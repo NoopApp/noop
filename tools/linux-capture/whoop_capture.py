@@ -84,9 +84,10 @@ class Capture:
                 "ts_ms": int(time.time() * 1000),
                 "hr": self.latest_hr,
             })
-            self._dirty += 1
-        if self._dirty >= 20:
-            self.flush()
+        # Deliberately NO disk flush here. A historical offload arrives as a fast burst (~21 KB in
+        # ~2.6 s); a blocking JSON rewrite on this notification callback drops BlueZ notifications and
+        # loses frames (observed: ~79% of a burst lost, including all type-47 biometric records). We
+        # buffer in memory and flush once at the end / on Ctrl-C — the hot path stays non-blocking.
 
     def flush(self):
         if not self.records:
@@ -169,14 +170,25 @@ async def run(args):
         # EXPERIMENTAL post-hello probes (WHOOP 5 only): try to coax the strap into streaming by
         # sending candidate puffin commands. The command numbers are UNVERIFIED guesses (4.0 numbers
         # on the 5.0 transport) — all non-destructive reads/toggles. Off unless --probe.
-        if args.probe and args.model == "whoop5":
+        if (args.probe or args.history_only) and args.model == "whoop5":
             await asyncio.sleep(1.0)
-            probes = [
-                (wf.PUFFIN_CMD_TOGGLE_REALTIME_HR, b"\x01", "TOGGLE_REALTIME_HR"),
-                (wf.PUFFIN_CMD_SEND_R10_R11_REALTIME, b"\x01", "SEND_R10_R11_REALTIME"),
-                (wf.PUFFIN_CMD_GET_CLOCK, b"", "GET_CLOCK"),
-                (wf.PUFFIN_CMD_SEND_HISTORICAL_DATA, b"\x00", "SEND_HISTORICAL_DATA"),
-            ]
+            if args.history_only:
+                # Turn the realtime streams OFF first so they don't starve the historical offload
+                # (mirrors the 4.0 handshake, which disables the type-43 flood before requesting
+                # history), then ask for the data range + the historical store.
+                probes = [
+                    (wf.PUFFIN_CMD_TOGGLE_REALTIME_HR, b"\x00", "TOGGLE_REALTIME_HR(off)"),
+                    (wf.PUFFIN_CMD_SEND_R10_R11_REALTIME, b"\x00", "SEND_R10_R11_REALTIME(off)"),
+                    (wf.PUFFIN_CMD_GET_DATA_RANGE, b"\x00", "GET_DATA_RANGE"),
+                    (wf.PUFFIN_CMD_SEND_HISTORICAL_DATA, b"\x00", "SEND_HISTORICAL_DATA"),
+                ]
+            else:
+                probes = [
+                    (wf.PUFFIN_CMD_TOGGLE_REALTIME_HR, b"\x01", "TOGGLE_REALTIME_HR"),
+                    (wf.PUFFIN_CMD_SEND_R10_R11_REALTIME, b"\x01", "SEND_R10_R11_REALTIME"),
+                    (wf.PUFFIN_CMD_GET_CLOCK, b"", "GET_CLOCK"),
+                    (wf.PUFFIN_CMD_SEND_HISTORICAL_DATA, b"\x00", "SEND_HISTORICAL_DATA"),
+                ]
             seq = 2
             for cmd, pl, name in probes:
                 frame = wf.build_puffin_command(cmd, seq=seq, payload=pl)
@@ -196,6 +208,28 @@ async def run(args):
             except NotImplementedError:
                 pass
         print("capturing… (Ctrl-C to stop)")
+
+        async def rerequest_history():
+            # The offload is deterministic while we never ack (the trim cursor doesn't advance), so
+            # re-requesting re-sends the same records. Repeating + dedup fills in frames that random
+            # BLE drops lost on earlier attempts. Realtime stays off (history-only mode).
+            seq2 = 100
+            while not stop.is_set():
+                await asyncio.sleep(args.history_repeat)
+                if stop.is_set():
+                    break
+                frame = wf.build_puffin_command(wf.PUFFIN_CMD_SEND_HISTORICAL_DATA, seq=seq2 & 0xFF,
+                                                payload=b"\x00")
+                try:
+                    await client.write_gatt_char(cfg["cmd_write"], frame, response=False)
+                    print(f"  re-request SEND_HISTORICAL_DATA (#{seq2-99})")
+                except Exception as e:
+                    print(f"  re-request failed: {e}")
+                seq2 += 1
+
+        tasks = []
+        if args.history_only and args.history_repeat:
+            tasks.append(asyncio.create_task(rerequest_history()))
         try:
             if args.duration:
                 await asyncio.wait_for(stop.wait(), timeout=args.duration)
@@ -203,6 +237,9 @@ async def run(args):
                 await stop.wait()
         except asyncio.TimeoutError:
             pass
+        stop.set()
+        for t in tasks:
+            t.cancel()
 
         cap.flush()
         print(f"\ncaptured {len(cap.records)} frames → {args.out}")
@@ -224,6 +261,13 @@ def main():
     p.add_argument("--probe", action="store_true",
                    help="WHOOP 5 only: after CLIENT_HELLO, send candidate puffin commands (realtime "
                         "toggles + history request) to try to start the biometric stream. Experimental.")
+    p.add_argument("--history-only", dest="history_only", action="store_true",
+                   help="WHOOP 5 only: turn the realtime streams OFF, then request the historical "
+                        "offload (type-47 records). Use instead of --probe to avoid the realtime "
+                        "flood starving the offload.")
+    p.add_argument("--history-repeat", dest="history_repeat", type=float, default=5.0,
+                   help="In --history-only mode, re-request the offload every N seconds (default 5). "
+                        "The offload is deterministic, so repeating + dedup recovers drop-lost frames.")
     p.add_argument("--pair", action="store_true",
                    help="also call BlueZ pair() (default off; the confirmed write bonds. The WHOOP 5 "
                         "rejects explicit pair() — leave this off for 5/MG)")
