@@ -315,6 +315,31 @@ public final class BLEManager: NSObject, ObservableObject {
         log("→ \(command.label) payload=\(hex(payload))")
     }
 
+    /// Ask CoreBluetooth for the current Battery Level value when the standard profile is present.
+    /// WHOOP 5/MG exposes live battery through 0x2A19, while WHOOP 4 can also answer the legacy
+    /// proprietary command path.
+    public func refreshBattery() {
+        guard state.connected, let p = peripheral, p.state == .connected else {
+            log("refreshBattery ignored — not connected")
+            return
+        }
+
+        if let batteryCharacteristic {
+            if batteryCharacteristic.properties.contains(.read) {
+                p.readValue(for: batteryCharacteristic)
+                log("Reading standard Battery Level")
+            } else {
+                log("Battery Level read unavailable; waiting for notifications")
+            }
+        } else {
+            log("Battery Level characteristic unavailable")
+        }
+
+        if selectedModel.deviceFamily == .whoop4 {
+            send(.getBatteryLevel, payload: [0x00])
+        }
+    }
+
     /// Ack one HISTORY_END chunk so the strap may trim it. Confirmed write — the strap forgets
     /// the chunk once this lands (link-layer half of safe-trim; decoded + raw already persisted).
     ///
@@ -885,7 +910,11 @@ extension BLEManager: CBPeripheralDelegate {
                 case BLEManager.eventNotifyChar: eventNotifyCharacteristic = c
                 case BLEManager.dataNotifyChar: dataNotifyCharacteristic = c
                 case BLEManager.heartRateChar: heartRateCharacteristic = c
-                case BLEManager.batteryChar: batteryCharacteristic = c
+                case BLEManager.batteryChar:
+                    batteryCharacteristic = c
+                    if c.properties.contains(.read) {
+                        peripheral.readValue(for: c)
+                    }
                 default: break
                 }
                 requestNotify(c, on: peripheral, reason: "discovery")

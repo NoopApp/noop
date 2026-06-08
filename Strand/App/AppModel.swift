@@ -167,7 +167,7 @@ final class AppModel: ObservableObject {
     /// Stop the realtime stream (the lightweight 0x2A37 HR keeps recording regardless).
     func stopRealtimeHR() { ble.stopRealtime() }
     /// Ask the strap for a fresh battery reading.
-    func getBattery() { ble.send(.getBatteryLevel, payload: [0x00]) }
+    func getBattery() { ble.refreshBattery() }
 
     /// Fire a haptic buzz on the strap. patternId=2 is the graduated buzz confirmed on-device;
     /// `loops` sets the length. Used by the in-app test button and (later) notification alerts.
