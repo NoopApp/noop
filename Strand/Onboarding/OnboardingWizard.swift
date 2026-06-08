@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import StrandDesign
 import WhoopStore
 
@@ -13,10 +14,10 @@ import WhoopStore
 //  2 What it does      — 3 calm value slides
 //  3 Bluetooth priming — explain BEFORE the OS prompt
 //  4 Wear & wake       — put your strap on, make sure it's charged
-//  5 Scan              — radar sweep; Scan calls model.scan(); reassurance sub-state
+//  5 Scan              — radar sweep; auto-scans, Scan retries via model.scan()
 //  6 Bonding           — celebration when live.bonded (a RecoveryRing blooms in)
 //  7 Profile           — age / sex / weight / height bound to ProfileStore
-//  8 Import (optional)  — pointer to Data Sources for Whoop / Apple Health
+//  8 Import (optional)  — WHOOP / Apple Health import from the wizard
 //  9 Done              — "Your thread starts here." → onFinished()
 //
 // Presentation is wired centrally; this view only calls onFinished() when complete.
@@ -53,7 +54,7 @@ public struct OnboardingWizard: View {
                 // Top chrome: a small back affordance + a step counter.
                 topBar
                     .padding(.horizontal, 36)
-                    .padding(.top, 28)
+                    .padding(.top, 42)
 
                 // The paged content.
                 ZStack {
@@ -78,6 +79,7 @@ public struct OnboardingWizard: View {
                 // Bottom: the thread (progress) + the forward CTA.
                 bottomBar
                     .padding(.horizontal, 40)
+                    .padding(.top, 24)
                     .padding(.bottom, 36)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -153,22 +155,14 @@ public struct OnboardingWizard: View {
 
     @ViewBuilder
     private var bottomBar: some View {
-        VStack(spacing: 22) {
+        VStack(spacing: 28) {
             ThreadProgress(progress: progress)
                 .frame(height: 3)
                 .frame(maxWidth: 620)
 
             HStack(spacing: 14) {
-                // Optional skip on the import step.
-                if step == .importData {
-                    Button("Skip for now", action: advance)
-                        .buttonStyle(GhostButtonStyle())
-                }
-
-                Spacer(minLength: 0)
-
                 PrimaryButton(title: ctaTitle, systemImage: ctaIcon, action: primaryAction)
-                    .frame(maxWidth: step == .importData ? 220 : .infinity)
+                    .frame(maxWidth: .infinity)
             }
             .frame(maxWidth: 620)
         }
@@ -189,7 +183,7 @@ public struct OnboardingWizard: View {
         case .scan:       return "Continue"
         case .bonded:     return "Continue"
         case .profile:    return "Save & Continue"
-        case .importData: return "Import later"
+        case .importData: return "Continue"
         case .done:       return "Enter NOOP"
         }
     }
@@ -469,6 +463,7 @@ private struct ScanStep: View {
 
     @State private var scanning = false
     @State private var showHelp = false
+    @State private var autoScanStarted = false
 
     /// Which strap to look for — shared with the Live screen via the same key.
     @AppStorage("selectedWhoopModel") private var selectedModelRaw = WhoopModel.whoop4.rawValue
@@ -476,7 +471,7 @@ private struct ScanStep: View {
 
     var body: some View {
         StepShell(title: "Find your strap",
-                  subtitle: live.bonded ? "Bonded. You're set." : "We'll sweep the airwaves for it.") {
+                  subtitle: live.bonded ? "Bonded. You're set." : "NOOP starts looking as soon as this step appears. You can keep going while it bonds.") {
             VStack(spacing: 24) {
                 RadarSweep(active: scanning && !live.bonded, bonded: live.bonded)
                     .frame(width: 220, height: 220)
@@ -491,15 +486,14 @@ private struct ScanStep: View {
                             WhoopModel.allCases,
                             selection: Binding(
                                 get: { selectedModel },
-                                set: { selectedModelRaw = $0.rawValue }
+                                set: { restartScan(for: $0) }
                             ),
                             label: { $0.displayName }
                         )
                     }
-                    .disabled(scanning)
 
-                    Button(action: startScan) {
-                        Label(scanning ? "Scanning…" : "Scan", systemImage: "dot.radiowaves.left.and.right")
+                    Button(action: { startScan() }) {
+                        Label(scanning ? "Scanning…" : "Scan again", systemImage: "dot.radiowaves.left.and.right")
                     }
                     .buttonStyle(SecondaryButtonStyle())
                     .disabled(scanning)
@@ -510,6 +504,7 @@ private struct ScanStep: View {
                 }
             }
         }
+        .onAppear(perform: startAutoScanIfNeeded)
         .onDisappear { scanning = false }
     }
 
@@ -527,10 +522,11 @@ private struct ScanStep: View {
         }
     }
 
-    private func startScan() {
+    private func startScan(model scanModel: WhoopModel? = nil) {
+        let modelToScan = scanModel ?? selectedModel
         scanning = true
         showHelp = false
-        model.scan(model: selectedModel)
+        model.scan(model: modelToScan)
         // Surface the reassurance card if we haven't bonded after a calm beat.
         DispatchQueue.main.asyncAfter(deadline: .now() + 12) {
             if !live.bonded {
@@ -538,6 +534,19 @@ private struct ScanStep: View {
                 withAnimation(StrandMotion.gentle) { showHelp = true }
             }
         }
+    }
+
+    private func restartScan(for newModel: WhoopModel) {
+        selectedModelRaw = newModel.rawValue
+        guard !live.bonded else { return }
+        model.disconnect()
+        startScan(model: newModel)
+    }
+
+    private func startAutoScanIfNeeded() {
+        guard !autoScanStarted, !live.bonded, !live.connected else { return }
+        autoScanStarted = true
+        startScan()
     }
 
     // The calm, never-alarmist "can't find it" card.
@@ -696,9 +705,13 @@ private struct ProfileStep: View {
 // MARK: - Step 8 · Import (optional)
 
 private struct ImportStep: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var showingImporter = false
+    @State private var importTarget: ImportTarget = .whoop
+
     var body: some View {
         StepShell(title: "Bring your history",
-                  subtitle: "Optional — you can do this any time.") {
+                  subtitle: "Optional — import now, or continue and return to Data Sources later.") {
             VStack(spacing: 18) {
                 ZStack {
                     Circle()
@@ -712,17 +725,79 @@ private struct ImportStep: View {
                 InfoCard(
                     icon: "clock.arrow.circlepath",
                     tint: StrandPalette.accent,
-                    title: "Import past data later",
-                    message: "Already have months of history? Export it from WHOOP or pull it from Apple Health, then load it under Data Sources — your ring and trends fill in instantly."
+                    title: "History fills the dashboard immediately",
+                    message: "A WHOOP export backfills recovery, strain, sleep and workouts. Apple Health can add HR, HRV, sleep, SpO₂, steps, workouts and weight."
                 )
 
-                HStack(spacing: 8) {
-                    Image(systemName: "sidebar.left")
-                        .foregroundStyle(StrandPalette.textTertiary)
-                    Text("Find it in the sidebar under Data Sources.")
-                        .font(StrandFont.subhead)
-                        .foregroundStyle(StrandPalette.textSecondary)
+                StrandCard {
+                    VStack(spacing: 10) {
+                        ImportActionButton(
+                            title: model.importing ? "Importing…" : "Import WHOOP export",
+                            systemImage: "tray.and.arrow.down",
+                            disabled: model.importing
+                        ) {
+                            presentImporter(.whoop)
+                        }
+                        ImportActionButton(
+                            title: model.importing ? "Working…" : "Import Apple Health export",
+                            systemImage: "heart.fill",
+                            disabled: model.importing
+                        ) {
+                            presentImporter(.appleHealth)
+                        }
+                    }
                 }
+                .frame(maxWidth: 480)
+
+                if model.importing {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(StrandPalette.accent)
+                }
+
+                if let summary = model.importSummary {
+                    Text(summary)
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(summary.localizedCaseInsensitiveContains("failed") ? StrandPalette.statusWarning : StrandPalette.statusPositive)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 460)
+                }
+            }
+        }
+        .fileImporter(
+            isPresented: $showingImporter,
+            allowedContentTypes: importTarget.allowedContentTypes,
+            allowsMultipleSelection: false
+        ) { result in
+            handleImportResult(result, for: importTarget)
+        }
+    }
+
+    private func presentImporter(_ target: ImportTarget) {
+        importTarget = target
+        showingImporter = true
+    }
+
+    private func handleImportResult(_ result: Result<[URL], Error>, for target: ImportTarget) {
+        guard case .success(let urls) = result, let url = urls.first else { return }
+        switch target {
+        case .whoop:
+            model.importWhoop(url: url)
+        case .appleHealth:
+            model.importAppleHealth(url: url)
+        }
+    }
+
+    private enum ImportTarget {
+        case whoop
+        case appleHealth
+
+        var allowedContentTypes: [UTType] {
+            switch self {
+            case .whoop:
+                return [.zip, .folder]
+            case .appleHealth:
+                return [.zip, .xml, .folder]
             }
         }
     }
@@ -1018,6 +1093,33 @@ private struct DisclosureToggle: View {
             .foregroundStyle(StrandPalette.accent)
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct ImportActionButton: View {
+    let title: String
+    let systemImage: String
+    var disabled = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: 18)
+                Text(title)
+                    .font(StrandFont.subhead.weight(.semibold))
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(StrandPalette.textTertiary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(SecondaryButtonStyle())
+        .disabled(disabled)
+        .opacity(disabled ? 0.55 : 1)
     }
 }
 
