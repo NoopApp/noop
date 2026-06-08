@@ -65,6 +65,17 @@ class Capture:
         self.latest_hr = None
         self.reassemblers = {}     # char uuid -> Reassembler
         self._dirty = 0
+        # Historical chunk-ack plumbing (set up by run() only in --history-ack mode). The notify
+        # callback must stay non-blocking, so it only ENQUEUES end_data; a separate task does the
+        # confirmed GATT write. Re-ack the same cursor at most every `ack_retry_s` so a burst of
+        # identical HISTORY_ENDs doesn't spam acks, but a still-stuck cursor is retried.
+        self.ack_queue = None
+        self._last_end = None
+        self._last_ack_ms = 0
+        self.ack_retry_s = 2.0
+        self.type47_count = 0
+        self.history_complete = 0    # HISTORY_COMPLETE (METADATA meta_type 3) markers seen
+        self.last_frame_ms = 0       # wall-clock of the most recent frame (for idle detection)
 
     def on_hr(self, _sender, data: bytearray):
         hr = wf.parse_standard_hr(bytes(data))
@@ -78,16 +89,43 @@ class Capture:
             ra = wf.Reassembler(self.family)
             self.reassemblers[char] = ra
         for frame in ra.feed(bytes(data)):
+            self.last_frame_ms = int(time.time() * 1000)
             self.records.append({
                 "hex": frame.hex(),
                 "char": char,
-                "ts_ms": int(time.time() * 1000),
+                "ts_ms": self.last_frame_ms,
                 "hr": self.latest_hr,
             })
+            if self.family == "whoop5" and len(frame) > wf.WHOOP5_INNER_OFF:
+                t = frame[wf.WHOOP5_INNER_OFF]
+                if t == wf.PACKET_HISTORICAL_DATA:
+                    self.type47_count += 1          # the prize — log it loudly in run()
+                elif t == wf.PACKET_METADATA:
+                    if len(frame) > wf.WHOOP5_META_TYPE_OFF \
+                            and frame[wf.WHOOP5_META_TYPE_OFF] == wf.META_HISTORY_COMPLETE:
+                        self.history_complete += 1   # store fully drained at least once
+                    if self.ack_queue is not None:
+                        self._maybe_queue_ack(frame)
         # Deliberately NO disk flush here. A historical offload arrives as a fast burst (~21 KB in
         # ~2.6 s); a blocking JSON rewrite on this notification callback drops BlueZ notifications and
         # loses frames (observed: ~79% of a burst lost, including all type-47 biometric records). We
         # buffer in memory and flush once at the end / on Ctrl-C — the hot path stays non-blocking.
+
+    def _maybe_queue_ack(self, frame: bytes):
+        """Enqueue a HISTORY_END's end_data for acking (non-blocking — the write happens in the
+        ack-sender task). Dedups a burst of identical cursors but retries a stuck one."""
+        end_data = wf.history_end_data(frame)
+        if end_data is None:
+            return
+        now_ms = int(time.time() * 1000)
+        if end_data == self._last_end and (now_ms - self._last_ack_ms) < self.ack_retry_s * 1000:
+            return
+        self._last_end = end_data
+        self._last_ack_ms = now_ms
+        try:
+            self.ack_queue.put_nowait(end_data)
+        except Exception:
+            pass
 
     def flush(self):
         if not self.records:
@@ -140,6 +178,11 @@ async def run(args):
                 print("paired")
             except Exception as e:
                 print(f"pair() failed (continuing; bond comes from the confirmed write): {e}")
+
+        # Arm the chunk-ack queue BEFORE subscribing, so a HISTORY_END arriving in the very first
+        # post-bond burst is enqueued rather than dropped.
+        if args.history_ack and args.model == "whoop5":
+            cap.ack_queue = asyncio.Queue()
 
         # Standard HR (unbonded) → ground-truth bpm for correlation.
         try:
@@ -227,9 +270,45 @@ async def run(args):
                     print(f"  re-request failed: {e}")
                 seq2 += 1
 
+        async def ack_sender():
+            # Drain the ack queue and write each HISTORICAL_DATA_RESULT(23) as a CONFIRMED write —
+            # the link-layer half of the offload handshake. This is what advances the strap's trim
+            # cursor to the next chunk; watch the live trim in the HISTORY_END log move once acks land.
+            seq3 = 50
+            while not stop.is_set():
+                try:
+                    end_data = await asyncio.wait_for(cap.ack_queue.get(), timeout=0.5)
+                except asyncio.TimeoutError:
+                    continue
+                ack = wf.build_history_ack(end_data, seq=seq3 & 0xFF)
+                trim = int.from_bytes(end_data[0:4], "little")
+                try:
+                    await client.write_gatt_char(cfg["cmd_write"], ack, response=True)
+                    print(f"  → ACK HISTORICAL_DATA_RESULT trim={trim} ({end_data.hex()})  "
+                          f"[type47 so far: {cap.type47_count}]")
+                except Exception as e:
+                    print(f"  ack write failed: {e}")
+                seq3 += 1
+
+        async def stop_when_idle():
+            # End the run shortly after the offload goes quiet, instead of guessing --duration. The
+            # ack-driven offload streams continuously, then stops once the store is drained; when no
+            # frame has arrived for `stop_on_idle` seconds we're done.
+            while not stop.is_set():
+                await asyncio.sleep(1.0)
+                if cap.last_frame_ms and (int(time.time() * 1000) - cap.last_frame_ms) \
+                        > args.stop_on_idle * 1000:
+                    print(f"  idle for {args.stop_on_idle}s — offload appears complete, stopping")
+                    stop.set()
+                    return
+
         tasks = []
         if args.history_only and args.history_repeat:
             tasks.append(asyncio.create_task(rerequest_history()))
+        if cap.ack_queue is not None:
+            tasks.append(asyncio.create_task(ack_sender()))
+        if args.stop_on_idle:
+            tasks.append(asyncio.create_task(stop_when_idle()))
         try:
             if args.duration:
                 await asyncio.wait_for(stop.wait(), timeout=args.duration)
@@ -248,6 +327,20 @@ async def run(args):
             chans[r["char"]] = chans.get(r["char"], 0) + 1
         for c, n in sorted(chans.items(), key=lambda kv: -kv[1]):
             print(f"  {n:6d}  {c}")
+        # Per-type tally so the result is obvious without a separate decode pass.
+        types = {}
+        for r in cap.records:
+            h = bytes.fromhex(r["hex"])
+            t = h[wf.WHOOP5_INNER_OFF] if len(h) > wf.WHOOP5_INNER_OFF else None
+            types[t] = types.get(t, 0) + 1
+        print("  by inner type:", dict(sorted(types.items(), key=lambda kv: -kv[1])))
+        if args.model == "whoop5":
+            verdict = "GOT THEM" if cap.type47_count else "none"
+            print(f"  type-47 HISTORICAL_DATA frames: {cap.type47_count}  → {verdict}")
+            if cap.ack_queue is not None:
+                drained = "yes" if cap.history_complete else "no (no HISTORY_COMPLETE seen)"
+                print(f"  offload drained to completion: {drained} "
+                      f"({cap.history_complete} HISTORY_COMPLETE markers)")
 
 
 def main():
@@ -268,6 +361,13 @@ def main():
     p.add_argument("--history-repeat", dest="history_repeat", type=float, default=5.0,
                    help="In --history-only mode, re-request the offload every N seconds (default 5). "
                         "The offload is deterministic, so repeating + dedup recovers drop-lost frames.")
+    p.add_argument("--history-ack", dest="history_ack", action="store_true",
+                   help="WHOOP 5 only: ack each HISTORY_END with HISTORICAL_DATA_RESULT(23) to advance "
+                        "the strap's trim cursor (the 4.0 offload handshake). Without this the cursor "
+                        "stays stuck and the type-47 DSP records past it are never served.")
+    p.add_argument("--stop-on-idle", dest="stop_on_idle", type=float, default=0,
+                   help="stop the capture once no frame has arrived for N seconds (the offload has "
+                        "drained). 0 = off (use --duration / Ctrl-C instead).")
     p.add_argument("--pair", action="store_true",
                    help="also call BlueZ pair() (default off; the confirmed write bonds. The WHOOP 5 "
                         "rejects explicit pair() — leave this off for 5/MG)")

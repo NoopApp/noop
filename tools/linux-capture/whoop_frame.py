@@ -87,6 +87,12 @@ def crc16_modbus(data: bytes) -> int:
 # on real WHOOP 5 hardware (see docs/BLE_REVERSE_ENGINEERING.md §3); the rest remain educated guesses.
 PUFFIN_CMD_TOGGLE_REALTIME_HR = 3
 PUFFIN_CMD_SEND_HISTORICAL_DATA = 22
+# Ack a received history chunk (confirmed write echoing the chunk's end_data / trim cursor). On 4.0
+# this is what advances the strap's trim cursor to the NEXT chunk; without it the strap re-sends the
+# same early chunk forever. The leading hypothesis for why the DSP (type-47) records never arrive is
+# that we never ack — so the cursor never reaches them. Build the payload from each METADATA (type 49)
+# chunk's trim/end_data; see Strand/BLE/BLEManager.swift `ackHistoricalChunk` for the 4.0 shape.
+PUFFIN_CMD_HISTORICAL_DATA_RESULT = 23
 PUFFIN_CMD_GET_CLOCK = 11
 PUFFIN_CMD_GET_DATA_RANGE = 34
 PUFFIN_CMD_SEND_R10_R11_REALTIME = 63
@@ -106,6 +112,72 @@ def build_puffin_command(cmd: int, seq: int = 0, payload: bytes = b"\x00",
     c32 = crc32(inner)
     frame += bytes([c32 & 0xFF, (c32 >> 8) & 0xFF, (c32 >> 16) & 0xFF, (c32 >> 24) & 0xFF])
     return bytes(frame)
+
+
+# --- WHOOP 5.0 historical-offload helpers ---------------------------------------------------------
+# Packet types (PacketType enum, wire byte at the inner-record start, offset 8 on 5.0).
+PACKET_METADATA = 49
+PACKET_HISTORICAL_DATA = 47
+# MetadataType enum values (the meta_type byte).
+META_HISTORY_START = 1
+META_HISTORY_END = 2
+META_HISTORY_COMPLETE = 3
+# WHOOP 5.0 metadata field offsets = the 4.0 offsets + 4 (the inner record starts at byte 8 vs 4).
+# Verified on real hardware: meta_type at 6→10, trim_cursor at 17→21 (decodes to clean HISTORY_END
+# values with a consistent trim across a whole capture). The 8-byte end_data the ack echoes is the
+# trim u32 followed by the next u32, i.e. frame[21:29].
+WHOOP5_INNER_OFF = 8
+WHOOP5_META_TYPE_OFF = 10
+WHOOP5_META_TRIM_OFF = 21
+WHOOP5_END_DATA_LEN = 8
+
+
+def verify_whoop5_frame(frame: bytes) -> bool:
+    """True if a WHOOP 5.0 frame's declared length, CRC16 header and CRC32 trailer all check out.
+
+    The ack must only echo a genuine, intact HISTORY_END — CRC is the protocol's only integrity
+    check, so a garbled BLE frame must never advance the strap's trim cursor.
+    """
+    if len(frame) < 12 or frame[0] != 0xAA:
+        return False
+    decl = frame[2] | (frame[3] << 8)
+    total = decl + 8
+    if total != len(frame):
+        return False
+    if crc16_modbus(bytes(frame[0:6])) != (frame[6] | (frame[7] << 8)):
+        return False
+    inner = bytes(frame[8:total - 4])
+    wire = int.from_bytes(frame[total - 4:total], "little")
+    return crc32(inner) == wire
+
+
+def history_end_data(frame: bytes):
+    """If `frame` is a CRC-valid WHOOP 5.0 METADATA HISTORY_END, return its 8-byte end_data
+    (trim u32 + next u32 at offset 21) to echo back in the ack; otherwise None.
+
+    Echoing these bytes verbatim in a HISTORICAL_DATA_RESULT(23) is what advances the strap's trim
+    cursor to the next chunk on 4.0 — without it the strap re-serves the same early chunk forever and
+    the type-47 DSP records further in the store are never reached.
+    """
+    if len(frame) < WHOOP5_META_TRIM_OFF + WHOOP5_END_DATA_LEN:
+        return None
+    if frame[WHOOP5_INNER_OFF] != PACKET_METADATA:
+        return None
+    if frame[WHOOP5_META_TYPE_OFF] != META_HISTORY_END:
+        return None
+    if not verify_whoop5_frame(frame):
+        return None
+    return bytes(frame[WHOOP5_META_TRIM_OFF:WHOOP5_META_TRIM_OFF + WHOOP5_END_DATA_LEN])
+
+
+def build_history_ack(end_data: bytes, seq: int = 0) -> bytes:
+    """Build the HISTORICAL_DATA_RESULT(23) ack frame: payload = 0x01 + the 8-byte end_data.
+
+    Mirrors `ackHistoricalChunk` in Strand/BLE/BLEManager.swift (`send(.historicalDataResult,
+    payload: [0x01] + endData, .withResponse)`). Written to fd4b0002 as a CONFIRMED write.
+    """
+    return build_puffin_command(PUFFIN_CMD_HISTORICAL_DATA_RESULT, seq=seq,
+                                payload=b"\x01" + bytes(end_data))
 
 
 class Reassembler:

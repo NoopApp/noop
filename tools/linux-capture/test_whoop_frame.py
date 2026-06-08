@@ -63,6 +63,43 @@ class PuffinCommandTests(unittest.TestCase):
                          wf.WHOOP5_CLIENT_HELLO)
 
 
+class HistoryAckTests(unittest.TestCase):
+    # Real CRC-valid frames captured from a worn WHOOP 5 (capture_hist2.json).
+    HISTORY_END = bytes.fromhex(
+        "aa011c00010023d1316a0284a3266a0a373d00000041b601001000000000000044d21e3d")
+    HISTORY_START = bytes.fromhex(
+        "aa012c0001002cd1312c0184a3266ad7230d0000005200000000000000320000002600000001000000000000000b010034497926")
+
+    def test_verify_real_frames(self):
+        self.assertTrue(wf.verify_whoop5_frame(self.HISTORY_END))
+        self.assertTrue(wf.verify_whoop5_frame(self.HISTORY_START))
+
+    def test_history_end_data_extracts_trim_plus_next(self):
+        end_data = wf.history_end_data(self.HISTORY_END)
+        # trim u32 (112193) at frame[21], next u32 (16) at frame[25] — the verbatim 8 bytes to echo.
+        self.assertEqual(end_data, bytes.fromhex("41b6010010000000"))
+        self.assertEqual(int.from_bytes(end_data[0:4], "little"), 112193)
+        self.assertEqual(int.from_bytes(end_data[4:8], "little"), 16)
+
+    def test_history_start_is_not_acked(self):
+        # Only HISTORY_END (meta_type 2) advances the cursor; START (meta_type 1) must return None.
+        self.assertIsNone(wf.history_end_data(self.HISTORY_START))
+
+    def test_corrupt_frame_is_not_acked(self):
+        bad = bytearray(self.HISTORY_END)
+        bad[22] ^= 0xFF                      # flip a trim byte → CRC32 fails
+        self.assertIsNone(wf.history_end_data(bytes(bad)))
+
+    def test_build_history_ack_shape_and_crc(self):
+        end_data = wf.history_end_data(self.HISTORY_END)
+        ack = wf.build_history_ack(end_data, seq=50)
+        self.assertEqual(ack[8], 35)                                  # inner type COMMAND
+        self.assertEqual(ack[10], wf.PUFFIN_CMD_HISTORICAL_DATA_RESULT)  # cmd 23
+        self.assertEqual(ack[11], 0x01)                              # payload prefix
+        self.assertEqual(ack[12:20], end_data)                       # echoed end_data
+        self.assertTrue(wf.verify_whoop5_frame(ack))                 # ack is itself CRC-valid
+
+
 class ReassemblerTests(unittest.TestCase):
     def test_single_frame_across_fragments(self):
         hello = wf.WHOOP5_CLIENT_HELLO
