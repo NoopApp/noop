@@ -182,7 +182,8 @@ public final class BLEManager: NSObject, ObservableObject {
                                 ackTrim: { [weak self] trim, endData in
                                     self?.ackHistoricalChunk(trim: trim, endData: endData)
                                 },
-                                enableRawCapture: enableRawCapture)
+                                enableRawCapture: enableRawCapture,
+                                log: { [weak self] s in self?.log(s) })
         // Strand: no server uploader/sync — all data stays on-device.
     }
 

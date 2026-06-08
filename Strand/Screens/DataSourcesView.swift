@@ -31,16 +31,16 @@ struct DataSourcesView: View {
                 Button {
                     presentImporter(.whoop)
                 } label: {
-                    Label(model.importing ? "Importing…" : "Choose export…",
+                    Label(model.whoopImporting ? "Importing…" : "Choose export…",
                           systemImage: "tray.and.arrow.down")
                         .padding(.horizontal, 6)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(StrandPalette.accent)
-                .disabled(model.importing)
-                if model.importing { ProgressView().controlSize(.small) }
+                .disabled(model.whoopImporting)
+                if model.whoopImporting { ProgressView().controlSize(.small) }
             }
-            if let s = model.importSummary {
+            if let s = model.whoopImportSummary {
                 Text(s).font(StrandFont.subhead).foregroundStyle(StrandPalette.statusPositive)
             }
             Text("\(repo.days.count) days · \(repo.sleeps.count) sleeps stored")
@@ -53,12 +53,15 @@ struct DataSourcesView: View {
              subtitle: "Import an Apple Health export (Health app → profile → Export All Health Data → export.zip). 7 years of HR, HRV, sleep, SpO₂, steps and more — streamed locally. Large exports take a minute or two.") {
             HStack(spacing: 12) {
                 Button { presentImporter(.appleHealth) } label: {
-                    Label(model.importing ? "Working…" : "Choose export.zip…", systemImage: "tray.and.arrow.down")
+                    Label(model.appleImporting ? "Working…" : "Choose export.zip…", systemImage: "tray.and.arrow.down")
                         .padding(.horizontal, 6)
                 }
                 .buttonStyle(.borderedProminent).tint(StrandPalette.accent)
-                .disabled(model.importing)
-                if model.importing { ProgressView().controlSize(.small) }
+                .disabled(model.appleImporting)
+                if model.appleImporting { ProgressView().controlSize(.small) }
+            }
+            if let s = model.appleImportSummary {
+                Text(s).font(StrandFont.subhead).foregroundStyle(StrandPalette.statusPositive)
             }
         }
     }

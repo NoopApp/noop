@@ -177,6 +177,21 @@ class WhoopRepository(private val dao: WhoopDao) {
     /** All cached daily metrics for a device, oldest first. Feeds com.noop.analytics.IllnessWatch. */
     suspend fun days(deviceId: String): List<DailyMetric> = dao.days(deviceId)
 
+    /**
+     * One-time #34 refile: move legacy Health Connect data out of the shared "apple-health" bucket into
+     * its own "health-connect" source, so it stops being shown as Apple Health. HC workouts are tagged
+     * `source = "health-connect"` so they move unconditionally; the daily aggregates only move when there
+     * is no Apple Health EXPORT (no apple-health metricSeries), since only the export writes metricSeries.
+     * Idempotent + safe (runs before this import writes any HC data, so no PK conflict).
+     */
+    suspend fun refileLegacyHealthConnect() {
+        dao.reassignWorkoutsBySource(from = "apple-health", to = "health-connect", source = "health-connect")
+        if (dao.metricSeriesCount("apple-health") == 0) {
+            dao.reassignAppleDaily(from = "apple-health", to = "health-connect")
+            upsertDevice("health-connect", name = "Health Connect")
+        }
+    }
+
     // MARK: - Merged reads (imported source wins per day; computed "-noop" gap-fills)
     //
     // Mirrors macOS Repository.mergeDaily / mergeSleep: the IntelligenceEngine persists

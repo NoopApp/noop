@@ -17,6 +17,58 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 1.18 — Import fixes (Mac + Android)
+
+- **Fixed (macOS): an Apple Health import overwrote the WHOOP import's status message** in Data Sources
+  (issue #40). The two importers shared one `importing`/`importSummary` state, and only the WHOOP card
+  rendered the summary — so importing Apple Health flipped both buttons to loading and replaced the WHOOP
+  message in the WHOOP section, looking like a data overwrite. The data was always stored under separate
+  sources (`my-whoop` vs `apple-health`); split the UI state per source (`whoopImporting`/`appleImporting`
+  + per-source summaries) and gave the Apple Health card its own status line.
+- **Fixed (Android): one failing Health Connect record type aborted the whole import** (issue #34). All
+  the `readAll` calls ran inside a single try/catch, so a device/SDK quirk on any one type (e.g. the
+  "count must not be less than 1, currently 0" some Health Connect builds throw) failed the entire
+  import. Each type's read is now self-contained — on failure it's logged and skipped, and every other
+  type still imports (reads accumulate into shared buckets, so a partial type is simply absent, never
+  corrupt).
+
+---
+
+## 1.17 — Sleep from WHOOP 4 on unmapped firmware (Mac)
+
+- **Fixed (macOS): a WHOOP 4 on firmware whose historical record version NOOP hadn't mapped recorded no
+  sleep.** Root cause: sleep is staged from the strap's overnight **gravity/motion** stream
+  (`SleepStager.detectSleep` requires gravity — empty gravity → 0 sleeps). The WHOOP 4 historical
+  (type-47) post-hook **bailed out entirely on any version outside the schema's `{12, 24}`** —
+  `guard resolveVersion(...) else { region("unmapped"); return }` decoded nothing (no HR, no R-R, **no
+  gravity**). So the offload "completed" (acks + HISTORY_COMPLETE) yet stored no motion, HR got
+  backfilled from the realtime stream (which carries none), and `IntelligenceEngine` produced a day with
+  HR but zero sleeps. **Fix:** for an unmapped version, fall back to the canonical **v24 DSP layout**
+  (firmware overwhelmingly shares it — the schema notes V12 == V24) and accept it **only if it decodes
+  to physically-real data** — `|gravity| ≈ 1 g` (the DSP gravity is a unit vector) and a plausible HR. A
+  wrong layout yields random f32 gravity nowhere near 1 g, so it's rejected and the record left raw (the
+  Backfiller then logs the unmapped version once to the strap log, so we can map it). Mapped versions are
+  unchanged. New tests cover accept + reject. Issue #30. *(Android has its own decoder; this is the Mac
+  fix for the reporters' platform.)*
+
+---
+
+## 1.16 — Health Connect shows as Health Connect (Android)
+
+- **Fixed (Android): Health Connect data was attributed to "Apple Health."** `HealthConnectImporter`
+  stored its daily aggregates (steps/HR/HRV/sleep/weight) under the shared `apple-health` deviceId — the
+  same bucket the Apple Health export uses — so the Data Sources screen counted them under the Apple
+  Health card (only the workouts were correctly tagged `health-connect`). It now files **all** Health
+  Connect data under its own `health-connect` source, named "Health Connect," and the Data Sources
+  Health Connect card shows its own counts. The unified-external-health read sites (Today footer,
+  Workouts) union both sources, so nothing disappears; `CompareScreen` is unaffected (Health Connect
+  writes no `metricSeries`). A one-time refile runs at the start of a Health Connect import to move any
+  legacy `apple-health` Health-Connect data across (safe + idempotent: HC writes no `metricSeries`, so
+  `apple-health` daily rows with no `metricSeries` are unambiguously HC-origin; runs before the import so
+  re-importing never duplicates). No data was ever lost — labelling only (issue #34).
+
+---
+
 ## 1.15 — WHOOP 5/MG: the wrist buzz works
 
 - **The haptic buzz now fires on WHOOP 5.0/MG (experimental), both platforms.** @jamartif confirming live

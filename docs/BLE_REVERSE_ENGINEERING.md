@@ -425,6 +425,24 @@ region for any version other than 18, so an unknown record is described, never m
 > capture from the device in hand — do not assume one generation's documented layout transfers to
 > another, even within the same generation.
 
+### WHOOP 4 firmware-drift check — still v24 (hardware-verified)
+
+The v18 surprise prompted the obvious question: does a *different* device on *different* firmware still
+emit the documented record? Tested on a real WHOOP 4 (firmware **41.17.6.0**) with the tool's WHOOP 4
+offload mode (`whoop_capture.py --model whoop4 --history-only --history-ack`). The 4.0 handshake is the
+image of the 5.0 one with the envelope shift removed: `meta_type` at `frame[6]`, `trim_cursor` at
+`frame[17]`, `end_data` = `frame[17:25]` (vs 5.0's `[21:29]`), and acks are CRC8-framed COMMANDs
+(`build_history_ack_whoop4` / `history_end_data_whoop4`). The cursor walked (`22303 → 22395 …`) exactly
+as on 5.0.
+
+**Result: no drift.** All **1704** type-47 frames pulled were **version 24** (`frame[5] == 24`),
+CRC-valid, and decoded cleanly through the *existing* documented v24 decoder — HR equalled
+`60000 / mean(R-R)` to ~1 bpm and \|gravity\| ≈ 1 g. So the documented v24 layout is confirmed on a
+second device and generation, and the v18 record is specific to the WHOOP 5's firmware, not a sign the
+v24 documentation was wrong. Real-frame parity test: `Whoop4HistoricalV24HardwareTests.swift`
+(`HistoricalV24Tests` covers the same layout synthetically). The offload streamed the same way as 4.0's
+realtime path, so its HR/HRV/gravity feed `extractHistoricalStreams` unchanged.
+
 ### WHOOP 5.0 COMMAND_RESPONSE (type 36)
 
 WHOOP 5 reuses the 4.0 command **numbers** on the puffin transport (`resp_cmd` at frame[10], the 4.0
@@ -448,6 +466,28 @@ stub payloads on this firmware (so the firmware version lives in the `GET_HELLO`
 > offsets), so no real device name or token ever enters a committed fixture. The version offset sits
 > after the variable name+token region, so it is anchored to a 50.38.1.0 capture and guarded on the
 > "5.0" generation byte (`pay[93] == 50`) — re-verify it across firmwares.
+
+### WHOOP 5.0 EVENT (type 48)
+
+The event frame is the 4.0 layout shifted +4: `event` (u8/`EventNumber`) at frame[10] and
+`event_timestamp` (u32 real unix) at frame[12] are surfaced by the `parseFrameWhoop5` static walk, so
+simple events (wrist on/off, double-tap, boot, pairing, BLE up/down, bonded) decode with no extra code.
+A u16 **payload length** at frame[18] gives the size of the per-event body that starts at frame[20]
+(verified: it predicts the frame size exactly across every event class in the capture).
+
+`decodeWhoop5Event` adds the one per-event payload with on-device ground truth — **BATTERY_LEVEL** (3),
+again following the +4 rule (4.0 soc@17 / mv@21 / charge@26 → soc@21 / mv@25 / charge@30). Unlike the
+COMMAND_RESPONSE battery above, the EVENT battery keeps 4.0's **deci-percent** (`soc / 10`), confirmed
+by a clean monotonic discharge across a real capture (49.9 → 47.7 %, mV ≈ 3.8 V). The same range guards
+as the 4.0 `event` post-hook fail closed.
+
+> **Enum-drift guard.** Event names come **only** from the shared `EventNumber` schema. This firmware
+> also emits numbers the schema does not name (61, 62, 110, 112, 116, 120, 123); they stay raw
+> (`0x7B(123)`) and are never given a name borrowed from another enum — note `CommandNumber` 123 is
+> `SELECT_WRIST`, an unrelated meaning — nor invented. Other event payloads
+> (`EXTENDED_BATTERY_INFORMATION`, `STRAP_CONDITION_REPORT`, and the serial-bearing 61/62) lack 5.0
+> ground truth and are left raw rather than ported from 4.0 on faith. Parity tests use real frames
+> verified to carry no device name / serial / token (battery and simple events do not).
 
 ---
 

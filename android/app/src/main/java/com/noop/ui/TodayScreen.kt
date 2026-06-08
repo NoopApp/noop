@@ -71,15 +71,21 @@ fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
             .atStartOfDay(ZoneId.systemDefault())
             .toEpochSecond()
         val whoopWorkouts = viewModel.repo.workouts("my-whoop", 0L, now)
-        val appleWorkouts = viewModel.repo.workouts("apple-health", 0L, now)
+        // External health = Apple Health export + Health Connect (separate sources since #34); union both
+        // for the provenance footer so Health Connect data still shows.
+        val externalWorkouts = viewModel.repo.workouts("apple-health", 0L, now) +
+            viewModel.repo.workouts("health-connect", 0L, now)
+        val externalDays = viewModel.repo.appleDaily("apple-health", "0000-01-01", "9999-12-31").size +
+            viewModel.repo.appleDaily("health-connect", "0000-01-01", "9999-12-31").size
         footer = TodayFooterState(
             recentWorkouts = (viewModel.repo.workouts("my-whoop", recentCutoff, now) +
-                viewModel.repo.workouts("apple-health", recentCutoff, now))
+                viewModel.repo.workouts("apple-health", recentCutoff, now) +
+                viewModel.repo.workouts("health-connect", recentCutoff, now))
                 .sortedByDescending { it.startTs },
             whoopDays = days.size,
             whoopWorkouts = whoopWorkouts.size,
-            appleDays = viewModel.repo.appleDaily("apple-health", "0000-01-01", "9999-12-31").size,
-            appleWorkouts = appleWorkouts.size,
+            appleDays = externalDays,
+            appleWorkouts = externalWorkouts.size,
         )
     }
 

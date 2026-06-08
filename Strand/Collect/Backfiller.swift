@@ -57,15 +57,22 @@ final class Backfiller {
     /// Whether a START has been received and we're accumulating a chunk.
     private var chunkOpen = false
 
+    /// Diagnostic sink (strap log). Surfaces historical records whose firmware layout we can't decode.
+    private let log: ((String) -> Void)?
+    /// Versions already reported this session, so the diagnostic logs each once (no spam).
+    private var loggedUnmappedVersions: Set<Int> = []
+
     init(store: BackfillStoreWriting,
          deviceId: String,
          ackTrim: @escaping (_ trim: UInt32, _ endData: [UInt8]) -> Void,
          enableRawCapture: Bool = false,
+         log: ((String) -> Void)? = nil,
          extract: @escaping Extractor = { extractHistoricalStreams($0, deviceClockRef: $1, wallClockRef: $2) }) {
         self.store = store
         self.deviceId = deviceId
         self.ackTrim = ackTrim
         self.enableRawCapture = enableRawCapture
+        self.log = log
         self.extract = extract
     }
 
@@ -130,6 +137,17 @@ final class Backfiller {
             // truly required to map REALTIME (type-40/43) device-epoch timestamps, never in a hist chunk.
             let ref = clockRef ?? { let now = Int(Date().timeIntervalSince1970); return ClockRef(device: now, wall: now) }()
             let parsed = frames.map { parseFrame($0) }
+            // Diagnostic (#30): a historical record whose firmware version we don't have a field map for
+            // bails out of decode entirely — no HR, no R-R, no GRAVITY — so sleep (which is gravity/
+            // motion-driven) can never be computed from it, even though the offload "completes". Surface
+            // each unmapped version once so the user's strap log reveals what their firmware emits.
+            for p in parsed {
+                guard let v = p.parsed["hist_version"]?.intValue,
+                      p.parsed["heart_rate"] == nil,            // decoded nothing → unmapped layout
+                      !loggedUnmappedVersions.contains(v) else { continue }
+                loggedUnmappedVersions.insert(v)
+                log?("Historical records use firmware layout v\(v), which NOOP doesn't decode yet — no motion data, so sleep can't be computed from the strap. Please report this (issue #30).")
+            }
             let decoded = extract(parsed, ref.device, ref.wall)
             do { try await store.insert(decoded, deviceId: deviceId) } catch { return }
 

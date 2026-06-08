@@ -56,7 +56,11 @@ object HealthConnectImporter {
     const val SOURCE = "Health Connect"
 
     private const val WHOOP = "my-whoop"
-    private const val APPLE = "apple-health"
+    // Health Connect data is stored under its OWN source ("health-connect"), NOT the shared
+    // "apple-health" bucket — otherwise it's mis-attributed to Apple Health in the UI (issue #34).
+    // (The recovery/sleep backfill still lands under "my-whoop"; only the external-health aggregates
+    // + workouts carry this source.)
+    private const val HC_DEVICE = "health-connect"
     private const val HC_WORKOUT_SOURCE = "health-connect"
 
     /** Read window: a wide ~10-year span ending now. Health Connect itself caps retention. */
@@ -108,6 +112,10 @@ object HealthConnectImporter {
         if (sdkStatus(context) != HealthConnectClient.SDK_AVAILABLE) {
             return ImportSummary.failure(SOURCE, "Health Connect is not available on this device.")
         }
+
+        // Refile any legacy Health Connect data that landed in the shared "apple-health" bucket before
+        // #34 BEFORE importing, so a re-import refiles cleanly instead of duplicating across both sources.
+        try { repo.refileLegacyHealthConnect() } catch (_: Exception) { /* best-effort */ }
 
         val client = client(context)
 
@@ -211,7 +219,7 @@ object HealthConnectImporter {
                 val endS = r.endTime.epochSecond
                 workouts.add(
                     WorkoutRow(
-                        deviceId = APPLE,
+                        deviceId = HC_DEVICE,
                         startTs = startS,
                         endTs = endS,
                         sport = exerciseName(r),
@@ -258,7 +266,7 @@ object HealthConnectImporter {
             if (hasApple) {
                 appleRows.add(
                     AppleDaily(
-                        deviceId = APPLE,
+                        deviceId = HC_DEVICE,
                         day = day,
                         steps = if (a.steps > 0L) a.steps.toInt() else null,
                         activeKcal = if (a.activeKcal > 0.0) round1(a.activeKcal) else null,
@@ -303,7 +311,7 @@ object HealthConnectImporter {
         // Persist. Register the devices we write under so name() lookups resolve.
         try {
             if (appleRows.isNotEmpty()) {
-                repo.upsertDevice(APPLE, name = "Apple Health")
+                repo.upsertDevice(HC_DEVICE, name = "Health Connect")
                 repo.upsertAppleDaily(appleRows)
             }
             if (dailyRows.isNotEmpty()) {
@@ -356,18 +364,26 @@ object HealthConnectImporter {
         onRecord: (T) -> Unit,
     ) {
         var pageToken: String? = null
-        do {
-            val response = client.readRecords(
-                ReadRecordsRequest(
-                    recordType = type,
-                    timeRangeFilter = filter,
-                    pageSize = PAGE_SIZE,
-                    pageToken = pageToken,
+        try {
+            do {
+                val response = client.readRecords(
+                    ReadRecordsRequest(
+                        recordType = type,
+                        timeRangeFilter = filter,
+                        pageSize = PAGE_SIZE,
+                        pageToken = pageToken,
+                    )
                 )
-            )
-            for (record in response.records) onRecord(record)
-            pageToken = response.pageToken
-        } while (pageToken != null)
+                for (record in response.records) onRecord(record)
+                pageToken = response.pageToken
+            } while (pageToken != null)
+        } catch (e: Exception) {
+            // One record type failing (e.g. a device/SDK validation quirk like "count must not be less
+            // than 1" seen on some Health Connect builds) must NOT abort the whole import — log it and
+            // keep whatever was read, so every other data type still comes in (issue #34). The reads
+            // accumulate into shared buckets, so a partial type is simply absent, never corrupt.
+            android.util.Log.w("HealthConnect", "read of ${type.simpleName} failed; skipping: ${e.message}")
+        }
     }
 
     // MARK: - field mapping helpers

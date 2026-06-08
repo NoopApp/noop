@@ -171,6 +171,20 @@ interface WhoopDao {
     @Query("SELECT DISTINCT key FROM metricSeries WHERE deviceId = :deviceId ORDER BY key ASC")
     suspend fun metricKeys(deviceId: String): List<String>
 
+    // MARK: - One-time #34 refile: separate legacy Health Connect data from the Apple Health bucket.
+    // Only an Apple Health EXPORT writes metricSeries, so metricSeries-count==0 means the apple-health
+    // daily rows are Health-Connect-origin and safe to move. HC workouts are tagged source so they move
+    // unconditionally. Safe on first run: no `to` rows exist yet (no PK conflict), and post-#34 nothing
+    // ever writes HC data to apple-health again, so it's idempotent (re-runs match 0 rows).
+    @Query("SELECT COUNT(*) FROM metricSeries WHERE deviceId = :deviceId")
+    suspend fun metricSeriesCount(deviceId: String): Int
+
+    @Query("UPDATE appleDaily SET deviceId = :to WHERE deviceId = :from")
+    suspend fun reassignAppleDaily(from: String, to: String)
+
+    @Query("UPDATE workout SET deviceId = :to WHERE deviceId = :from AND source = :source")
+    suspend fun reassignWorkoutsBySource(from: String, to: String, source: String)
+
     // MARK: - Journal / workouts / Apple-Health reads (mirror JournalWorkoutAppleCache.swift, v8)
 
     /**

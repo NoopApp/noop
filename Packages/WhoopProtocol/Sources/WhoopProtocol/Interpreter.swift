@@ -243,6 +243,8 @@ private func parseFrameWhoop5(_ frame: [UInt8]) -> ParsedFrame {
             decodeWhoop5Metadata(frame, fb: fb)
         } else if spec!.post == "command_response" {
             decodeWhoop5CommandResponse(frame, fb: fb, schema: schema, payloadEnd: payloadEnd)
+        } else if spec!.post == "event" {
+            decodeWhoop5Event(frame, fb: fb, schema: schema)
         } else if let payloadEnd = payloadEnd, innerStart + 3 < payloadEnd, payloadEnd <= frame.count {
             // Other types: static fields decoded above; the remaining variable body is kept raw —
             // its 4.0 post-hook awaits per-type 5.0 hardware verification before we apply it at +4.
@@ -394,6 +396,34 @@ private func decodeWhoop5CommandResponse(_ frame: [UInt8], fb: FieldBuilder, sch
         if pay.count >= 97, pay[93] == 50 {
             fb.parsed["fw_version"] = .string("\(pay[93]).\(pay[94]).\(pay[95]).\(pay[96])")
         }
+    }
+}
+
+/// Decode a WHOOP 5.0 EVENT (type 48) per-event payload.
+///
+/// `event` (u8 @10, EventNumber) and `event_timestamp` (u32 @12, real unix) are already set by the
+/// static +4 walk. This hook adds the BATTERY_LEVEL payload, which follows the same +4 rule as the
+/// rest of the 5.0 layout: 4.0's soc@17 / mv@21 / charge@26 become soc@21 / mv@25 / charge@30. Unlike
+/// the 5.0 COMMAND_RESPONSE (which switched to a DIRECT percent), the EVENT battery keeps 4.0's
+/// deci-percent (÷10) — confirmed by a clean monotonic discharge across a real capture (49.9 → 47.7 %).
+/// The same range guards as the 4.0 `event` post-hook fail closed.
+///
+/// Event NAMES come only from the shared `EventNumber` schema, so an unnamed number the firmware emits
+/// (e.g. 123) stays the raw `0x7B(123)` set by the static walk and gets no payload here — never a name
+/// borrowed from another enum (`CommandNumber` 123 is `SELECT_WRIST`) or invented. Other events'
+/// payloads (EXTENDED_BATTERY_INFORMATION, STRAP_CONDITION_REPORT) lack on-device 5.0 ground truth and
+/// are intentionally left raw rather than ported from 4.0 on faith.
+private func decodeWhoop5Event(_ frame: [UInt8], fb: FieldBuilder, schema: Schema) {
+    guard let evVal = readDType(frame, 10, "u8") else { return }
+    guard schema.enums["EventNumber"]?[String(evVal)] == "BATTERY_LEVEL" else { return }
+    if let raw = readDType(frame, 21, "u16"), raw <= 1100 {
+        fb.add(21, 2, "battery_pct", "battery", value: .double(Double(raw) / 10), note: "%")
+    }
+    if let mv = readDType(frame, 25, "u16"), (3000...4300).contains(mv) {
+        fb.add(25, 2, "battery_mV", "battery", value: .int(mv), note: "mV")
+    }
+    if let ch = readDType(frame, 30, "u8"), ch <= 1 {
+        fb.add(30, 1, "battery_charging", "battery", value: .int(ch & 1))
     }
 }
 

@@ -73,7 +73,9 @@ fun WorkoutsScreen(vm: AppViewModel) {
     LaunchedEffect(Unit) {
         val now = System.currentTimeMillis() / 1000
         val whoop = vm.repo.workouts("my-whoop", 0L, now)
-        val apple = vm.repo.workouts("apple-health", 0L, now)
+        // Apple Health export + Health Connect are separate sources (since #34) — include both.
+        val apple = vm.repo.workouts("apple-health", 0L, now) +
+            vm.repo.workouts("health-connect", 0L, now)
         val merged = (whoop + apple).sortedByDescending { it.startTs }
         allRows = merged
         loaded = true

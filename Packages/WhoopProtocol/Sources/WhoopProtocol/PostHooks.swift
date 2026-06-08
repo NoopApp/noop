@@ -294,7 +294,15 @@ func registerPostHooks() {
         let spec = schema.packet(forType: Int(frame[4]))
         let version = Int(frame[5])
         fb.parsed["hist_version"] = .int(version)
-        guard let entry = spec.flatMap({ schema.resolveVersion($0.versions, version) }) else {
+        let mapped = spec.flatMap { schema.resolveVersion($0.versions, version) }
+        // Unmapped firmware version: instead of dropping the whole record (→ no HR/R-R/GRAVITY → sleep
+        // can never compute from the strap, issue #30), fall back to the canonical v24 DSP layout —
+        // firmware versions overwhelmingly share it (the schema notes V12 == V24). We then accept it
+        // ONLY if it decodes to something physically real (validated after the field decode below): a
+        // wrong layout yields random f32 gravity whose magnitude is nowhere near 1 g, so it's rejected
+        // and the record is left raw. Mapped versions are unaffected.
+        let usingFallback = (mapped == nil)
+        guard let entry = mapped ?? spec.flatMap({ schema.resolveVersion($0.versions, 24) }) else {
             fb.region(7, length, "HISTORICAL_DATA v\(version) (unmapped layout)", "unknown")
             return
         }
@@ -329,6 +337,26 @@ func registerPostHooks() {
             }
         }
         fb.parsed["rr_intervals"] = .intArray(rrVals)
+
+        // Validate the v24-layout guess for an unmapped version: gravity is the DSP-separated
+        // orientation vector, so |gravity| ≈ 1 g on a real record regardless of motion. If the magnitude
+        // isn't ~1 g (or HR is implausible), the layout doesn't fit this firmware — drop the decoded
+        // biometrics so nothing garbage is stored, and leave the record raw (the Backfiller then logs the
+        // unmapped version, issue #30). Mapped versions skip this entirely.
+        if usingFallback {
+            let gx = fb.parsed["gravity_x"]?.doubleValue ?? Double.nan
+            let gy = fb.parsed["gravity_y"]?.doubleValue ?? Double.nan
+            let gz = fb.parsed["gravity_z"]?.doubleValue ?? Double.nan
+            let mag = (gx * gx + gy * gy + gz * gz).squareRoot()
+            let hr = fb.parsed["heart_rate"]?.intValue ?? 0
+            if !((0.8...1.2).contains(mag) && (25...230).contains(hr)) {
+                for k in ["heart_rate", "rr_count", "rr_intervals",
+                          "gravity_x", "gravity_y", "gravity_z", "unix", "subseconds"] {
+                    fb.parsed.removeValue(forKey: k)
+                }
+                fb.region(7, length, "HISTORICAL_DATA v\(version) (unmapped; v24 layout rejected)", "unknown")
+            }
+        }
     }
 
     postHooks["metadata"] = { fb, frame, length, _ in
