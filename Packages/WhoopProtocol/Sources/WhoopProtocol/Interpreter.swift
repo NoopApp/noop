@@ -287,6 +287,10 @@ private func decodeWhoop5Historical(_ frame: [UInt8], fb: FieldBuilder, payloadE
     let version = frame.count > 9 ? Int(frame[9]) : -1
     fb.parsed["hist_version"] = .int(version)
     fb.add(9, 1, "hist_version", "meta", value: .int(version))
+    if version == 26 {
+        decodeWhoop5HistoricalV26(frame, fb: fb)
+        return
+    }
     guard version == 18 else {
         // Unknown historical layout — describe it faithfully without inventing offsets.
         if let payloadEnd = payloadEnd, 11 < payloadEnd, payloadEnd <= frame.count {
@@ -320,6 +324,35 @@ private func decodeWhoop5Historical(_ frame: [UInt8], fb: FieldBuilder, payloadE
     // are not yet ground-truth-mapped; keep them as one honest raw region.
     if let payloadEnd = payloadEnd, 57 < payloadEnd, payloadEnd <= frame.count {
         fb.region(57, payloadEnd, "unmapped optical (PPG/SpO₂/skin-temp)", "unknown")
+    }
+}
+
+/// Decode a WHOOP 5.0 type-47 **version-26** record — the high-rate optical PPG buffer.
+///
+/// Unlike the v18 per-second summary, v26 is a 24 Hz waveform: **24 little-endian i16 samples at bytes
+/// [27:75]**, one record per second (`unix` u32 LE @15, the same slot v18 uses). It was verified to be
+/// an OPTICAL PPG trace — not IMU/motion — using the heart rate as *internal* ground truth (no external
+/// reference): the concatenated waveform's autocorrelation peaks at the HR (lag 14 = 102.9 bpm vs a
+/// measured 101.7 bpm), trough-detection gives a 563 ms inter-beat interval (≈106 bpm), the pulse stays
+/// HR-locked even when the wrist is still, and its amplitude is not motion-driven. (Reproduce with
+/// `tools/linux-capture/analyze_v26_waveform.py`; see docs §5.)
+///
+/// The samples are raw AC-coupled ADC counts — PPG has no absolute unit — so they are exposed verbatim
+/// as `ppg_waveform` with NO invented scale. The bytes before [27] (header + a block index) and the
+/// footer after [75] are not mapped; SpO₂/skin-temp have no internal proxy and are left untouched.
+private func decodeWhoop5HistoricalV26(_ frame: [UInt8], fb: FieldBuilder) {
+    if let unix = readDType(frame, 15, "u32") {
+        fb.add(15, 4, "unix", "time", value: .int(unix), note: "real unix seconds")
+    }
+    var samples: [Int] = []
+    for off in stride(from: 27, to: 75, by: 2) {
+        guard let v = readI16(frame, off) else { break }
+        samples.append(v)
+    }
+    if !samples.isEmpty {
+        fb.add(27, samples.count * 2, "ppg_waveform", "ppg", value: .intArray(samples),
+               note: "optical PPG @24 Hz, LE-i16 ADC counts")
+        fb.parsed["ppg_sample_count"] = .int(samples.count)
     }
 }
 

@@ -414,10 +414,33 @@ are left as a single raw region rather than guessed (project rule: real captures
 offsets). The decoded fields feed the existing `extractHistoricalStreams` path unchanged, so WHOOP 5
 historical HR / HRV / gravity land in the datastore exactly like 4.0.
 
-The same WHOOP 5 also emits an **88-byte type-47 record with version byte 26** — its body is a
-high-rate big-endian i16 waveform buffer (a PPG/IMU trace), distinct from the v18 per-second summary.
-It is not mapped; `decodeWhoop5Historical` keys on the version byte and falls back to a labelled raw
-region for any version other than 18, so an unknown record is described, never mis-decoded.
+### The WHOOP 5.0 type-47 record (version 26) — high-rate optical PPG
+
+The same WHOOP 5 also emits an **88-byte type-47 record with version byte 26**, distinct from the v18
+per-second summary: a high-rate **optical PPG** waveform — **24 little-endian i16 samples at bytes
+[27:75]**, one record per second (`unix` u32 LE @15, the same slot v18 uses), i.e. a **24 Hz** trace.
+(It is little-endian — the high byte of each sample is `0xFA..0xFF` / `0x00..0x01` — not big-endian.)
+
+It is identified as PPG, not IMU/motion, using the **heart rate as internal ground truth** — no external
+reference or app export needed:
+
+- Autocorrelating the concatenated trace peaks at the HR: **lag 14 = 102.9 bpm** vs a v18-measured
+  101.7 bpm, with the half-period anti-correlation and 2-beat harmonic of a real pulse.
+- Independent trough-detection gives a **563 ms inter-beat interval (≈106 bpm)**, again matching HR.
+- The pulse stays HR-locked even in the **stillest** seconds, and its amplitude is not motion-driven
+  (`corr(amplitude, |Δgravity|) = +0.35` — mild motion artifact, not the signal) — so it is optical,
+  not a ballistocardiographic IMU reading.
+
+`decodeWhoop5HistoricalV26` exposes the samples as `ppg_waveform` (+ `ppg_sample_count`, `unix`). They
+are raw AC-coupled ADC counts — PPG has no absolute unit — so no scale is invented. The header before
+[27] (a block index) and the footer after [75] are left raw. Reproduce the proof with
+`tools/linux-capture/analyze_v26_waveform.py`; parity test `Whoop5PpgWaveformTests.swift`.
+
+> The v18 per-second record's own optical region (bytes [57:120]) carries **no simple summary of this
+> PPG** (no field tracks its DC or AC amplitude), and its SpO₂ / skin-temp channels have no internal
+> proxy — HR, R-R, gravity and PPG morphology don't determine blood-oxygen or temperature. Those remain
+> a raw region; positively mapping them needs an external reference (a worn pulse-oximeter / thermometer,
+> or the official app's readout for matching timestamps), so they are intentionally left undecoded.
 
 > **Firmware-version caveat.** The 4.0 `v24` layout in `whoop_protocol.json` reflects one firmware
 > revision (the `my-whoop` reference device); a given strap may run older or newer firmware with a
