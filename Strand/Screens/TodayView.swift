@@ -19,8 +19,9 @@ import Foundation
 //   (c) LAST WORKOUTS — the SAME adaptive grid of fixed-104pt workout StatTiles.
 //   (d) DATA SOURCES — one full-width NoopCard footer of SourceBadges + counts.
 //
-// Sparse series (weight) fall back to ALL history so a tile never shows an empty
-// state when data exists. Only locked StrandDesign components are used.
+// Sparkline series are calendar windows ending on the device's actual local date.
+// Old imported history stays available in history screens, but it must not be
+// presented as today's trend.
 
 struct TodayView: View {
     @EnvironmentObject var repo: Repository
@@ -53,7 +54,7 @@ struct TodayView: View {
                 sourcesSection
             }
         }
-        .task(id: repo.today?.day) { await loadAll() }
+        .task(id: repo.days.last?.day) { await loadAll() }
         .toolbar {
             ToolbarItem {
                 Button { showingSupport = true } label: {
@@ -77,7 +78,7 @@ struct TodayView: View {
 
     @ViewBuilder
     private var readinessSection: some View {
-        let r = ReadinessEngine.evaluate(days: repo.days)
+        let r = ReadinessEngine.evaluate(days: repo.days, today: DashboardDates.todayKey())
         if r.level != .insufficient {
             VStack(alignment: .leading, spacing: NoopMetrics.gap) {
                 SectionHeader("Readiness", overline: "Should you push today?")
@@ -178,7 +179,7 @@ struct TodayView: View {
     @ViewBuilder
     private var metricsSection: some View {
         let d = repo.today
-        let aLatest = appleDays.last
+        let aToday = DashboardDates.row(for: appleDays)
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
             SectionHeader("Key Metrics", overline: "Today", trailing: "14-day trend")
             LazyVGrid(columns: grid, alignment: .leading, spacing: NoopMetrics.gap) {
@@ -240,7 +241,7 @@ struct TodayView: View {
                 )
                 StatTile(
                     label: "Steps",
-                    value: aLatest?.steps.map { intString(Double($0)) } ?? latestString("steps", decimals: 0),
+                    value: aToday?.steps.map { intString(Double($0)) } ?? latestString("steps", decimals: 0),
                     caption: "today",
                     accent: StrandPalette.metricCyan,
                     sparkline: sparks["steps"],
@@ -248,7 +249,7 @@ struct TodayView: View {
                 )
                 StatTile(
                     label: "Weight",
-                    value: aLatest?.weightKg.map { String(format: "%.1f kg", $0) } ?? latestString("weight", decimals: 1, unit: "kg"),
+                    value: aToday?.weightKg.map { String(format: "%.1f kg", $0) } ?? latestString("weight", decimals: 1, unit: "kg"),
                     caption: "latest",
                     accent: StrandPalette.accent,
                     sparkline: sparks["weight"],
@@ -256,7 +257,7 @@ struct TodayView: View {
                 )
                 StatTile(
                     label: "Calories",
-                    value: caloriesValue(aLatest),
+                    value: caloriesValue(aToday),
                     caption: "active",
                     accent: StrandPalette.metricAmber,
                     sparkline: sparks["active_kcal"],
@@ -341,32 +342,18 @@ struct TodayView: View {
         // 14-day sparklines — Apple Health.
         sparks["resp_rate"]   = await sparkValues("resp_rate", source: "apple-health", window: 14)
         sparks["steps"]       = await sparkValues("steps", source: "apple-health", window: 14)
-        sparks["weight"]      = await sparkValues("weight", source: "apple-health", window: 90)
+        sparks["weight"]      = await sparkValues("weight", source: "apple-health", window: 14)
         sparks["active_kcal"] = await sparkValues("active_kcal", source: "apple-health", window: 14)
 
         workouts = await repo.workoutRows()
         appleDays = await repo.appleDailyRows()
     }
 
-    /// Trailing-window values for a metric, with the sparse-data fallback:
-    /// if the trailing window has <2 points, fall back to ALL history so sparse
-    /// series (weight) still render a value + line instead of an empty state.
+    /// Trailing-window values for a metric, anchored to the device's actual local
+    /// calendar date. Sparse windows stay sparse instead of widening into stale imports.
     private func sparkValues(_ key: String, source: String, window: Int) async -> [Double] {
         let all = await repo.series(key: key, source: source)   // full history, asc
-        guard !all.isEmpty else { return [] }
-        let windowed = trailingWindow(all, days: window)
-        let chosen = windowed.count >= 2 ? windowed : all
-        return chosen.map { $0.value }
-    }
-
-    /// Keep only points within `days` of the most recent point (parsing yyyy-MM-dd in UTC).
-    private func trailingWindow(_ points: [(day: String, value: Double)], days: Int) -> [(day: String, value: Double)] {
-        guard let lastDay = points.last?.day, let lastDate = Self.dayParser.date(from: lastDay) else { return points }
-        let cutoff = lastDate.addingTimeInterval(-Double(days) * 86_400)
-        return points.filter { p in
-            guard let dt = Self.dayParser.date(from: p.day) else { return false }
-            return dt >= cutoff
-        }
+        return DashboardDates.trailingWindow(all, count: window).map { $0.value }
     }
 
     /// Latest value of a loaded sparkline series, formatted — for tiles whose hero

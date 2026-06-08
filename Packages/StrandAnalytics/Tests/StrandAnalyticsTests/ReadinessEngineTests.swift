@@ -27,6 +27,15 @@ final class ReadinessEngineTests: XCTestCase {
         XCTAssertEqual(ReadinessEngine.evaluate(days: []).level, .insufficient)
     }
 
+    func testSpecifiedTodayDoesNotFallbackToLatestHistoricalDay() {
+        let r = ReadinessEngine.evaluate(
+            days: baseline(todayHrv: 72, todayRhr: 46, todayStrain: 10),
+            today: "2026-06-08"
+        )
+
+        XCTAssertEqual(r.level, .insufficient)
+    }
+
     func testPrimedWhenSignalsAligned() {
         // Today: HRV well above baseline, resting HR below, load steady.
         let r = ReadinessEngine.evaluate(days: baseline(todayHrv: 72, todayRhr: 46, todayStrain: 10))

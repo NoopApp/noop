@@ -76,7 +76,13 @@ public enum ReadinessEngine {
     /// treated as "today" unless `today` (a YYYY-MM-DD string) is given.
     public static func evaluate(days: [DailyMetric], today: String? = nil) -> Readiness {
         let sorted = days.sorted { $0.day < $1.day }
-        guard let latest = today.flatMap({ t in sorted.first { $0.day == t } }) ?? sorted.last else {
+        let latest: DailyMetric?
+        if let today = today {
+            latest = sorted.first { $0.day == today }
+        } else {
+            latest = sorted.last
+        }
+        guard let latest else {
             return Readiness(level: .insufficient,
                              headline: "Readiness",
                              summary: "Wear the strap for a few nights and your readiness read will appear here.",
@@ -126,7 +132,7 @@ public enum ReadinessEngine {
         }
 
         // Training Stress Balance (ACWR) + monotony --------------------------
-        let strainSeries = sorted.compactMap { $0.strain }
+        let strainSeries = sorted.filter { $0.day <= latest.day }.compactMap { $0.strain }
         var acwr: Double? = nil
         var monotony: Double? = nil
         if strainSeries.count >= minChronic {

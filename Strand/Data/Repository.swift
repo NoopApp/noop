@@ -22,10 +22,10 @@ final class Repository: ObservableObject {
 
     init(deviceId: String) { self.deviceId = deviceId }
 
-    /// The most recent day with data (treated as "today" for the dashboard hero).
-    var today: DailyMetric? { days.last }
-    /// The trailing 7 days (for the week strip), oldest→newest.
-    var week: [DailyMetric] { Array(days.suffix(7)) }
+    /// The row for the device's actual local calendar day.
+    var today: DailyMetric? { DashboardDates.row(for: days) }
+    /// The trailing 7 calendar days ending today, oldest→newest.
+    var week: [DailyMetric] { DashboardDates.trailingWindow(days, count: 7) }
 
     private func ensureStore() async -> WhoopStore? {
         if let store { return store }

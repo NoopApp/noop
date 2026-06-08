@@ -1,5 +1,5 @@
 import XCTest
-@testable import Strand
+@testable import NOOP
 
 final class StrandSmokeTests: XCTestCase {
     func testItRuns() {

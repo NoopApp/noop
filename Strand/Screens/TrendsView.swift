@@ -9,7 +9,8 @@ import Foundation
 // surface, height and gap is identical: one SegmentedPillControl for the range,
 // a hero recovery ChartCard, a uniform grid of HRV / Resting HR / Day Strain
 // ChartCards (all NoopMetrics.chartHeight tall), and the whole history as a
-// recovery YearHeatStrip in a NoopCard. No hand-sized cards anywhere.
+// recovery YearHeatStrip in a NoopCard. Fixed windows are anchored to the
+// device's actual local date so imported historical rows do not look current.
 
 struct TrendsView: View {
     @EnvironmentObject var repo: Repository
@@ -33,13 +34,6 @@ struct TrendsView: View {
         /// Trailing-day window, or nil for "all history".
         var days: Int? { self == .all ? nil : rawValue }
 
-        /// This range plus every LARGER range, ascending — the auto-expand search
-        /// order when the selected window holds zero points.
-        var widening: [Range] {
-            let order: [Range] = [.week, .month, .quarter, .half, .year, .all]
-            guard let i = order.firstIndex(of: self) else { return [.all] }
-            return Array(order[i...])
-        }
     }
 
     @State private var range: Range = .quarter
@@ -54,24 +48,16 @@ struct TrendsView: View {
     }()
     private func date(_ day: String) -> Date? { Self.dayParser.date(from: day) }
 
-    // MARK: Window selection (relative to the LATEST day, with auto-expand)
+    // MARK: Window selection (relative to actual local today)
 
-    /// The latest recorded day across all history (anchors every window).
-    private var latestDay: Date? {
-        guard let d = repo.days.last?.day else { return nil }
-        return date(d)
-    }
-
-    /// Days for a given range, taken RELATIVE TO THE LATEST day (not "now").
-    /// `.all` returns everything.
+    /// Days for a given range, taken relative to the device's actual local date.
+    /// `.all` returns everything through today.
     private func days(for r: Range) -> [DailyMetric] {
-        guard let n = r.days else { return repo.days }
-        guard let last = latestDay else { return [] }
-        let cutoff = last.addingTimeInterval(-Double(n - 1) * 86_400)
-        return repo.days.filter { d in
-            guard let dt = date(d.day) else { return false }
-            return dt >= cutoff
+        let today = DashboardDates.todayKey()
+        if let n = r.days {
+            return DashboardDates.trailingWindow(repo.days, ending: today, count: n)
         }
+        return DashboardDates.throughDay(repo.days, day: today)
     }
 
     /// Build trend points from a metric accessor over a day slice.
@@ -88,14 +74,8 @@ struct TrendsView: View {
     // MARK: Resolved metric (memoized per body)
     //
     // days(for:) / points each re-filter the full multi-year `repo.days` array,
-    // and the subviews used to fan out to them many times per render (caption +
-    // widened + windowPoints, ×4 metrics). `resolve(_:)` walks the widening order
-    // ONCE per metric (the smallest range ≥ selected whose window holds ≥1 point,
-    // else ALL), captures that window's points and its effective range, then
-    // derives the caption / widened flag from those — so a single body evaluation
-    // filters each metric's window once instead of dozens of times. Identical
-    // results to the old per-helper (effectiveRange / windowPoints / caption /
-    // widened) computation.
+    // so `resolve(_:)` captures that window's points once per metric and reuses
+    // the count/caption downstream.
     private struct ResolvedMetric {
         var points: [TrendPoint]
         var effective: Range
@@ -104,28 +84,15 @@ struct TrendsView: View {
     }
 
     private func resolve(_ value: (DailyMetric) -> Double?) -> ResolvedMetric {
-        // Find the smallest range ≥ selected whose window has ≥1 point, keeping
-        // that window's points so we don't re-filter to read them back.
-        for r in range.widening {
-            let pts = points(days(for: r), value)
-            if !pts.isEmpty {
-                return ResolvedMetric(points: pts, effective: r,
-                                      widened: r != range, caption: caption(count: pts.count, eff: r))
-            }
-        }
-        // No range held data: fall back to ALL (matches effectiveRange()).
-        let pts = points(days(for: .all), value)
-        return ResolvedMetric(points: pts, effective: .all,
-                              widened: .all != range, caption: caption(count: pts.count, eff: .all))
+        let pts = points(days(for: range), value)
+        return ResolvedMetric(points: pts, effective: range,
+                              widened: false, caption: caption(count: pts.count, eff: range))
     }
 
     /// Caption text from an already-resolved count + effective range. Mirrors
     /// `caption(_:)` exactly but takes precomputed inputs to avoid re-filtering.
     private func caption(count n: Int, eff: Range) -> String {
         let unit = n == 1 ? "reading" : "readings"
-        if eff != range {
-            return "\(n) \(unit) · sparse — widened to \(name(for: eff))"
-        }
         return "\(n) \(unit) · \(name(for: range))"
     }
 
@@ -316,7 +283,9 @@ struct TrendsView: View {
     private var yearStrip: some View {
         // Always show at least a full year for context; expand to all history on ALL.
         let stripDays = max(range.days ?? repo.days.count, 365)
-        let recent = repo.days.suffix(stripDays)
+        let recent = range == .all
+            ? DashboardDates.throughDay(repo.days)
+            : DashboardDates.trailingWindow(repo.days, count: stripDays)
         let recoveryDays: [RecoveryDay] = recent.compactMap { d in
             guard let dt = date(d.day) else { return nil }
             return RecoveryDay(date: dt, score: d.recovery)

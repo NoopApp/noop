@@ -64,8 +64,16 @@ final class AppModel: ObservableObject {
         live.onWristChange = { [weak self] worn in self?.handleWristChange(worn) }
         // HR-zone haptic coaching watches the smoothed bpm.
         $bpm.sink { [weak self] hr in self?.coachZone(hr) }.store(in: &hrCancellables)
-        // Illness/strain early-warning recomputes when the daily history changes.
-        repo.$days.sink { [weak self] days in self?.evaluateIllness(days) }.store(in: &hrCancellables)
+        // Illness/strain early-warning recomputes against the actual calendar-today row.
+        repo.$days.sink { [weak self] days in
+            guard let self else { return }
+            let today = DashboardDates.todayKey()
+            guard DashboardDates.row(for: days, day: today) != nil else {
+                self.healthAlert = nil
+                return
+            }
+            self.evaluateIllness(DashboardDates.throughDay(days, day: today))
+        }.store(in: &hrCancellables)
 
         moments = (UserDefaults.standard.array(forKey: "moments") as? [Double] ?? [])
             .map { Date(timeIntervalSince1970: $0) }
