@@ -15,12 +15,39 @@
 </p>
 
 <p align="center">
+  <a href="#keeping-noop-alive">♥&nbsp;Support</a> ·
   <a href="#download">⬇&nbsp;Download</a> ·
   <a href="#features">Features</a> ·
   <a href="docs/PROTOCOL.md">Protocol</a> ·
-  <a href="docs/DONATIONS.md">♥&nbsp;Support</a> ·
   <a href="mailto:thenoopapp@gmail.com">Contact</a>
 </p>
+
+---
+
+## Keeping NOOP alive
+
+NOOP is **free, forever** — no account, no cloud, no subscription, every feature unlocked, no nag. That doesn't change.
+
+But here's the honest reality, up front: **NOOP is built and maintained by one person, out of pocket.** Reverse-engineering WHOOP's hardware — and keeping up as its firmware changes — takes real time and real test hardware. **The project continues if the people who use it help fund it. If that doesn't happen, it can't.** No drama, no guilt — just the maths of an unfunded project.
+
+If NOOP saves you a subscription, or you just want WHOOP 5.0/MG support finished and the work to keep going, **chipping in is what genuinely decides that.** It's optional, one-off, and tied to nothing about your data or access — there's no server and no record of who has or hasn't.
+
+### How to donate — 2 minutes, even if you've never touched crypto
+
+Donations are **crypto-only**, on purpose: staying anonymous (for the project *and* for you) rules out PayPal, Patreon, or anything with a name attached. If you don't already hold any:
+
+1. **Install a mainstream exchange app** — Coinbase, Binance, Kraken, or **Cash App** (Cash App handles Bitcoin directly).
+2. **Buy a small amount of Bitcoin (BTC) or Ethereum (ETH)** — even $5–10 is genuinely helpful.
+3. **Tap Send / Withdraw, paste the matching address below, and send.** That's it. (Only ever send a coin to its own network.)
+
+| Coin | Network | Address |
+|---|---|---|
+| **BTC** | Bitcoin | `bc1qn2gkl7wslwpws06mvazjn2uu689zlkv7kg3kf5` |
+| **ETH** | Ethereum | `0xd64D508b531c4b1297Ca4023C774e0E97aA67B7F` |
+
+The same addresses — plus **ADA** and **XRP**, each with a scan-to-donate **QR code** — are in the app under **Support**, and listed in [`docs/DONATIONS.md`](docs/DONATIONS.md). *Always copy the full address and double-check the first and last characters; crypto transactions are irreversible.*
+
+**Can't or would rather not?** Also genuinely valued: **⭐ star this repo**, file a good bug report, share a strap log, test on hardware you own, or just tell another WHOOP user. That moves NOOP forward too.
 
 ---
 
