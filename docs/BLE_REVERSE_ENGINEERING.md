@@ -449,6 +449,28 @@ stub payloads on this firmware (so the firmware version lives in the `GET_HELLO`
 > after the variable name+token region, so it is anchored to a 50.38.1.0 capture and guarded on the
 > "5.0" generation byte (`pay[93] == 50`) — re-verify it across firmwares.
 
+### WHOOP 5.0 EVENT (type 48)
+
+The event frame is the 4.0 layout shifted +4: `event` (u8/`EventNumber`) at frame[10] and
+`event_timestamp` (u32 real unix) at frame[12] are surfaced by the `parseFrameWhoop5` static walk, so
+simple events (wrist on/off, double-tap, boot, pairing, BLE up/down, bonded) decode with no extra code.
+A u16 **payload length** at frame[18] gives the size of the per-event body that starts at frame[20]
+(verified: it predicts the frame size exactly across every event class in the capture).
+
+`decodeWhoop5Event` adds the one per-event payload with on-device ground truth — **BATTERY_LEVEL** (3),
+again following the +4 rule (4.0 soc@17 / mv@21 / charge@26 → soc@21 / mv@25 / charge@30). Unlike the
+COMMAND_RESPONSE battery above, the EVENT battery keeps 4.0's **deci-percent** (`soc / 10`), confirmed
+by a clean monotonic discharge across a real capture (49.9 → 47.7 %, mV ≈ 3.8 V). The same range guards
+as the 4.0 `event` post-hook fail closed.
+
+> **Enum-drift guard.** Event names come **only** from the shared `EventNumber` schema. This firmware
+> also emits numbers the schema does not name (61, 62, 110, 112, 116, 120, 123); they stay raw
+> (`0x7B(123)`) and are never given a name borrowed from another enum — note `CommandNumber` 123 is
+> `SELECT_WRIST`, an unrelated meaning — nor invented. Other event payloads
+> (`EXTENDED_BATTERY_INFORMATION`, `STRAP_CONDITION_REPORT`, and the serial-bearing 61/62) lack 5.0
+> ground truth and are left raw rather than ported from 4.0 on faith. Parity tests use real frames
+> verified to carry no device name / serial / token (battery and simple events do not).
+
 ---
 
 ## 6. Haptic preset discovery (GET_ALL_HAPTICS_PATTERN)
