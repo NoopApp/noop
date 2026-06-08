@@ -352,6 +352,11 @@ public func whoop5HistoricalAckFrame(endData: [UInt8], seq: UInt8) -> [UInt8] {
 /// mapped from a real WHOOP 5 capture (firmware 50.38.1.0), not ported on faith. Commands that return
 /// a short stub on this firmware (REPORT_VERSION_INFO / GET_EXTENDED_BATTERY_INFO) or aren't served
 /// (GET_CLOCK — unneeded, since realtime + historical carry real unix) are intentionally left undecoded.
+///
+/// The divergences are confirmed by a side-by-side capture from a real WHOOP 4 (firmware 41.x), which
+/// — unlike this strap — uses the 4.0 deci-percent battery and returns the full REPORT_VERSION_INFO /
+/// ext-battery blocks. So these are genuine generation differences, not capture artifacts; the
+/// firmware prefix (41 vs 50) is itself the generation marker the GET_HELLO guard keys on.
 private func decodeWhoop5CommandResponse(_ frame: [UInt8], fb: FieldBuilder, schema: Schema, payloadEnd: Int?) {
     guard let payloadEnd = payloadEnd, 11 < payloadEnd, payloadEnd <= frame.count else { return }
     let respCmd = Int(frame[10])
@@ -359,7 +364,8 @@ private func decodeWhoop5CommandResponse(_ frame: [UInt8], fb: FieldBuilder, sch
     let pay = Array(frame[11..<payloadEnd])
     fb.region(11, payloadEnd, "response payload", "cmd")
     if name.hasPrefix("GET_BATTERY_LEVEL"), pay.count >= 3 {
-        // Direct percent at pay[2] (47% confirmed against the app) — the 4.0 deci-percent ÷10 is gone.
+        // Direct percent at pay[2] (47% confirmed against the app). The 4.0 deci-percent ÷10 is gone —
+        // a real WHOOP 4 returns the same field as 989 → 98.9%, so the scaling really did change.
         fb.add(11 + 2, 1, "battery_pct", "battery", value: .double(Double(pay[2])), note: "%")
     } else if name.hasPrefix("GET_DATA_RANGE"), pay.count >= 7 {
         // The long response carries record cursors + real-unix timestamps as 4-byte-aligned u32s from

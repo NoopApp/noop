@@ -442,6 +442,20 @@ stub payloads on this firmware (so the firmware version lives in the `GET_HELLO`
 `GET_CLOCK` (11) isn't served at all — WHOOP 5 doesn't need it, since realtime (type-40) and historical
 (type-47) both carry real unix rather than a device epoch.
 
+**Cross-checked against a real WHOOP 4** (firmware `41.x`), captured the same way — this confirms the
+differences are genuine generation changes, not capture artifacts:
+
+| Command | WHOOP 4 (`41.x`) | WHOOP 5 (`50.x`) |
+|---|---|---|
+| `GET_BATTERY_LEVEL` | `989` → **98.9%** (deci-percent ÷10) | `47` → **47%** (direct) |
+| `REPORT_VERSION_INFO` | full version block → `41.17.6.0` | short stub (firmware is in `GET_HELLO`) |
+| `GET_EXTENDED_BATTERY_INFO` | full block (`battery_mV`) | short stub |
+| `GET_DATA_RANGE` | history window, same aligned-u32 decode | history window, same decode |
+| `GET_CLOCK` | not served | not served |
+
+The firmware prefix is itself the generation marker — **41**.x for WHOOP 4, **50**.x for WHOOP 5 —
+which is exactly what the `GET_HELLO` firmware guard (`pay[93] == 50`) keys on.
+
 > **Privacy.** The `GET_HELLO` response also contains a **session token**, which the decoder never
 > reads or exposes — only the device name and firmware version are surfaced. The `device_name`/
 > `fw_version` parity tests use a **synthetic** hello frame (fake name, version bytes at their real
