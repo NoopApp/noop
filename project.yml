@@ -93,3 +93,107 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.noopapp.strandtests
+
+  # ---------------------------------------------------------------------------
+  # iOS app target. Reuses the five shared packages and almost all of Strand/
+  # (the SwiftUI screens, BLE engine, collector, data layer) unchanged; only the
+  # macOS-only scene/menu-bar/notification files are excluded, and the iOS-only
+  # app shell + HealthKit + widgets/intents live under StrandiOS/.
+  NOOPiOS:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Strand
+        excludes:
+          - "Resources/Info.plist"
+          - "Resources/Strand.entitlements"
+          - "Resources/Assets.xcassets"
+          - "App/StrandApp.swift"
+          - "App/RootView.swift"
+          - "MenuBar"
+          - "Data/NotificationSettingsStore.swift"
+          - "Screens/NotificationSettingsView.swift"
+      - path: StrandiOS
+        excludes:
+          - "Resources/Info.plist"
+          - "Resources/NOOP.entitlements"
+      - path: StrandiOSShared
+    info:
+      path: StrandiOS/Resources/Info.plist
+      properties:
+        CFBundleName: NOOP
+        CFBundleDisplayName: NOOP
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "25"
+        LSApplicationCategoryType: public.app-category.healthcare-fitness
+        UILaunchScreen: {}
+        NSSupportsLiveActivities: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIBackgroundModes:
+          - bluetooth-central
+        NSBluetoothAlwaysUsageDescription: "NOOP connects directly to your WHOOP strap over Bluetooth to read heart rate, R-R intervals, battery, and sensor data locally on your iPhone. Nothing leaves your device."
+        NSHealthShareUsageDescription: "NOOP reads your own Apple Health data on-device to compute recovery, strain, and sleep. Nothing leaves your device."
+        NSHealthUpdateUsageDescription: "NOOP writes the metrics it computes from your strap back into Apple Health, on-device and only when you allow it."
+    entitlements:
+      path: StrandiOS/Resources/NOOP.entitlements
+      properties:
+        com.apple.developer.healthkit: true
+        com.apple.developer.healthkit.access: []
+        com.apple.security.application-groups:
+          - group.com.noopapp.noop
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.noopapp.noop
+        PRODUCT_NAME: NOOP
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_EMIT_LOC_STRINGS: YES
+    dependencies:
+      - package: WhoopProtocol
+      - package: WhoopStore
+      - package: StrandAnalytics
+      - package: StrandImport
+      - package: StrandDesign
+      - target: NOOPiOSWidgets
+
+  # ---------------------------------------------------------------------------
+  # WidgetKit + Live Activity extension. Renders the glanceable widget (the iOS
+  # analogue of the macOS menu-bar extra) and the live-HR Live Activity. Reads a
+  # tiny snapshot the app publishes into the shared App Group — never the DB.
+  NOOPiOSWidgets:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: StrandiOSWidgets
+        excludes:
+          - "Info.plist"
+          - "NOOPWidgets.entitlements"
+      - path: StrandiOSShared
+    info:
+      path: StrandiOSWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: NOOP
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: StrandiOSWidgets/NOOPWidgets.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.noopapp.noop
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.noopapp.noop.widgets
+        PRODUCT_NAME: NOOPWidgets
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1,2"
+    dependencies:
+      - package: StrandDesign

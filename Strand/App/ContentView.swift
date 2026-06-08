@@ -9,7 +9,11 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
+            #if os(macOS)
             RootView()
+            #else
+            RootTabView()
+            #endif
             if !onboarded {
                 OnboardingWizard(onFinished: {
                     onboarded = true

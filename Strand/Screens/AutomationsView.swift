@@ -28,7 +28,7 @@ struct AutomationsView: View {
                     Text("When I double-tap").font(StrandFont.body).foregroundStyle(StrandPalette.textPrimary)
                     Spacer()
                     Picker("", selection: $behavior.doubleTapAction) {
-                        ForEach(MacActionKind.allCases) { Text($0.label).tag($0) }
+                        ForEach(MacActionKind.available) { Text($0.label).tag($0) }
                     }
                     .labelsHidden().fixedSize()
                 }

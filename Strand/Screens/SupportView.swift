@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 import StrandDesign
 
 /// Support — attribution + optional crypto donations. Never a paywall; the whole app works without it.
@@ -28,7 +27,7 @@ struct SupportView: View {
                 }
                 Spacer(minLength: 8)
                 Button {
-                    if let url = URL(string: "mailto:\(ProjectInfo.contactEmail)") { NSWorkspace.shared.open(url) }
+                    if let url = URL(string: "mailto:\(ProjectInfo.contactEmail)") { PlatformOpen.url(url) }
                 } label: { Label("Email", systemImage: "paperplane.fill") }
                 .buttonStyle(.bordered).tint(StrandPalette.accent)
                 .help("Email \(ProjectInfo.contactEmail)")
@@ -106,8 +105,7 @@ struct SupportView: View {
                                 .font(StrandFont.mono(11)).foregroundStyle(StrandPalette.textSecondary)
                                 .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                             Button {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(coin.address, forType: .string)
+                                PlatformPasteboard.copy(coin.address)
                                 withAnimation { copied = coin.symbol }
                             } label: {
                                 Label(copied == coin.symbol ? "Copied!" : "Copy address",
@@ -130,7 +128,7 @@ struct SupportView: View {
     private func qrView(_ address: String) -> some View {
         Group {
             if let img = QRCode.image(for: address) {
-                Image(nsImage: img).resizable().interpolation(.none)
+                Image(platformImage: img).resizable().interpolation(.none)
             } else {
                 RoundedRectangle(cornerRadius: 8, style: .continuous).fill(StrandPalette.surfaceInset)
             }
@@ -189,7 +187,9 @@ struct SupportModalOverlay: View {
                 }
                 .shadow(color: Color.black.opacity(0.5), radius: 30, x: 0, y: 14)
         }
+        #if os(macOS)
         .onExitCommand { isPresented = false }
+        #endif
         .transition(.opacity)
     }
 }

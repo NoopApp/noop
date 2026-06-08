@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(AppKit)
 import AppKit
+#elseif canImport(UIKit)
+import UIKit
+#endif
 import UniformTypeIdentifiers
 import WhoopStore
 
@@ -53,6 +57,7 @@ enum DataBackup {
         // Flush the WAL so the single .sqlite carries everything. Best-effort.
         let checkpointed = await checkpoint()
 
+        #if os(macOS)
         // Ask where to save.
         let panel = NSSavePanel()
         panel.title = "Export NOOP backup"
@@ -85,6 +90,21 @@ enum DataBackup {
         } catch {
             return .failure("Export failed: \(error.localizedDescription)")
         }
+        #else
+        // iOS: stage a copy in a temp dir, then hand it to the system document picker so the user
+        // can save it into Files / iCloud Drive. (Sidecars aren't carried — the checkpoint above
+        // has almost always folded the WAL into the single file by this point.)
+        let fm = FileManager.default
+        let staged = fm.temporaryDirectory.appendingPathComponent(defaultBackupName())
+        do {
+            if fm.fileExists(atPath: staged.path) { try fm.removeItem(at: staged) }
+            try fm.copyItem(at: dbURL, to: staged)
+        } catch {
+            return .failure("Export failed: \(error.localizedDescription)")
+        }
+        guard let dest = await DocumentPicker.export(staged) else { return .cancelled }
+        return .exported(dest)
+        #endif
     }
 
     // MARK: - Import
@@ -98,6 +118,7 @@ enum DataBackup {
         do { dbPath = try StorePaths.defaultDatabasePath() }
         catch { return .failure("Couldn't locate the NOOP database. \(error.localizedDescription)") }
 
+        #if os(macOS)
         let panel = NSOpenPanel()
         panel.title = "Import NOOP backup"
         panel.prompt = "Import"
@@ -110,6 +131,11 @@ enum DataBackup {
 
         let scoped = source.startAccessingSecurityScopedResource()
         defer { if scoped { source.stopAccessingSecurityScopedResource() } }
+        #else
+        // iOS: pick the backup through the system document picker (asCopy gives us a readable local
+        // copy in our temp dir, so no security-scoped bookkeeping is needed).
+        guard let source = await DocumentPicker.importFile(sqliteContentTypes()) else { return .cancelled }
+        #endif
 
         // Validate: must be a real SQLite database (magic header "SQLite format 3\0").
         guard isSQLiteFile(at: source) else {

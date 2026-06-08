@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 import UniformTypeIdentifiers
 import StrandDesign
 import WhoopStore
@@ -271,6 +270,7 @@ struct SettingsView: View {
                         .buttonStyle(.borderedProminent)
                         .tint(StrandPalette.accent)
 
+                        #if os(macOS)
                         Button {
                             revealPuffinCaptures()
                         } label: {
@@ -279,6 +279,7 @@ struct SettingsView: View {
                         }
                         .buttonStyle(.bordered)
                         .tint(StrandPalette.accent)
+                        #endif
                         Spacer(minLength: 0)
                     }
                 }
@@ -286,32 +287,21 @@ struct SettingsView: View {
         }
     }
 
-    /// Flush the in-flight capture, then copy it to a user-chosen location via a save panel.
+    /// Flush the in-flight capture, then copy it to a user-chosen location (or share it on iOS).
     private func exportPuffinCaptures() {
         model.ble.flushPuffinCaptures()
         guard let src = live.puffinCaptureURL else { return }
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.json]
-        panel.nameFieldStringValue = src.lastPathComponent
-        panel.canCreateDirectories = true
-        guard panel.runModal() == .OK, let dest = panel.url else { return }
-        let fm = FileManager.default
-        do {
-            if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: dest) }
-            try fm.copyItem(at: src, to: dest)
-        } catch {
-            backupAlertTitle = "Export failed"
-            backupAlertMessage = error.localizedDescription
-            showBackupAlert = true
-        }
+        FileExport.exportFile(at: src)
     }
 
+    #if os(macOS)
     /// Flush, then reveal the capture file in Finder so the user can grab it directly.
     private func revealPuffinCaptures() {
         model.ble.flushPuffinCaptures()
         guard let url = live.puffinCaptureURL else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
+    #endif
 
     private var backupCard: some View {
         SettingsSection(
