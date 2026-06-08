@@ -165,6 +165,11 @@ fun SettingsScreen(vm: AppViewModel) {
 
     var backupBusy by remember { mutableStateOf(false) }
 
+    // Re-scan must request the runtime Bluetooth permission before scanning — without this the
+    // button calls connect() directly and silently no-ops on Android 12+ when the permission was
+    // denied/revoked (issue #1). Shared with Live's Connect via the one rememberRequestScan gate.
+    val requestScan = rememberRequestScan { vm.connect() }
+
     // "What's New" changelog sheet, reachable any time from About (mirrors the macOS
     // Settings → About "What's new" button). Persistence/gating lives in NoopRoot; this
     // is a manual re-open and writes nothing.
@@ -336,18 +341,19 @@ fun SettingsScreen(vm: AppViewModel) {
                     }
                 }
                 Text(
-                    strapStatusDetail(live.bonded, live.connected),
+                    strapStatusDetail(live.bonded, live.connected, live.scanning),
                     style = NoopType.subhead,
                     color = Palette.textSecondary,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Button(
-                        onClick = { vm.connect() },
+                        onClick = { requestScan() },
+                        enabled = !live.scanning,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Palette.accent,
                             contentColor = Palette.surfaceBase,
                         ),
-                    ) { Text("Re-scan", style = NoopType.captionNumber) }
+                    ) { Text(if (live.scanning) "Searching…" else "Re-scan", style = NoopType.captionNumber) }
 
                     OutlinedButton(
                         onClick = { vm.disconnect() },
@@ -699,7 +705,9 @@ private fun strapTone(bonded: Boolean, connected: Boolean): StrandTone = when {
     else -> StrandTone.Critical
 }
 
-private fun strapStatusDetail(bonded: Boolean, connected: Boolean): String = when {
+// `internal` (not private) so the unit test in the same package can assert the scanning branch.
+internal fun strapStatusDetail(bonded: Boolean, connected: Boolean, scanning: Boolean): String = when {
+    scanning -> "Searching for your WHOOP… make sure it's charged, on your wrist, and the official WHOOP app isn't connected to it."
     bonded && connected -> "Your strap is paired and sending data. Open Live for a real-time heart rate."
     connected -> "Connected. Finishing the secure pairing handshake…"
     bonded -> "Previously paired but not currently connected. Re-scan to reconnect."

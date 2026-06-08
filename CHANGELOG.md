@@ -17,6 +17,27 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 1.29 — Re-scan actually scans on Android
+
+- **Fixed (Android): Re-scan / Connect could silently do nothing on Android 12+** (issue #1; community
+  PRs #54/#55). A BLE scan needs the runtime `BLUETOOTH_SCAN`/`BLUETOOTH_CONNECT` (Nearby devices)
+  permission; the Settings **Re-scan** button called `vm.connect()` directly, so if the permission was
+  denied or revoked the scan threw `SecurityException`, the BLE layer swallowed it into a status note,
+  and no prompt was ever raised — the button did nothing (the Pixel 9 report). Live's Connect and the
+  onboarding flow already gated correctly; Settings was the overlooked path. The permission gate is now
+  a single shared Compose helper, `rememberRequestScan {}` (`ui/BlePermissions.kt`), used by both Live
+  and Settings, so no entry point can forget it. The gate must stay in the Compose layer — the
+  ViewModel can't raise an Activity-scoped prompt.
+- **Feedback while searching.** Settings now shows a "Searching…" status detail and disables Re-scan
+  while a scan is in flight (`enabled = !live.scanning`); Live's Connect shows "Searching…" and disables
+  too. The `scanning`/`statusNote` state already existed and was fully wired in `WhoopBleClient` (set on
+  scan start, cleared on every terminal path — timeout, found, connected, disconnect, permission error),
+  so no BLE/state changes were needed; only the buttons were missing the `enabled` gate.
+- **Live control buttons stay on one line** on narrow phones (`captionNumber` + `maxLines = 1`), which
+  also keeps the new longer "Searching…" label from wrapping the row.
+- macOS: lockstep version bump only — CoreBluetooth has no Android-style runtime-permission prompt, so
+  there's no analogous fix to make (the macOS scanning-feedback parity gap is tracked separately).
+
 ## 1.28 — Health Connect: correct source label + workout types (Android)
 
 - **Fixed (Android): Health Connect data showed under the "Apple Health" pill on Today** (issue #53,

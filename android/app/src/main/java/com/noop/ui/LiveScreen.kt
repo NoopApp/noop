@@ -7,10 +7,12 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
@@ -30,13 +32,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.ble.WhoopModel
 
@@ -51,23 +46,11 @@ fun LiveScreen(viewModel: AppViewModel) {
     val live by viewModel.live.collectAsStateWithLifecycle()
     val bpm by viewModel.bpm.collectAsStateWithLifecycle()
     val selectedModel by viewModel.selectedModel.collectAsStateWithLifecycle()
-    val context = LocalContext.current
 
-    // The runtime Bluetooth permission gates scanning. If it isn't granted, the Connect
-    // button REQUESTS it (rather than silently doing nothing), then connects once allowed.
-    val blePerms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-        arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
-    else
-        arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
-    val blePermLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions(),
-    ) { viewModel.connect() }   // granted -> scans; denied -> connect() shows the permission note
-    fun requestConnect() {
-        val granted = blePerms.all {
-            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
-        }
-        if (granted) viewModel.connect() else blePermLauncher.launch(blePerms)
-    }
+    // The runtime Bluetooth permission gates scanning. If it isn't granted, the Connect button
+    // REQUESTS it (rather than silently doing nothing), then connects once allowed. Shared with
+    // Settings → Re-scan via rememberRequestScan so no entry point can forget the gate (issue #1).
+    val requestConnect = rememberRequestScan { viewModel.connect() }
 
     // Keep the realtime HR stream on while this screen is visible (ref-counted in the ViewModel, so
     // navigating to Health Monitor — which also wants it — doesn't stop it). Refresh battery on bond.
@@ -147,36 +130,84 @@ fun LiveScreen(viewModel: AppViewModel) {
 
         // Controls.
         Row(horizontalArrangement = Arrangement.spacedBy(Metrics.gap), modifier = Modifier.fillMaxWidth()) {
+            // Compact, single-line labels: with three weight(1f) buttons in a row, the default
+            // body style + icon could wrap "Re-scan"/"Searching…" to two lines on narrow phones,
+            // making one button taller than the others. captionNumber + maxLines=1 keeps the row
+            // even. Connect disables while a scan is in flight so it can't be re-tapped mid-search.
             Button(
                 onClick = { requestConnect() },
                 modifier = Modifier.weight(1f),
+                enabled = !live.scanning,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Palette.accent,
                     contentColor = Palette.surfaceBase,
                 ),
             ) {
-                Icon(Icons.Filled.Bluetooth, contentDescription = null, modifier = Modifier.padding(end = 6.dp))
-                Text(if (live.connected) "Re-scan" else "Connect", style = NoopType.body)
+                Icon(
+                    Icons.Filled.Bluetooth,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(18.dp)
+                        .padding(end = 4.dp),
+                )
+                Text(
+                    when {
+                        live.scanning -> "Searching…"
+                        live.connected -> "Re-scan"
+                        else -> "Connect"
+                    },
+                    style = NoopType.captionNumber,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Clip,
+                )
             }
 
             OutlinedButton(
                 onClick = { viewModel.buzz(2) },
                 modifier = Modifier.weight(1f),
                 enabled = live.bonded,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Palette.accent),
             ) {
-                Icon(Icons.Filled.GraphicEq, contentDescription = null, modifier = Modifier.padding(end = 6.dp))
-                Text("Buzz", style = NoopType.body)
+                Icon(
+                    Icons.Filled.GraphicEq,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(18.dp)
+                        .padding(end = 4.dp),
+                )
+                Text(
+                    "Buzz",
+                    style = NoopType.captionNumber,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Clip,
+                )
             }
 
             OutlinedButton(
                 onClick = { viewModel.disconnect() },
                 modifier = Modifier.weight(1f),
                 enabled = live.connected,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Palette.statusCritical),
             ) {
-                Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.padding(end = 6.dp))
-                Text("End", style = NoopType.body)
+                Icon(
+                    Icons.Filled.Close,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(18.dp)
+                        .padding(end = 4.dp),
+                )
+                Text(
+                    "End",
+                    style = NoopType.captionNumber,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Clip,
+                )
             }
         }
 
