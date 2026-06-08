@@ -7,10 +7,12 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
@@ -150,33 +152,72 @@ fun LiveScreen(viewModel: AppViewModel) {
             Button(
                 onClick = { requestConnect() },
                 modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Palette.accent,
                     contentColor = Palette.surfaceBase,
                 ),
             ) {
-                Icon(Icons.Filled.Bluetooth, contentDescription = null, modifier = Modifier.padding(end = 6.dp))
-                Text(if (live.connected) "Re-scan" else "Connect", style = NoopType.body)
+                Icon(
+                    Icons.Filled.Bluetooth,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(18.dp)
+                        .padding(end = 4.dp),
+                )
+                Text(
+                    if (live.connected) "Re-scan" else "Connect",
+                    style = NoopType.captionNumber,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Clip,
+                )
             }
 
             OutlinedButton(
                 onClick = { viewModel.buzz(2) },
                 modifier = Modifier.weight(1f),
                 enabled = live.bonded,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Palette.accent),
             ) {
-                Icon(Icons.Filled.GraphicEq, contentDescription = null, modifier = Modifier.padding(end = 6.dp))
-                Text("Buzz", style = NoopType.body)
+                Icon(
+                    Icons.Filled.GraphicEq,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(18.dp)
+                        .padding(end = 4.dp),
+                )
+                Text(
+                    "Buzz",
+                    style = NoopType.captionNumber,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Clip,
+                )
             }
 
             OutlinedButton(
                 onClick = { viewModel.disconnect() },
                 modifier = Modifier.weight(1f),
                 enabled = live.connected,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Palette.statusCritical),
             ) {
-                Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.padding(end = 6.dp))
-                Text("End", style = NoopType.body)
+                Icon(
+                    Icons.Filled.Close,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(18.dp)
+                        .padding(end = 4.dp),
+                )
+                Text(
+                    "End",
+                    style = NoopType.captionNumber,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Clip,
+                )
             }
         }
 
