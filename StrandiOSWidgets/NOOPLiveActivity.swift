@@ -14,15 +14,16 @@ struct NOOPLiveActivity: Widget {
                     .foregroundStyle(StrandPalette.statusCritical)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(context.attributes.title)
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(StrandPalette.textSecondary)
                     Text("\(context.state.bpm.map(String.init) ?? "–") bpm")
                         .font(.system(size: 26, weight: .bold, design: .rounded))
+                        .foregroundStyle(StrandPalette.textPrimary)
                 }
                 Spacer()
                 if let r = context.state.recovery {
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text("Recovery").font(.caption2).foregroundStyle(.secondary)
-                        Text("\(r)%").font(.headline)
+                        Text("Recovery").font(.caption2).foregroundStyle(StrandPalette.textSecondary)
+                        Text("\(r)%").font(.headline).foregroundStyle(StrandPalette.textPrimary)
                     }
                 }
             }
