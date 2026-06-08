@@ -258,10 +258,10 @@ fall through to "unknown":
 > WHOOP 5.0 framing, the hello, the puffin aliases, the bond/session handshake and the command set
 > are implemented and now hardware-verified (see "Bonding and the puffin session" above): the strap
 > bonds, accepts the 4.0 command numbers, and performs a full historical offload, all decoding
-> CRC-valid. The remaining gap is the 5.0 **biometric field offsets** — `parseFrameWhoop5` still
-> exposes the inner record as a single unparsed region rather than inventing offsets. Mapping them
-> needs a clean capture of the historical data records (the type-47 equivalent) correlated against
-> ground truth; capture with `tools/linux-capture/whoop_capture.py --probe` and decode with `whoop-decode`.
+> CRC-valid. The 5.0 **biometric field offsets** are now mapped from real captures too — live
+> `REALTIME_DATA` (§5) and the historical type-47 record (version 18, §5) both decode HR / R-R /
+> gravity, validated against ground truth. Capture with `tools/linux-capture/whoop_capture.py
+> --history-only --history-ack` and decode with `whoop-decode`.
 
 ---
 
@@ -369,6 +369,61 @@ Each `METADATA` chunk carries a **`trim_cursor`** (u32 at frame offset 17). NOOP
 raw rows first, then sends `HISTORICAL_DATA_RESULT` (23) as a confirmed write echoing the chunk's
 `end_data` — only then may the strap forget that chunk. This makes the offload resumable: the durable
 `strap_trim` cursor means the next session resumes exactly where the last one stopped.
+
+### WHOOP 5.0 historical offload (hardware-verified)
+
+The ack is not just for resumability on WHOOP 5 — **it is what makes the offload progress at all.**
+Confirmed on a real worn WHOOP 5 (latest firmware) via `tools/linux-capture/`:
+
+- **Without acking**, the strap re-serves the *same* early chunk forever. Across 16 deterministic
+  re-requests the `trim_cursor` stayed frozen at `112193` and **zero** type-47 records arrived — only
+  `CONSOLE_LOGS`, small `EVENT`s and `METADATA` (HISTORY_START/END).
+- **With the chunk-ack handshake** — parse each `HISTORY_END`'s 8-byte `end_data` (trim u32 + next
+  u32) and write it back in a `HISTORICAL_DATA_RESULT` (23) confirmed write — the cursor walks forward
+  (`112193 → 112195 → … → 112474`) and the DSP records pour out. One 90 s capture pulled **3193**
+  CRC-valid type-47 frames. (`whoop_capture.py --history-only --history-ack`.)
+
+On WHOOP 5 the metadata fields sit at the 4.0 offsets **+4** (the envelope shift): `meta_type` at 10,
+`trim_cursor` at 21, `end_data` = `frame[21:29]`.
+
+### The WHOOP 5.0 type-47 record (version 18)
+
+The historical record's version byte is `frame[9]` on WHOOP 5 (the +4 image of the 4.0 `frame[5]`).
+Real WHOOP 5 hardware on the **latest firmware** emits **version 18 (124-byte)** — **not** the 4.0
+**v24** layout documented above, and **not** v24 shifted by +4. The repo schema does not contain v18;
+this device's firmware revision simply uses a different layout, and a naive "v24 + 4" decodes to
+garbage (HR `0`, gravity overflow). The fields below were read off real frames at their **absolute
+5.0 offsets** and cross-checked physiologically, never assumed (`decodeWhoop5Historical` in
+`Interpreter.swift`, parity test `Whoop5HistoricalTests.swift`):
+
+| Offset | Field | Validation |
+|---|---|---|
+| 9 | `hist_version` (u8) = 18 | discriminates the layout |
+| 15 | `unix` (u32) | monotonic, +1 s |
+| 22 | `heart_rate` (u8) | **matched the 2A37-verified live HR exactly at all 96 overlapping timestamps** (mean \|Δ\| 0.00 bpm); note this is v24's `21`+1, **not** +4 |
+| 23 | `rr_count` (u8) | matches #valid R-R intervals 100 % (1141/1143) |
+| 24 + 2·i | `rr[i]` (u16, ms) | 60000/mean(R-R) ≈ HR for 88 % (rest are HR-averaging) |
+| 45 / 49 / 53 | `gravity_x/y/z` (f32, g) | \|g\| ≈ 1.0 for 100 % of 500 records; v18 has **one** triplet (not v24's two) |
+
+The strongest check on the HR offset: where a historical record and a live `REALTIME_DATA` (§5, 2A37
+ground-truth-verified) frame share a timestamp, the historical HR equalled the live HR at **96/96**
+samples — so HR@22 is anchored to hardware ground truth, not just internally consistent.
+
+PPG / SpO₂ / skin-temp live further in the 124-byte record but lack on-device ground truth, so they
+are left as a single raw region rather than guessed (project rule: real captures, never invented
+offsets). The decoded fields feed the existing `extractHistoricalStreams` path unchanged, so WHOOP 5
+historical HR / HRV / gravity land in the datastore exactly like 4.0.
+
+The same WHOOP 5 also emits an **88-byte type-47 record with version byte 26** — its body is a
+high-rate big-endian i16 waveform buffer (a PPG/IMU trace), distinct from the v18 per-second summary.
+It is not mapped; `decodeWhoop5Historical` keys on the version byte and falls back to a labelled raw
+region for any version other than 18, so an unknown record is described, never mis-decoded.
+
+> **Firmware-version caveat.** The 4.0 `v24` layout in `whoop_protocol.json` reflects one firmware
+> revision (the `my-whoop` reference device); a given strap may run older or newer firmware with a
+> different record version. Always key the decode on the version byte and anchor offsets to a real
+> capture from the device in hand — do not assume one generation's documented layout transfers to
+> another, even within the same generation.
 
 ---
 

@@ -39,6 +39,11 @@ public struct ParsedFrame: Codable, Equatable {
     let raw = UInt16(f[off]) | (UInt16(f[off + 1]) << 8)
     return Int(Int16(bitPattern: raw))
 }
+@inline(__always) private func readF32(_ f: [UInt8], _ off: Int) -> Double? {
+    guard off + 4 <= f.count else { return nil }
+    let bits = UInt32(f[off]) | (UInt32(f[off + 1]) << 8) | (UInt32(f[off + 2]) << 16) | (UInt32(f[off + 3]) << 24)
+    return Double(Float(bitPattern: bits))   // float32 -> Double is exact, no rounding
+}
 
 /// Read a schema dtype at off; returns the integer value or nil if out of range.
 private func readDType(_ f: [UInt8], _ off: Int, _ dtype: String) -> Int? {
@@ -231,6 +236,10 @@ private func parseFrameWhoop5(_ frame: [UInt8]) -> ParsedFrame {
                 }
             }
             fb.parsed["rr_intervals"] = .intArray(rrs)
+        } else if spec!.post == "historical_data" {
+            decodeWhoop5Historical(frame, fb: fb, payloadEnd: payloadEnd)
+        } else if spec!.post == "metadata" {
+            decodeWhoop5Metadata(frame, fb: fb)
         } else if let payloadEnd = payloadEnd, innerStart + 3 < payloadEnd, payloadEnd <= frame.count {
             // Other types: static fields decoded above; the remaining variable body is kept raw —
             // its 4.0 post-hook awaits per-type 5.0 hardware verification before we apply it at +4.
@@ -253,6 +262,84 @@ private func parseFrameWhoop5(_ frame: [UInt8]) -> ParsedFrame {
     return ParsedFrame(ok: true, typeName: typeName, seq: seq, cmdName: cmdName,
                        crcOK: crcOK, lenBytes: frame.count, rawHex: rawHex,
                        fields: fb.fields, parsed: fb.parsed)
+}
+
+/// Decode a WHOOP 5.0 HISTORICAL_DATA (type 47) DSP biometric record.
+///
+/// The layout version is carried in the byte at frame[9] — the inner record's seq slot, which the
+/// historical packet reuses for its layout version exactly as WHOOP 4.0 does (version at frame[5],
+/// +4 here). Real WHOOP 5 hardware on the latest firmware emits **version 18**, captured 2026-06-08
+/// and unlocked via the HISTORICAL_DATA_RESULT chunk-ack handshake (see docs §5).
+///
+/// v18 is NOT the repo's 4.0 v24 layout shifted by +4 — that firmware revision is not what this
+/// device emits, and a naive +4 decodes to garbage (HR 0, gravity overflow). Every offset below is
+/// read directly off real frames at its absolute 5.0 position and cross-checked physiologically:
+///   • unix monotonic at +1 s,  • rr_count matches the number of valid R-R intervals (100%),
+///   • 60000/mean(R-R) ≈ heart_rate (88%, the rest being HR-averaging cases),  • |gravity| ≈ 1 g
+///     (100% of 500 records).
+/// PPG / SpO₂ / skin-temp live further in the 124-byte record but lack on-device ground truth, so
+/// they are left as a raw region rather than guessed (project rule: real captures, never invented
+/// offsets).
+private func decodeWhoop5Historical(_ frame: [UInt8], fb: FieldBuilder, payloadEnd: Int?) {
+    let version = frame.count > 9 ? Int(frame[9]) : -1
+    fb.parsed["hist_version"] = .int(version)
+    fb.add(9, 1, "hist_version", "meta", value: .int(version))
+    guard version == 18 else {
+        // Unknown historical layout — describe it faithfully without inventing offsets.
+        if let payloadEnd = payloadEnd, 11 < payloadEnd, payloadEnd <= frame.count {
+            fb.region(11, payloadEnd, "HISTORICAL_DATA v\(version) (unmapped layout)", "unknown")
+        }
+        return
+    }
+    if let unix = readDType(frame, 15, "u32") {
+        fb.add(15, 4, "unix", "time", value: .int(unix), note: "real unix seconds")
+    }
+    if let hr = readDType(frame, 22, "u8") {
+        fb.add(22, 1, "heart_rate", "hr", value: .int(hr), note: "bpm")
+    }
+    let rrn = readDType(frame, 23, "u8") ?? 0
+    fb.add(23, 1, "rr_count", "rr", value: .int(rrn))
+    var rrs: [Int] = []
+    for i in 0..<min(rrn, 4) {
+        let off = 24 + i * 2
+        if let v = readDType(frame, off, "u16"), v > 0 {
+            fb.add(off, 2, "rr[\(i)]", "rr", value: .int(v), note: "ms")
+            rrs.append(v)
+        }
+    }
+    fb.parsed["rr_intervals"] = .intArray(rrs)
+    for (name, off) in [("gravity_x", 45), ("gravity_y", 49), ("gravity_z", 53)] {
+        if let d = readF32(frame, off) {
+            fb.add(off, 4, name, "accel", value: .double(d), note: "g")
+        }
+    }
+    // Optical channels (PPG green/red-IR, SpO₂ red/IR, skin-temp, ambient) sit past offset 57 but
+    // are not yet ground-truth-mapped; keep them as one honest raw region.
+    if let payloadEnd = payloadEnd, 57 < payloadEnd, payloadEnd <= frame.count {
+        fb.region(57, payloadEnd, "unmapped optical (PPG/SpO₂/skin-temp)", "unknown")
+    }
+}
+
+/// Decode WHOOP 5.0 METADATA (type 49) chunk fields so the historical-offload state machine can act
+/// on them. `meta_type` is already added by the static-schema walk (4.0 @6 → 5.0 @10); a HISTORY_END
+/// additionally carries the chunk's `unix` and `trim_cursor`, which `classifyHistoricalMeta` needs to
+/// drive the `HISTORICAL_DATA_RESULT` ack. Offsets are the 4.0 metadata post-hook positions + 4,
+/// verified on real WHOOP 5 HISTORY_END frames (trim decodes consistently across a whole capture).
+/// `end_data` to echo back in the ack is `frame[21..29]` (trim u32 + next u32).
+private func decodeWhoop5Metadata(_ frame: [UInt8], fb: FieldBuilder) {
+    if let unix = readDType(frame, 11, "u32") { fb.add(11, 4, "unix", "time", value: .int(unix)) }
+    if let ss = readDType(frame, 15, "u16") { fb.add(15, 2, "subsec", "time", value: .int(ss)) }
+    if let trim = readDType(frame, 21, "u32") {
+        fb.add(21, 4, "trim_cursor", "meta", value: .int(trim), note: "ack with this to advance")
+    }
+}
+
+/// Build the WHOOP 5.0 historical-offload ack (`HISTORICAL_DATA_RESULT`, cmd 23) for one HISTORY_END
+/// chunk. `endData` is the chunk's verbatim 8-byte trim block (`frame[21..29]`); the payload is
+/// `[0x01] + endData`, framed as a puffin COMMAND. This is the WHOOP 5 image of `ackHistoricalChunk`
+/// in `BLEManager`, and the byte-for-byte twin of the Python `build_history_ack` proven on hardware.
+public func whoop5HistoricalAckFrame(endData: [UInt8], seq: UInt8) -> [UInt8] {
+    puffinCommandFrame(cmd: 23, seq: seq, payload: [0x01] + endData)
 }
 
 @inline(__always)
