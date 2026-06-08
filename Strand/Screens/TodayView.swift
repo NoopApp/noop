@@ -37,7 +37,7 @@ struct TodayView: View {
     private let grid = [GridItem(.adaptive(minimum: 168), spacing: NoopMetrics.gap)]
 
     var body: some View {
-        ScreenScaffold(title: "Control Center", subtitle: dateLine) {
+        ScreenScaffold(title: "Control Center", subtitle: "\(dateLine)") {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                 HealthAlertBanner()
                 if repo.today?.recovery == nil {
@@ -164,8 +164,8 @@ struct TodayView: View {
                 // Right: the plain-English read-out, equal width.
                 InsightCard(
                     category: "Recovery",
-                    status: synthesisWord(score),
-                    detail: synthesisDetail(d),
+                    status: "\(synthesisWord(score))",
+                    detail: "\(synthesisDetail(d))",
                     statusColor: score.map { StrandPalette.recoveryColor($0) } ?? StrandPalette.textTertiary
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -277,7 +277,7 @@ struct TodayView: View {
                 LazyVGrid(columns: grid, alignment: .leading, spacing: NoopMetrics.gap) {
                     ForEach(Array(workouts.prefix(6).enumerated()), id: \.offset) { _, w in
                         StatTile(
-                            label: w.sport,
+                            label: "\(w.sport)",
                             value: workoutDuration(w),
                             caption: workoutCaption(w),
                             accent: StrandPalette.strainColor(w.strain ?? 0),
@@ -319,7 +319,7 @@ struct TodayView: View {
     @ViewBuilder
     private func sourceRow(badge: String, tint: Color, present: Bool, detail: String) -> some View {
         HStack(spacing: 10) {
-            SourceBadge(badge, tint: present ? tint : StrandPalette.textTertiary)
+            SourceBadge("\(badge)", tint: present ? tint : StrandPalette.textTertiary)
             Spacer()
             Text(present ? detail : "Not connected")
                 .font(StrandFont.captionNumber)

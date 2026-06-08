@@ -39,7 +39,7 @@ struct NotificationSettingsView: View {
                 .tint(StrandPalette.accent)
 
                 HStack(spacing: 10) {
-                    StatePill(strapPillTitle, tone: strapPillTone, pulsing: live.connected)
+                    StatePill("\(strapPillTitle)", tone: strapPillTone, pulsing: live.connected)
                     StatePill("\(store.enabledCount) app\(store.enabledCount == 1 ? "" : "s") on",
                               tone: store.enabledCount > 0 ? .positive : .neutral,
                               showsDot: false)

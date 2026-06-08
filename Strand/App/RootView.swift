@@ -24,6 +24,34 @@ enum NavItem: String, CaseIterable, Identifiable, Hashable {
     case support = "Support"
 
     var id: String { rawValue }
+
+    /// Localized sidebar label. Each case maps to a string literal so Xcode extracts
+    /// it into the String Catalog as an English (US) base entry.
+    var titleKey: LocalizedStringKey {
+        switch self {
+        case .today: return "Today"
+        case .intelligence: return "Intelligence"
+        case .coach: return "Coach"
+        case .live: return "Live"
+        case .breathe: return "Breathe"
+        case .intervals: return "Intervals"
+        case .explore: return "Explore"
+        case .compare: return "Compare"
+        case .insights: return "Insights"
+        case .sleep: return "Sleep"
+        case .trends: return "Trends"
+        case .workouts: return "Workouts"
+        case .health: return "Health"
+        case .stress: return "Stress"
+        case .appleHealth: return "Apple Health"
+        case .dataSources: return "Data Sources"
+        case .notifications: return "Notifications"
+        case .automation: return "Automations"
+        case .settings: return "Settings"
+        case .support: return "Support"
+        }
+    }
+
     var icon: String {
         switch self {
         case .today: return "circle.hexagongrid.fill"
@@ -61,7 +89,7 @@ struct RootView: View {
         NavigationSplitView {
             VStack(spacing: 0) {
                 List(NavItem.allCases, selection: $selection) { item in
-                    Label(item.rawValue, systemImage: item.icon)
+                    Label(item.titleKey, systemImage: item.icon)
                         .font(.system(size: 13, weight: .medium))
                         .tag(item)
                 }

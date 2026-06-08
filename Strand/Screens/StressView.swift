@@ -105,7 +105,7 @@ struct StressView: View {
                 HStack {
                     Text("Stress monitor").strandOverline()
                     Spacer()
-                    StatePill(model.band.title, tone: model.band.tone, showsDot: true)
+                    StatePill("\(model.band.title)", tone: model.band.tone, showsDot: true)
                 }
                 StressGauge(score: model.score, band: model.band)
                     .frame(maxWidth: .infinity)
@@ -164,7 +164,7 @@ struct StressView: View {
 
     /// A vs-baseline marker as a fixed-height StatTile. The delta is tinted by
     /// whether the move is toward stress (warning) or recovery (positive).
-    private func markerTile(label: String, value: String, delta: Double?, accent: Color, higherIsStress: Bool) -> some View {
+    private func markerTile(label: LocalizedStringKey, value: String, delta: Double?, accent: Color, higherIsStress: Bool) -> some View {
         let deltaText: String?
         let deltaColor: Color
         if let delta, abs(delta) >= 0.5 {
@@ -667,7 +667,7 @@ private struct StressPreviewHarness: View {
                         HStack {
                             Text("Stress monitor").strandOverline()
                             Spacer()
-                            StatePill(band.title, tone: band.tone)
+                            StatePill("\(band.title)", tone: band.tone)
                         }
                         StressGauge(score: score, band: band)
                             .frame(maxWidth: .infinity)

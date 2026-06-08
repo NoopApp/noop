@@ -158,7 +158,7 @@ private struct HeartRateSection: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
 
-            StatePill(zoneLabel(hasLiveHR: hasLiveHR, zone: zone, fraction: fraction),
+            StatePill("\(zoneLabel(hasLiveHR: hasLiveHR, zone: zone, fraction: fraction))",
                       tone: hasLiveHR ? .accent : .neutral,
                       showsDot: hasLiveHR,
                       pulsing: hasLiveHR)
@@ -188,7 +188,7 @@ private struct VitalsSection: View {
             ) {
                 ForEach(vitals) { v in
                     StatTile(
-                        label: v.label,
+                        label: "\(v.label)",
                         value: v.formattedValue ?? "—",
                         caption: v.stateCaption,
                         accent: v.accent

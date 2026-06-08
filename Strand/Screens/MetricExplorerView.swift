@@ -116,7 +116,7 @@ struct MetricExplorerView: View {
                     let metrics = MetricCatalog.inCategory(category)
                     if !metrics.isEmpty {
                         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-                            SectionHeader(category, overline: "Category",
+                            SectionHeader("\(category)", overline: "Category",
                                           trailing: "\(metrics.count)")
                             NoopCard(padding: 0) {
                                 VStack(spacing: 0) {
@@ -390,7 +390,7 @@ struct MetricDetailView: View {
             ? "Sparse — widened to \(effectiveRange.name) · \(windowed.count) readings"
             : "\(windowed.count) readings · \(range.name)"
         return ChartCard(
-            title: metric.title,
+            title: "\(metric.title)",
             subtitle: subtitle,
             trailing: "\(heroValue) · \(asOf)"
         ) {

@@ -341,7 +341,7 @@ struct CompareView: View {
     private func overlaySection(_ series: [CompareSeries]) -> some View {
         let nonEmpty = series.filter { !$0.rows.isEmpty }
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-            SectionHeader("Overlay", overline: range.phrase)
+            SectionHeader("Overlay", overline: "\(range.phrase)")
             ChartCard(
                 title: "Normalized overlay",
                 subtitle: anyWidened
