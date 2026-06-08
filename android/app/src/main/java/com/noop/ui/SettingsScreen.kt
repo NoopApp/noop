@@ -179,6 +179,9 @@ fun SettingsScreen(vm: AppViewModel) {
     // on. SharedPreferences isn't reactive, so the Switch mirrors into a local state.
     var backgroundConnection by remember { mutableStateOf(NoopPrefs.backgroundConnection(context)) }
 
+    // "Debug logging" — mirror the strap log to logcat (adb). Default OFF so normal users don't.
+    var debugLogging by remember { mutableStateOf(NoopPrefs.debugLogging(context)) }
+
     // SAF launchers — CreateDocument for export, OpenDocument for import.
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream"),
@@ -385,6 +388,46 @@ fun SettingsScreen(vm: AppViewModel) {
                             uncheckedTrackColor = Palette.surfaceInset,
                             uncheckedBorderColor = Palette.hairline,
                         ),
+                    )
+                }
+
+                // Diagnostics: "Debug logging" mirrors the strap log to logcat (adb). Default OFF — a
+                // normal user never needs to write the connection log to the system log; the in-app log
+                // (and the "Share strap log" export below) work regardless. Developers flip this on to
+                // watch the connection live over `adb logcat -s WhoopBleClient`.
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Debug logging",
+                            style = NoopType.subhead,
+                            color = Palette.textPrimary,
+                        )
+                        Text(
+                            "Also write the strap log to the system log (logcat) for development over adb. Off by default — the in-app log and “Share strap log” below work either way.",
+                            style = NoopType.footnote,
+                            color = Palette.textTertiary,
+                        )
+                    }
+                    Switch(
+                        checked = debugLogging,
+                        onCheckedChange = {
+                            debugLogging = it
+                            vm.setDebugLogging(it)
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Palette.surfaceBase,
+                            checkedTrackColor = Palette.accent,
+                            uncheckedThumbColor = Palette.textSecondary,
+                            uncheckedTrackColor = Palette.surfaceInset,
+                            uncheckedBorderColor = Palette.hairline,
+                        ),
+                        modifier = Modifier.semantics {
+                            contentDescription = "Debug logging"
+                        },
                     )
                 }
 

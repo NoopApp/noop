@@ -293,9 +293,23 @@ class WhoopBleClient(
     /** All BLE work hops onto the main looper, matching CBCentralManager(queue: .main). */
     private val handler = Handler(Looper.getMainLooper())
 
+    /**
+     * Mirror the strap log to logcat (`Log.d`). Default OFF — a normal user has no reason to write the
+     * connection log to the system log, and shouldn't have to. The in-app ring buffer below always
+     * records regardless, so the "Share strap log" export still works for everyone (issues #17/#18);
+     * this gate only controls the adb-visible `Log.d`, which is the tool developers use to watch a
+     * connection live (`adb logcat -s WhoopBleClient`). Driven by Settings → Strap → "Debug logging"
+     * (persisted as [com.noop.ui.NoopPrefs.KEY_DEBUG_LOGGING]); the value is pushed down from the
+     * composition root so this low-level client never depends on the UI/prefs layer. @Volatile because
+     * [log] runs on both the GATT binder thread and the main looper.
+     */
+    @Volatile
+    var debugLogcat: Boolean = false
+
     /** In-memory ring buffer of the strap log so it can be exported from the UI for bug reports.
-     *  `log()` writes here (under [logBuffer]'s monitor) in addition to logcat; Android's `Log.d`
-     *  isn't reachable by a normal user, which is why people couldn't share logs (issues #17/#18). */
+     *  `log()` always writes here (under [logBuffer]'s monitor); logcat mirroring is opt-in via
+     *  [debugLogcat]. Android's `Log.d` isn't reachable by a normal user, which is why the in-app
+     *  buffer + "Share strap log" exist (issues #17/#18). */
     private val logBuffer = ArrayDeque<String>()
     private val logTimeFmt = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
 
@@ -1553,7 +1567,9 @@ class WhoopBleClient(
     private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
 
     private fun log(s: String) {
-        Log.d(TAG, s)
+        // logcat is opt-in (Settings → Strap → "Debug logging"); default OFF so normal users don't
+        // emit the strap log to the system log. The in-app ring buffer below always records.
+        if (debugLogcat) Log.d(TAG, s)
         // Mirror into the in-app ring buffer (format under the lock — SimpleDateFormat isn't
         // thread-safe and log() is called from both the GATT binder thread and the main looper).
         synchronized(logBuffer) {

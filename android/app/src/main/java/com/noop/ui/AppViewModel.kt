@@ -185,6 +185,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Flip "Debug logging" (driven by Settings → Strap). Persists the preference and pushes it to the
+     * live BLE client so it takes effect immediately. Default OFF: the strap log stays in the in-app
+     * ring buffer (and the "Share strap log" export) but is not mirrored to logcat unless the user opts
+     * in — so a normal user never writes the connection log to the system log. With it on, developers
+     * can watch the connection live over `adb logcat -s WhoopBleClient`.
+     */
+    fun setDebugLogging(enabled: Boolean) {
+        NoopPrefs.setDebugLogging(appContext, enabled)
+        ble.debugLogcat = enabled
+    }
+
     /** How many screens currently want the live HR stream (Live, Health Monitor, …). The stream stays
      *  on while ANY of them is visible, so navigating between them doesn't stop it (issue #18: leaving
      *  Live sent TOGGLE_REALTIME_HR=0, leaving Health Monitor with a frozen value). */

@@ -188,6 +188,39 @@ schema scaffolding inherited from the upstream collection library; in NOOP's off
 configuration nothing uploads, and the raw buffer is purely a local replay/recovery
 aid.)
 
+### 2.4 Diagnostics: the strap connection log
+
+When a strap won't connect or behaves oddly, the single most useful thing a user can
+send is the connection log. NOOP keeps one so it can be shared **without** needing
+`adb` or a developer setup (this is what made issues #17/#18 reportable), and the same
+log doubles as the primary tool for **debugging and protocol development** (see
+`ANDROID.md` → "Debugging the strap connection").
+
+**What it is.** The BLE client (`android/.../ble/WhoopBleClient.kt`,
+`Strand/BLE/BLEManager.swift` on macOS) keeps an **in-memory ring buffer** — the last
+2000 log lines on Android — of the connection's control flow: scan results (strap
+advertised name + RSSI), the bond/handshake state machine, command names with their
+outbound payload **hex**, and offload progress (trim cursors, chunk acks). It is held
+in RAM only; the "Share strap log" button writes it to a private app-cache file at
+share time and hands that file to the OS share sheet. Nothing is uploaded by NOOP.
+
+**What it does *not* contain.** No account credentials (there is no account), no
+decoded biometric *values* (heart-rate numbers, R-R intervals, SpO₂, skin-temp are not
+written to the log — only control-plane command names and frame-routing), and no
+hello-token or serial hex (the handshake lines log *that* a step happened, not its
+secret payload). The one mild identifier is the strap's advertised name (e.g.
+`WHOOP 5AG…`), which the user chooses to include when they tap Share.
+
+**logcat is opt-in (debug mode), off by default.** By default the log is mirrored
+**only** to the in-app buffer — it is *not* written to Android's system log
+(`Log.d`/logcat). A user has no reason to emit the connection log to the device-wide
+log, so they don't. Developers who want to watch a session live over
+`adb logcat -s WhoopBleClient` turn on **Settings → Strap → "Debug logging"**
+(persisted as `NoopPrefs.KEY_DEBUG_LOGGING`, default `false`); the flag drives
+`WhoopBleClient.debugLogcat`, which gates the single `Log.d` call. The in-app buffer
+and the "Share strap log" export work the same whether or not debug logging is on, so
+the diagnostic path is always available without ever defaulting users into logcat.
+
 ---
 
 ## 3. Threat model
@@ -358,6 +391,7 @@ bundle of CSV files, but the same defensive posture applies.
 | CSV import | Zip bomb / oversized entries | 256 MB per-entry cap (declared + running budget); CRC32 verify | `StrandImport/WhoopExportImporter.swift` |
 | CSV import | Arbitrary archive members | Filename allow-list; tolerant optional-column parsing | `StrandImport/WhoopExportImporter.swift` |
 | Data at rest | Disk theft / offline access | Relies on FileVault + sandbox container; SQLCipher available as an option | `WhoopStore/WhoopStore.swift` |
+| Diagnostics log | Leaking the strap log to the device-wide system log | In-app ring buffer only; logcat mirroring is **opt-in** (Settings → Strap → "Debug logging", default off); no biometric values / tokens logged (§2.4) | `android/.../ble/WhoopBleClient.kt` (`debugLogcat`), `android/.../ui/MainActivity.kt` (`NoopPrefs`) |
 
 ---
 
