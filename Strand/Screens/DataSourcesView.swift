@@ -27,18 +27,19 @@ struct DataSourcesView: View {
     private var whoopCard: some View {
         card(title: "WHOOP Export", icon: "square.and.arrow.down.fill",
              subtitle: "Import your full WHOOP history — recovery, strain, sleep, workouts — from a data export (.zip). Works for WHOOP 4.0, 5.0 and MG. Get one at app.whoop.com → Data Management.") {
+            let importingWhoop = model.isImporting(.whoop)
             HStack(spacing: 12) {
                 Button {
                     presentImporter(.whoop)
                 } label: {
-                    Label(model.whoopImporting ? "Importing…" : "Choose export…",
+                    Label(importingWhoop ? "Importing…" : "Choose export…",
                           systemImage: "tray.and.arrow.down")
                         .padding(.horizontal, 6)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(StrandPalette.accent)
-                .disabled(model.whoopImporting)
-                if model.whoopImporting { ProgressView().controlSize(.small) }
+                .disabled(model.hasActiveImport)
+                if importingWhoop { ProgressView().controlSize(.small) }
             }
             if let s = model.whoopImportSummary {
                 Text(s).font(StrandFont.subhead).foregroundStyle(StrandPalette.statusPositive)
@@ -51,16 +52,17 @@ struct DataSourcesView: View {
     private var appleHealthCard: some View {
         card(title: "Apple Health", icon: "heart.fill",
              subtitle: "Import an Apple Health export (Health app → profile → Export All Health Data → export.zip). 7 years of HR, HRV, sleep, SpO₂, steps and more — streamed locally. Large exports take a minute or two.") {
+            let importingAppleHealth = model.isImporting(.appleHealth)
             HStack(spacing: 12) {
                 Button { presentImporter(.appleHealth) } label: {
-                    Label(model.appleImporting ? "Working…" : "Choose export.zip…", systemImage: "tray.and.arrow.down")
+                    Label(importingAppleHealth ? "Working…" : "Choose export.zip…", systemImage: "tray.and.arrow.down")
                         .padding(.horizontal, 6)
                 }
                 .buttonStyle(.borderedProminent).tint(StrandPalette.accent)
-                .disabled(model.appleImporting)
-                if model.appleImporting { ProgressView().controlSize(.small) }
+                .disabled(model.hasActiveImport)
+                if importingAppleHealth { ProgressView().controlSize(.small) }
             }
-            if let s = model.appleImportSummary {
+            if let s = model.appleHealthImportSummary {
                 Text(s).font(StrandFont.subhead).foregroundStyle(StrandPalette.statusPositive)
             }
         }

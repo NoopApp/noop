@@ -3,6 +3,12 @@ import Combine
 import WhoopProtocol
 import WhoopStore
 
+/// Data source currently running an import from the Data Sources screen.
+enum DataSourceImportKind {
+    case whoop
+    case appleHealth
+}
+
 /// Root app state: owns the live BLE connection state and the CoreBluetooth engine.
 /// More subsystems (Repository, AnalyticsEngine, ImportCoordinator) get wired in here
 /// in later milestones.
@@ -38,14 +44,20 @@ final class AppModel: ObservableObject {
     private var hrvBaseline: Double = 0
     private var lastStressBuzzAt: Date = .distantPast
 
-    /// Import status surfaced to the Data Sources screen.
-    // Per-source import state so a WHOOP import and an Apple Health import don't share one status line
-    // (importing one was overwriting the other's message in the WHOOP card — issue #40). They land in
-    // separate stores already; this just keeps the UI honest.
-    @Published var whoopImporting = false
+    /// Import source currently writing to the local store, if any.
+    @Published private var activeImportSource: DataSourceImportKind?
+    /// Last WHOOP export import result surfaced in the WHOOP card.
     @Published var whoopImportSummary: String?
-    @Published var appleImporting = false
-    @Published var appleImportSummary: String?
+    /// Last Apple Health import result surfaced in the Apple Health card.
+    @Published var appleHealthImportSummary: String?
+
+    /// True while any data-source import is writing to the local store.
+    var hasActiveImport: Bool { activeImportSource != nil }
+
+    /// Returns true only for the source currently importing.
+    func isImporting(_ source: DataSourceImportKind) -> Bool {
+        activeImportSource == source
+    }
 
     /// Smoothed, display-ready live heart rate — median over a short window, spike-filtered.
     /// Every screen should show THIS, not the raw per-beat value (which swings with HRV).
@@ -266,14 +278,14 @@ final class AppModel: ObservableObject {
 
     /// Import a Whoop CSV export (.zip or folder) → on-device store, then refresh the dashboard.
     func importWhoop(url: URL) {
-        whoopImporting = true
-        whoopImportSummary = nil
+        beginImport(.whoop)
         Task {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             do {
                 guard let store = await repo.storeHandle() else {
-                    whoopImportSummary = "Couldn't open the local store."; whoopImporting = false; return
+                    finishImport(.whoop, summary: "Couldn't open the local store.")
+                    return
                 }
                 let summary = try await WhoopImporter.importExport(url: url, into: store, deviceId: deviceId)
                 await repo.refresh()
@@ -282,33 +294,53 @@ final class AppModel: ObservableObject {
                     let f = DateFormatter(); f.dateFormat = "MMM yyyy"
                     span = " · \(f.string(from: a))–\(f.string(from: b))"
                 } else { span = "" }
-                whoopImportSummary = "Imported \(summary.recordCount) records\(span)"
+                finishImport(.whoop, summary: "Imported \(summary.recordCount) records\(span)")
             } catch {
-                whoopImportSummary = "Import failed: \(error)"
+                finishImport(.whoop, summary: "Import failed: \(error)")
             }
-            whoopImporting = false
         }
     }
 
     /// Import an Apple Health export (export.zip) — streams + aggregates per-day into the store
     /// under the `apple-health` source, then refreshes. Large exports take ~1–2 minutes.
     func importAppleHealth(url: URL) {
-        appleImporting = true
-        appleImportSummary = nil
+        beginImport(.appleHealth)
         Task {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             do {
                 guard let store = await repo.storeHandle() else {
-                    appleImportSummary = "Couldn't open the local store."; appleImporting = false; return
+                    finishImport(.appleHealth, summary: "Couldn't open the local store.")
+                    return
                 }
                 let summary = try await AppleHealthImport.importExport(url: url, into: store, deviceId: appleDeviceId)
                 await repo.refresh()
-                appleImportSummary = "Apple Health: imported \(summary.recordCount) records"
+                finishImport(.appleHealth, summary: "Imported \(summary.recordCount) records")
             } catch {
-                appleImportSummary = "Apple Health import failed: \(error)"
+                finishImport(.appleHealth, summary: "Import failed: \(error)")
             }
-            appleImporting = false
         }
+    }
+
+    /// Marks a source as importing and clears only that source's old status text.
+    private func beginImport(_ source: DataSourceImportKind) {
+        activeImportSource = source
+        switch source {
+        case .whoop:
+            whoopImportSummary = nil
+        case .appleHealth:
+            appleHealthImportSummary = nil
+        }
+    }
+
+    /// Stores the completed import summary on the matching source card.
+    private func finishImport(_ source: DataSourceImportKind, summary: String) {
+        switch source {
+        case .whoop:
+            whoopImportSummary = summary
+        case .appleHealth:
+            appleHealthImportSummary = summary
+        }
+        activeImportSource = nil
     }
 }
