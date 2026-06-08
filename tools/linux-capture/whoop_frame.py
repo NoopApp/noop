@@ -21,8 +21,14 @@ import zlib
 # COMMAND packet type byte (PacketType.COMMAND).
 COMMAND_TYPE = 35
 
-# Command numbers (subset; mirrors WhoopCommand in Commands.swift).
+# Command numbers (subset; mirrors WhoopCommand in Commands.swift). The numbers are shared with the
+# 5.0 puffin command set — only the framing differs (CRC8 here vs CRC16 there).
 CMD_GET_BATTERY_LEVEL = 26
+CMD_GET_CLOCK = 11
+CMD_REPORT_VERSION_INFO = 7
+CMD_GET_EXTENDED_BATTERY_INFO = 98
+CMD_GET_DATA_RANGE = 34
+CMD_GET_HELLO_HARVARD = 35
 
 # WHOOP 5.0 session-start frame, written verbatim to fd4b0002 to open the puffin session.
 # (DeviceFamily.whoop5ClientHello — a fully-formed type-35 COMMAND with valid CRC16 header + CRC32.)

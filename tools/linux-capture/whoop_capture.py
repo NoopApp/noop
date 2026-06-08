@@ -155,18 +155,29 @@ async def run(args):
     cfg = WHOOP5 if args.model == "whoop5" else WHOOP4
     cap = Capture(args.model, args.out)
 
-    address = args.address
-    if not address:
+    target = args.address
+    if not args.address:
         device = await find_address(cfg, args.name_filter)
         if device is None:
             print("no WHOOP strap found. Make sure it is awake, near, and not bonded to a phone.")
             return
-        address = device.address
-        print(f"found {device.name or '?'} @ {address}")
+        target = device
+        print(f"found {device.name or '?'} @ {device.address}")
+    else:
+        # Even with an explicit --address, resolve the device via a scan first: BlueZ connects far more
+        # reliably to a freshly-discovered device object than to a bare address, especially for a strap
+        # that just woke (a bare-address connect raises "Device ... not found" if BlueZ has no cache).
+        print(f"scanning to resolve {args.address} …")
+        device = await BleakScanner.find_device_by_address(args.address, timeout=20.0)
+        if device is None:
+            print(f"{args.address} not found. Wake the strap (wear or tap it so it advertises) and "
+                  f"make sure the phone's Bluetooth is OFF, then retry.")
+            return
+        target = device
 
     stop = asyncio.Event()
 
-    async with BleakClient(address) as client:
+    async with BleakClient(target) as client:
         print(f"connected: {client.is_connected}")
 
         # Just-works bond: the protocol bonds via a single CONFIRMED WRITE (the session frame below),
@@ -250,6 +261,30 @@ async def run(args):
                 try:
                     await client.write_gatt_char(cfg["cmd_write"], frame, response=False)
                     print(f"probe → {name} (cmd {cmd}): {frame.hex()}")
+                except Exception as e:
+                    print(f"probe {name} failed: {e}")
+                seq += 1
+                await asyncio.sleep(1.5)
+
+        # WHOOP 4 command probe: the same read-only GETs, 4.0 (CRC8) framing. The strap's COMMAND_RESPONSE
+        # (type 36) replies decode via the existing 4.0 command_response post-hook — useful to validate
+        # the 4.0 decoder against real hardware and to spot any firmware-version divergence.
+        if args.commands and args.model == "whoop4":
+            await asyncio.sleep(1.0)
+            probes4 = [
+                (wf.CMD_GET_BATTERY_LEVEL, b"\x00", "GET_BATTERY_LEVEL"),
+                (wf.CMD_GET_CLOCK, b"", "GET_CLOCK"),
+                (wf.CMD_REPORT_VERSION_INFO, b"\x00", "REPORT_VERSION_INFO"),
+                (wf.CMD_GET_EXTENDED_BATTERY_INFO, b"\x00", "GET_EXTENDED_BATTERY_INFO"),
+                (wf.CMD_GET_DATA_RANGE, b"\x00", "GET_DATA_RANGE"),
+                (wf.CMD_GET_HELLO_HARVARD, b"\x00", "GET_HELLO_HARVARD"),
+            ]
+            seq = 2
+            for cmd, pl, name in probes4:
+                frame = wf.build_command_frame(cmd, seq=seq, payload=pl)
+                try:
+                    await client.write_gatt_char(cfg["cmd_write"], frame, response=False)
+                    print(f"probe(4.0) → {name} (cmd {cmd}): {frame.hex()}")
                 except Exception as e:
                     print(f"probe {name} failed: {e}")
                 seq += 1
@@ -352,11 +387,14 @@ async def run(args):
             chans[r["char"]] = chans.get(r["char"], 0) + 1
         for c, n in sorted(chans.items(), key=lambda kv: -kv[1]):
             print(f"  {n:6d}  {c}")
-        # Per-type tally so the result is obvious without a separate decode pass.
+        # Per-type tally so the result is obvious without a separate decode pass. The inner record
+        # (where the packet-type byte lives) starts at offset 8 on WHOOP 5 (puffin) but offset 4 on
+        # WHOOP 4 (Harvard), so read the right one per family.
+        inner_off = wf.WHOOP5_INNER_OFF if args.model == "whoop5" else 4
         types = {}
         for r in cap.records:
             h = bytes.fromhex(r["hex"])
-            t = h[wf.WHOOP5_INNER_OFF] if len(h) > wf.WHOOP5_INNER_OFF else None
+            t = h[inner_off] if len(h) > inner_off else None
             types[t] = types.get(t, 0) + 1
         print("  by inner type:", dict(sorted(types.items(), key=lambda kv: -kv[1])))
         if args.model == "whoop5":
@@ -380,9 +418,9 @@ def main():
                    help="WHOOP 5 only: after CLIENT_HELLO, send candidate puffin commands (realtime "
                         "toggles + history request) to try to start the biometric stream. Experimental.")
     p.add_argument("--commands", action="store_true",
-                   help="WHOOP 5 only: after CLIENT_HELLO, send the read-only GET commands (battery, "
-                        "clock, version, ext-battery, battery-pack, data-range) to capture their "
-                        "COMMAND_RESPONSE (type 36) frames for mapping the +4 response payloads.")
+                   help="after bond/hello, send the read-only GET commands (battery, clock, version, "
+                        "ext-battery, data-range, hello) to capture their COMMAND_RESPONSE (type 36) "
+                        "frames. WHOOP 5 uses puffin framing (+ battery-pack); WHOOP 4 uses 4.0 framing.")
     p.add_argument("--history-only", dest="history_only", action="store_true",
                    help="WHOOP 5 only: turn the realtime streams OFF, then request the historical "
                         "offload (type-47 records). Use instead of --probe to avoid the realtime "
