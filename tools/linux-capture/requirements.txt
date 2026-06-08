@@ -1,0 +1,3 @@
+# Headless WHOOP BLE capture (Linux/BlueZ).
+# bleak is the only runtime dependency; the framing/tests are stdlib-only.
+bleak>=0.22
