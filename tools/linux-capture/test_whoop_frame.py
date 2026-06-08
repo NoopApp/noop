@@ -100,6 +100,66 @@ class HistoryAckTests(unittest.TestCase):
         self.assertTrue(wf.verify_whoop5_frame(ack))                 # ack is itself CRC-valid
 
 
+def _whoop4_frame(type_: int, seq: int, cmd: int, payload: bytes) -> bytes:
+    """Build a complete, CRC-valid WHOOP 4.0 frame of an arbitrary type — for synthesising a METADATA
+    HISTORY_END the same way build_command_frame() builds a COMMAND. Inner [type][seq][cmd][payload]
+    starts at offset 4; len = (3 + len(payload)) + 4; CRC8 over the len bytes; CRC32 over the inner."""
+    inner = bytes([type_, seq, cmd]) + payload
+    length = (3 + len(payload)) + 4
+    len_bytes = bytes([length & 0xFF, (length >> 8) & 0xFF])
+    trailer = wf.crc32(inner)
+    return (bytes([0xAA]) + len_bytes + bytes([wf.crc8(len_bytes)]) + inner
+            + bytes([trailer & 0xFF, (trailer >> 8) & 0xFF,
+                     (trailer >> 16) & 0xFF, (trailer >> 24) & 0xFF]))
+
+
+class Whoop4HistoryAckTests(unittest.TestCase):
+    """WHOOP 4.0 offload handshake — the 4.0 image of the whoop5 helpers. The inner record starts at
+    offset 4 (vs 5.0's 8), so the metadata fields sit 4 bytes earlier: meta_type at frame[6], trim at
+    frame[17], end_data = frame[17:25] (vs 5.0's frame[21:29]). Acks use CRC8 framing, not CRC16.
+
+    Synthetic frames (real field offsets, recomputed CRC): no real WHOOP 4 HISTORY_END is in hand yet
+    (that needs a hardware offload), and a synthetic frame fully exercises the pure framing logic. The
+    ack is additionally cross-checked byte-exact via `whoop-decode --family whoop4`.
+    """
+
+    # Synthetic METADATA HISTORY_END (type 49, meta_type 2). Payload places trim u32 = 200000 at
+    # frame[17] (payload[10]) and next u32 = 281 at frame[21] (payload[14]).
+    _PAYLOAD_END = (bytes(10) + (200000).to_bytes(4, "little") + (281).to_bytes(4, "little"))
+    HISTORY_END = _whoop4_frame(wf.PACKET_METADATA, seq=0x31, cmd=wf.META_HISTORY_END,
+                                payload=_PAYLOAD_END)
+    HISTORY_START = _whoop4_frame(wf.PACKET_METADATA, seq=0x30, cmd=wf.META_HISTORY_START,
+                                  payload=_PAYLOAD_END)
+
+    def test_verify_whoop4_frame(self):
+        self.assertTrue(wf.verify_whoop4_frame(self.HISTORY_END))
+        self.assertTrue(wf.verify_whoop4_frame(self.HISTORY_START))
+
+    def test_history_end_data_whoop4_extracts_trim_plus_next(self):
+        end_data = wf.history_end_data_whoop4(self.HISTORY_END)
+        self.assertEqual(end_data, self.HISTORY_END[17:25])
+        self.assertEqual(int.from_bytes(end_data[0:4], "little"), 200000)
+        self.assertEqual(int.from_bytes(end_data[4:8], "little"), 281)
+
+    def test_history_start_whoop4_not_acked(self):
+        # Only HISTORY_END (meta_type 2) advances the cursor; START (meta_type 1) → None.
+        self.assertIsNone(wf.history_end_data_whoop4(self.HISTORY_START))
+
+    def test_corrupt_whoop4_frame_not_acked(self):
+        bad = bytearray(self.HISTORY_END)
+        bad[18] ^= 0xFF                      # flip a trim byte → CRC32 fails
+        self.assertIsNone(wf.history_end_data_whoop4(bytes(bad)))
+
+    def test_build_history_ack_whoop4_shape_and_crc(self):
+        end_data = wf.history_end_data_whoop4(self.HISTORY_END)
+        ack = wf.build_history_ack_whoop4(end_data, seq=50)
+        self.assertEqual(ack[4], wf.COMMAND_TYPE)                        # inner type COMMAND (35) @4
+        self.assertEqual(ack[6], wf.PUFFIN_CMD_HISTORICAL_DATA_RESULT)   # cmd 23 @6
+        self.assertEqual(ack[7], 0x01)                                  # payload prefix
+        self.assertEqual(ack[8:16], end_data)                           # echoed end_data
+        self.assertTrue(wf.verify_whoop4_frame(ack))                    # ack is itself CRC-valid
+
+
 class ReassemblerTests(unittest.TestCase):
     def test_single_frame_across_fragments(self):
         hello = wf.WHOOP5_CLIENT_HELLO

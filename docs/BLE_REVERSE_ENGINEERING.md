@@ -425,6 +425,24 @@ region for any version other than 18, so an unknown record is described, never m
 > capture from the device in hand — do not assume one generation's documented layout transfers to
 > another, even within the same generation.
 
+### WHOOP 4 firmware-drift check — still v24 (hardware-verified)
+
+The v18 surprise prompted the obvious question: does a *different* device on *different* firmware still
+emit the documented record? Tested on a real WHOOP 4 (firmware **41.17.6.0**) with the tool's WHOOP 4
+offload mode (`whoop_capture.py --model whoop4 --history-only --history-ack`). The 4.0 handshake is the
+image of the 5.0 one with the envelope shift removed: `meta_type` at `frame[6]`, `trim_cursor` at
+`frame[17]`, `end_data` = `frame[17:25]` (vs 5.0's `[21:29]`), and acks are CRC8-framed COMMANDs
+(`build_history_ack_whoop4` / `history_end_data_whoop4`). The cursor walked (`22303 → 22395 …`) exactly
+as on 5.0.
+
+**Result: no drift.** All **1704** type-47 frames pulled were **version 24** (`frame[5] == 24`),
+CRC-valid, and decoded cleanly through the *existing* documented v24 decoder — HR equalled
+`60000 / mean(R-R)` to ~1 bpm and \|gravity\| ≈ 1 g. So the documented v24 layout is confirmed on a
+second device and generation, and the v18 record is specific to the WHOOP 5's firmware, not a sign the
+v24 documentation was wrong. Real-frame parity test: `Whoop4HistoricalV24HardwareTests.swift`
+(`HistoricalV24Tests` covers the same layout synthetically). The offload streamed the same way as 4.0's
+realtime path, so its HR/HRV/gravity feed `extractHistoricalStreams` unchanged.
+
 ### WHOOP 5.0 COMMAND_RESPONSE (type 36)
 
 WHOOP 5 reuses the 4.0 command **numbers** on the puffin transport (`resp_cmd` at frame[10], the 4.0
