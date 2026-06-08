@@ -51,11 +51,11 @@ fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
     val today by viewModel.today.collectAsStateWithLifecycle()
     val alert by viewModel.healthAlert.collectAsStateWithLifecycle()
     val days by viewModel.recentDays.collectAsStateWithLifecycle()
+    val todayKey = DashboardDates.todayKey()
 
-    // 14-day trailing window (oldest → newest), with the macOS fallback: if the
-    // trailing slice has <2 points, fall back to all history so a tile never shows
-    // an empty line when data exists.
-    val window = remember14(days)
+    // Actual calendar 14-day window ending today. Old imported history remains in
+    // the database, but it must not be presented as today's trend.
+    val window = remember14(days, todayKey)
 
     ScreenScaffold(title = "Control Center", subtitle = "Your day, read in full") {
 
@@ -113,7 +113,7 @@ fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
 
         // READINESS — on-device training-readiness synthesis (HRV / resting-HR / load).
         // Mirrors the macOS readinessSection: rendered only once there's enough history.
-        ReadinessSection(days)
+        ReadinessSection(days, todayKey)
 
         // METRICS — uniform tile grid (two columns), each tile with a 14-day sparkline.
         Spacer(Modifier.padding(top = (Metrics.sectionGap - 20.dp) / 2))
@@ -267,8 +267,8 @@ private fun MetricGrid(d: DailyMetric?, w: Window) {
 // suppressed until there is enough history (level == INSUFFICIENT), matching macOS.
 
 @Composable
-private fun ReadinessSection(days: List<DailyMetric>) {
-    val readiness = remember(days) { ReadinessEngine.evaluate(days) }
+private fun ReadinessSection(days: List<DailyMetric>, todayKey: String) {
+    val readiness = remember(days, todayKey) { ReadinessEngine.evaluate(days, today = todayKey) }
     if (readiness.level == ReadinessEngine.Level.INSUFFICIENT) return
 
     SectionHeader("Readiness", overline = "Should you push today?")
@@ -453,18 +453,15 @@ private data class Window(
 )
 
 /**
- * Build the 14-day windows from `recentDays`. Each series drops null days then takes
- * the trailing 14 points; if that slice has <2 points it falls back to all available
- * history (the macOS sparse-data rule) so a tile renders a line whenever data exists.
+ * Build the 14-day windows from `recentDays`, anchored to the phone's actual local
+ * today. Each series drops null metric values within that calendar window only.
  */
 @Composable
-private fun remember14(days: List<com.noop.data.DailyMetric>): Window =
-    androidx.compose.runtime.remember(days) {
+private fun remember14(days: List<com.noop.data.DailyMetric>, todayKey: String): Window =
+    androidx.compose.runtime.remember(days, todayKey) {
+        val window = DashboardDates.trailingWindow(days, todayKey, 14)
         fun series(pick: (DailyMetric) -> Double?): List<Double> {
-            val all = days.mapNotNull(pick)
-            if (all.isEmpty()) return emptyList()
-            val windowed = all.takeLast(14)
-            return if (windowed.size >= 2) windowed else all
+            return window.mapNotNull(pick)
         }
         Window(
             recovery = series { it.recovery },

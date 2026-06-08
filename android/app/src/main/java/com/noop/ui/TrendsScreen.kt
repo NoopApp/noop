@@ -37,9 +37,8 @@ import kotlin.math.roundToInt
 // ChartCard, and a uniform set of HRV / Resting HR / Day-strain ChartCards (all
 // Metrics.chartHeight tall), followed by a recovery history strip.
 //
-// Windows are taken RELATIVE TO THE LATEST recorded day (not "now"), with the macOS
-// auto-expand rule: if the selected window holds zero points for a metric, the smallest
-// LARGER range that does is used and the card caption notes the widening.
+// Windows are taken relative to the phone's actual local date. Historical imports
+// stay available under ALL, but W/M/3M/6M/1Y must not make stale data look current.
 //
 // Data: full history is loaded once via repo.days("my-whoop"); until it arrives the
 // reactive recentDays flow backs the charts, so the screen is never empty when data exists.
@@ -64,6 +63,7 @@ fun TrendsScreen(vm: AppViewModel) {
     val days = fullHistory ?: reactiveDays
 
     var range by remember { mutableStateOf(TrendsRange.Quarter) }
+    val todayKey = DashboardDates.todayKey()
 
     ScreenScaffold(title = "Trends", subtitle = "The thread of you over time.") {
         if (days.isEmpty()) {
@@ -73,10 +73,10 @@ fun TrendsScreen(vm: AppViewModel) {
 
         // Resolve each metric's window ONCE per composition and reuse below — mirrors
         // the macOS resolve(_:) so caption / widened / points aren't recomputed per use.
-        val recovery = remember(days, range) { resolveMetric(days, range) { it.recovery } }
-        val hrv = remember(days, range) { resolveMetric(days, range) { it.avgHrv } }
-        val rhr = remember(days, range) { resolveMetric(days, range) { it.restingHr?.toDouble() } }
-        val strain = remember(days, range) { resolveMetric(days, range) { it.strain } }
+        val recovery = remember(days, range, todayKey) { resolveMetric(days, range, todayKey) { it.recovery } }
+        val hrv = remember(days, range, todayKey) { resolveMetric(days, range, todayKey) { it.avgHrv } }
+        val rhr = remember(days, range, todayKey) { resolveMetric(days, range, todayKey) { it.restingHr?.toDouble() } }
+        val strain = remember(days, range, todayKey) { resolveMetric(days, range, todayKey) { it.strain } }
 
         // --- Range control ---
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -138,7 +138,7 @@ fun TrendsScreen(vm: AppViewModel) {
         )
 
         // --- Recovery history strip (stands in for the macOS YearHeatStrip) ---
-        RecoveryHistoryCard(days = days, range = range)
+        RecoveryHistoryCard(days = days, range = range, todayKey = todayKey)
     }
 }
 
@@ -156,9 +156,6 @@ private enum class TrendsRange(val days: Int?, val label: String, val longName: 
     /** "Trailing 90 days" / "All history" — the card/range subtitle. */
     val subtitle: String get() = days?.let { "Trailing $it days" } ?: "All history"
 
-    /** This range plus every LARGER range, ascending — the auto-expand search order. */
-    val widening: List<TrendsRange>
-        get() = entries.dropWhile { it != this }
 }
 
 // MARK: - Resolved metric (mirrors TrendsView.ResolvedMetric / resolve)
@@ -173,50 +170,39 @@ private data class ResolvedMetric(
 )
 
 /**
- * Walk the widening order once: take the smallest range ≥ selected whose window holds
- * ≥1 non-null point for [value]; if none do, fall back to ALL. Windows are taken
- * relative to the LATEST recorded day, exactly like the macOS `days(for:)`.
+ * Resolve a metric for the selected calendar window. Empty real-time windows stay
+ * empty instead of widening into stale imported history.
  */
 private fun resolveMetric(
     days: List<DailyMetric>,
     selected: TrendsRange,
+    todayKey: String,
     value: (DailyMetric) -> Double?,
 ): ResolvedMetric {
-    for (r in selected.widening) {
-        val pts = windowValues(days, r, value)
-        if (pts.isNotEmpty()) {
-            return ResolvedMetric(
-                values = pts,
-                effective = r,
-                widened = r != selected,
-                caption = caption(pts.size, r, selected),
-            )
-        }
-    }
-    val pts = windowValues(days, TrendsRange.All, value)
+    val pts = windowValues(days, selected, todayKey, value)
     return ResolvedMetric(
         values = pts,
-        effective = TrendsRange.All,
-        widened = TrendsRange.All != selected,
-        caption = caption(pts.size, TrendsRange.All, selected),
+        effective = selected,
+        widened = false,
+        caption = caption(pts.size, selected, selected),
     )
 }
 
 /**
- * Non-null metric values within [range]'s trailing window, taken relative to the latest
- * recorded day (oldest → newest). `days` is the full oldest-first history. A null
- * `range.days` (ALL) returns every non-null point.
+ * Non-null metric values within [range]'s trailing calendar window, taken relative
+ * to actual local today (oldest → newest). A null `range.days` (ALL) returns every
+ * non-null point up to today.
  */
 private fun windowValues(
     days: List<DailyMetric>,
     range: TrendsRange,
+    todayKey: String,
     value: (DailyMetric) -> Double?,
 ): List<Double> {
     if (days.isEmpty()) return emptyList()
     val sliced = when (val n = range.days) {
-        null -> days
-        // The history is already oldest-first; a trailing N-day window is the last N rows.
-        else -> days.takeLast(n)
+        null -> DashboardDates.throughDay(days, todayKey)
+        else -> DashboardDates.trailingWindow(days, todayKey, n)
     }
     return sliced.mapNotNull(value)
 }
@@ -327,10 +313,14 @@ private fun ChartFooter(items: List<Pair<String, String>>) {
  * Always shows at least a full year of context, like the macOS strip.
  */
 @Composable
-private fun RecoveryHistoryCard(days: List<DailyMetric>, range: TrendsRange) {
+private fun RecoveryHistoryCard(days: List<DailyMetric>, range: TrendsRange, todayKey: String) {
     // Always show at least a year; expand to all history on ALL.
     val span = (range.days ?: days.size).coerceAtLeast(365)
-    val window = days.takeLast(span)
+    val window = if (range == TrendsRange.All) {
+        DashboardDates.throughDay(days, todayKey)
+    } else {
+        DashboardDates.trailingWindow(days, todayKey, span)
+    }
     val recovery = window.mapNotNull { it.recovery }
     val title = if (range == TrendsRange.All && days.size > 365) {
         "Recovery — all history"

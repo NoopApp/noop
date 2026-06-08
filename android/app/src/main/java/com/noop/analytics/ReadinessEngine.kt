@@ -76,7 +76,11 @@ object ReadinessEngine {
      */
     fun evaluate(days: List<DailyMetric>, today: String? = null): Readiness {
         val sorted = days.sortedBy { it.day }
-        val latest = (today?.let { t -> sorted.firstOrNull { it.day == t } }) ?: sorted.lastOrNull()
+        val latest = if (today != null) {
+            sorted.firstOrNull { it.day == today }
+        } else {
+            sorted.lastOrNull()
+        }
         if (latest == null) {
             return Readiness(
                 level = Level.INSUFFICIENT,
@@ -141,7 +145,7 @@ object ReadinessEngine {
         }
 
         // Training Stress Balance (ACWR) + monotony --------------------------
-        val strainSeries = sorted.mapNotNull { it.strain }
+        val strainSeries = sorted.filter { it.day <= latest.day }.mapNotNull { it.strain }
         var acwr: Double? = null
         var monotony: Double? = null
         if (strainSeries.size >= minChronic) {

@@ -98,11 +98,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 state.heartRate?.let { ingestHr(it) }
             }
         }
-        // Recompute the illness banner + today's row whenever cached days change.
+        // Recompute the illness banner + actual calendar-today row whenever cached days change.
         viewModelScope.launch {
             recentDays.collect { days ->
-                _today.value = days.lastOrNull()
-                _healthAlert.value = IllnessWatch.evaluate(days)
+                val todayKey = DashboardDates.todayKey()
+                val todayRow = DashboardDates.rowForDay(days, todayKey)
+                _today.value = todayRow
+                _healthAlert.value = if (todayRow != null) {
+                    IllnessWatch.evaluate(DashboardDates.throughDay(days, todayKey))
+                } else {
+                    null
+                }
             }
         }
 

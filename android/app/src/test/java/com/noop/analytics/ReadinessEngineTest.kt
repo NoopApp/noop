@@ -59,6 +59,16 @@ class ReadinessEngineTest {
     }
 
     @Test
+    fun specifiedTodayDoesNotFallbackToLatestHistoricalDay() {
+        val r = ReadinessEngine.evaluate(
+            baseline(todayHrv = 72.0, todayRhr = 46, todayStrain = 10.0),
+            today = "2026-06-08",
+        )
+
+        assertEquals(ReadinessEngine.Level.INSUFFICIENT, r.level)
+    }
+
+    @Test
     fun primedWhenSignalsAligned() {
         // Today: HRV well above baseline, resting HR below, load steady.
         val r = ReadinessEngine.evaluate(baseline(todayHrv = 72.0, todayRhr = 46, todayStrain = 10.0))
