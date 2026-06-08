@@ -341,6 +341,13 @@ private func decodeWhoop5Historical(_ frame: [UInt8], fb: FieldBuilder, payloadE
 /// as `ppg_waveform` with NO invented scale. The bytes before [27] (header + a block index) and the
 /// footer after [75] are not mapped; SpO₂/skin-temp have no internal proxy and are left untouched.
 private func decodeWhoop5HistoricalV26(_ frame: [UInt8], fb: FieldBuilder) {
+    // Optical channel id @12: the capture partitions cleanly into two 40-second bursts, one with
+    // frame[12]==0x41 and one with 0x46, each a distinct PPG channel that autocorrelates to the heart
+    // rate (lag 14 ≈ 103 bpm) with its own DC baseline. Which physical LED (green vs red/IR) each is
+    // stays unverified — no colour is claimed — so only the raw id is surfaced.
+    if let ch = readDType(frame, 12, "u8") {
+        fb.add(12, 1, "ppg_channel", "ppg", value: .int(ch), note: "optical channel id (raw)")
+    }
     if let unix = readDType(frame, 15, "u32") {
         fb.add(15, 4, "unix", "time", value: .int(unix), note: "real unix seconds")
     }

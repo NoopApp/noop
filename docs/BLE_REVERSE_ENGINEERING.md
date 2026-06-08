@@ -431,10 +431,31 @@ reference or app export needed:
   (`corr(amplitude, |Δgravity|) = +0.35` — mild motion artifact, not the signal) — so it is optical,
   not a ballistocardiographic IMU reading.
 
-`decodeWhoop5HistoricalV26` exposes the samples as `ppg_waveform` (+ `ppg_sample_count`, `unix`). They
-are raw AC-coupled ADC counts — PPG has no absolute unit — so no scale is invented. The header before
-[27] (a block index) and the footer after [75] are left raw. Reproduce the proof with
-`tools/linux-capture/analyze_v26_waveform.py`; parity test `Whoop5PpgWaveformTests.swift`.
+**Two optical channels.** Byte `frame[12]` is a channel id: the capture partitions cleanly into two
+40-second bursts, one with `frame[12] == 0x41` and one with `0x46` (no shared timestamps, ~19 min
+apart). *Both* channels' waveforms autocorrelate to the heart rate (lag 14 ≈ 103 bpm), with different DC
+baselines — i.e. two distinct PPG channels (the strap multiplexes green / red / IR LEDs). Which physical
+LED each id maps to is **not** verifiable from the data, so the raw id is surfaced (`ppg_channel`) with
+no colour claim.
+
+The full v26 byte map (88 bytes; CRC32 @84):
+
+| Bytes | Field | Status |
+|---|---|---|
+| 8 / 9 | type 47 / version 26 | — |
+| 10, 13, 14 | `0x80` / `0x84` / `0x01` | constant header |
+| 11 | per-record counter (+1/s) | sequence |
+| **12** | **`ppg_channel`** (`0x41` / `0x46`) | **mapped** — optical channel id |
+| **15** | **`unix`** u32 LE | **mapped** — real seconds (v18's slot) |
+| 19 | `0x000147AE` constant | config param |
+| 23–26 | high-entropy (DC / checksum?) | raw — no ground truth |
+| **27–74** | **`ppg_waveform`** 24× LE-i16 | **mapped** — 24 Hz PPG, HR-locked |
+| 75–83 | footer (random + `0x50`,`0x08` const) | raw — no ground truth |
+
+`decodeWhoop5HistoricalV26` exposes `ppg_waveform` (+ `ppg_sample_count`), `ppg_channel`, and `unix`. The
+samples are raw AC-coupled ADC counts — PPG has no absolute unit — so no scale is invented; the
+high-entropy `23–26` and the footer are left raw (no internal ground truth). Reproduce the proof with
+`tools/linux-capture/analyze_v26_waveform.py`; parity tests `Whoop5PpgWaveformTests.swift`.
 
 > The v18 per-second record's own optical region (bytes [57:120]) carries **no simple summary of this
 > PPG** (no field tracks its DC or AC amplitude), and its SpO₂ / skin-temp channels have no internal

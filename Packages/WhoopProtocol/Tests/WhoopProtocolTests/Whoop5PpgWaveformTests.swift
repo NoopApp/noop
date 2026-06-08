@@ -45,6 +45,30 @@ final class Whoop5PpgWaveformTests: XCTestCase {
         XCTAssertEqual(p["unix"]?.intValue, 1780917232)        // real unix, same @15 slot as v18
         XCTAssertEqual(p["ppg_sample_count"]?.intValue, 24)
         XCTAssertEqual(p["ppg_waveform"]?.intArrayValue, expectedWaveform)
+        XCTAssertEqual(p["ppg_channel"]?.intValue, 0x41)       // optical channel id @12
+    }
+
+    /// A second real v26 frame from the OTHER optical channel (`@12 = 0x46`), captured in a separate
+    /// 40 s burst ~19 min later. The capture holds two such bursts — 40 records of `@12 = 0x41` then 40
+    /// of `@12 = 0x46` — with no shared timestamps; both channels' waveforms autocorrelate to the heart
+    /// rate (lag 14 ≈ 103 bpm). Which physical LED (green vs red/IR) each maps to is unverified, so the
+    /// raw channel id is surfaced without a colour claim.
+    private let v26HexChannel46 =
+        "aa015000010035412f1a803546840178a8266af54802004ca006007dfde1fde4fe9904" +
+        "5009f40d7f0b380c5109e9013dff0dff19fd6efedafe8efe8cfca0fe98014002c9039f05" +
+        "30059201d8abbe3d50080001006b6cb5a5"
+
+    func testV26SecondChannelDecodes() {
+        let p = parseFrame(bytes(v26HexChannel46), family: .whoop5).parsed
+        XCTAssertEqual(p["hist_version"]?.intValue, 26)
+        XCTAssertEqual(p["unix"]?.intValue, 1780918392)
+        XCTAssertEqual(p["ppg_channel"]?.intValue, 0x46)       // distinct from the 0x41 channel above
+        XCTAssertEqual(p["ppg_sample_count"]?.intValue, 24)
+        // Still a smooth pulsatile trace (guards the [27:75] bounds on the other channel too).
+        let w = p["ppg_waveform"]!.intArrayValue!
+        let range = w.max()! - w.min()!
+        let meanStep = zip(w, w.dropFirst()).map { abs($1 - $0) }.reduce(0, +) / (w.count - 1)
+        XCTAssertLessThan(meanStep * 4, range)
     }
 
     func testV26WaveformIsSmoothNotNoise() {
