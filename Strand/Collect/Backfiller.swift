@@ -49,6 +49,11 @@ final class Backfiller {
     /// The clock reference set by BLEManager when GET_CLOCK confirms (required for decoding).
     var clockRef: ClockRef?
 
+    /// Strap generation of the current connection — selects the frame decoder and the HISTORY_END
+    /// `end_data` offset (the 5.0 puffin record sits +4 from 4.0). Set by BLEManager.beginBackfill
+    /// before any frame is ingested. Defaults to 4.0 so existing call sites are unchanged.
+    var family: DeviceFamily = .whoop4
+
     /// True while a historical offload session is active.
     private(set) var isBackfilling = false
 
@@ -80,7 +85,7 @@ final class Backfiller {
 
     /// Feed one raw BLE frame into the state machine. May trigger async store operations.
     func ingest(_ frame: [UInt8]) async {
-        switch classifyHistoricalMeta(parseFrame(frame)) {
+        switch classifyHistoricalMeta(parseFrame(frame, family: family)) {
         case .start:
             isBackfilling = true
             chunk.removeAll(keepingCapacity: true)
@@ -96,14 +101,14 @@ final class Backfiller {
         }
     }
 
-    /// The 8-byte `end_data` the high-freq-sync ack requires: metadata.data[10:18].
-    /// metadata.data begins at frame[7] (after [type,seq,cmd]), so end_data = frame[17:25].
-    /// trim cursor = the first u32 of end_data (data[10:14]). Returns nil if the frame is too
-    /// short to contain the field (shouldn't happen for a real HISTORY_END, which is >=14 data
-    /// bytes, but guards against a malformed frame).
-    static func endData(from frame: [UInt8]) -> [UInt8]? {
-        guard frame.count >= 25 else { return nil }
-        return Array(frame[17..<25])
+    /// The 8-byte `end_data` the ack requires: metadata.data[10:18]. metadata.data begins right after
+    /// the inner `[type,seq,cmd]` header — frame[7] on WHOOP 4.0, frame[11] on the +4 WHOOP 5.0 puffin
+    /// record — so end_data = frame[17:25] (4.0) or frame[21:29] (5.0). trim cursor = the first u32 of
+    /// end_data. Returns nil if the frame is too short (guards a malformed frame).
+    func endData(from frame: [UInt8]) -> [UInt8]? {
+        let start = (family == .whoop5) ? 21 : 17
+        guard frame.count >= start + 8 else { return nil }
+        return Array(frame[start..<(start + 8)])
     }
 
     /// Commit one HISTORY_END chunk: (persist decoded → enqueueRaw when present) → setCursor → ackTrim.
@@ -116,7 +121,7 @@ final class Backfiller {
     /// records is still acked (it advances the strap's trim) — that's how the offload progresses.
     /// `endFrame` carries the 8-byte `end_data` the ack requires.
     private func finishChunk(unix: UInt32, trim: UInt32, endFrame: [UInt8]) async {
-        guard let endData = Backfiller.endData(from: endFrame) else { return }
+        guard let endData = endData(from: endFrame) else { return }
 
         let frames = chunk
         chunk.removeAll(keepingCapacity: true)   // next records accumulate into the next chunk
@@ -129,7 +134,7 @@ final class Backfiller {
             // decodes to correct wall time, and we can persist + ack + upload. The correlation is only
             // truly required to map REALTIME (type-40/43) device-epoch timestamps, never in a hist chunk.
             let ref = clockRef ?? { let now = Int(Date().timeIntervalSince1970); return ClockRef(device: now, wall: now) }()
-            let parsed = frames.map { parseFrame($0) }
+            let parsed = frames.map { parseFrame($0, family: family) }
             let decoded = extract(parsed, ref.device, ref.wall)
             do { try await store.insert(decoded, deviceId: deviceId) } catch { return }
 

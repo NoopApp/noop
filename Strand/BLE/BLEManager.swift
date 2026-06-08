@@ -275,6 +275,14 @@ public final class BLEManager: NSObject, ObservableObject {
         }
     }
 
+    /// Opt-in (default OFF): drive the WHOOP 5/MG historical offload — puffin command framing in
+    /// `send()` plus the `HISTORICAL_DATA_RESULT` chunk-ack handshake. MAC-BUILD-PENDING: the protocol
+    /// half is verified on Linux (WhoopProtocol parity tests + the Python tool pulled 3193 type-47
+    /// records from a real strap by acking each HISTORY_END), but the CoreBluetooth wiring here has not
+    /// been built or run on a Mac. Flip `enableWhoop5Backfill` in UserDefaults to exercise it; with it
+    /// OFF the shipped 5/MG realtime path is byte-for-byte unchanged.
+    static var enableWhoop5Backfill: Bool { UserDefaults.standard.bool(forKey: "enableWhoop5Backfill") }
+
     /// Send a command to the WHOOP strap.
     /// - Parameters:
     ///   - command: The command to send.
@@ -288,16 +296,24 @@ public final class BLEManager: NSObject, ObservableObject {
             log("send(\(command.label)) ignored — \(reason)")
             return
         }
-        // WHOOP 5.0/MG uses a different (CRC16/puffin) command framing we don't build yet. Never
-        // write a WHOOP4-framed command to a 5/MG strap — its live HR/battery come from the standard
-        // profiles, and the only frame we send it is the static CLIENT_HELLO. (EXPERIMENTAL)
-        guard selectedModel.deviceFamily == .whoop4 else {
-            log("send(\(command.label)) skipped — WHOOP 5/MG has no command framing yet")
-            return
+        let frameBytes: [UInt8]
+        switch selectedModel.deviceFamily {
+        case .whoop4:
+            seq = seq &+ 1
+            frameBytes = command.frame(seq: seq, payload: payload)
+        case .whoop5:
+            // The 4.0 command NUMBERS run on the 5.0 transport (hardware-verified), so re-frame the
+            // same command as a puffin COMMAND (`puffinCommandFrame`). Gated so a 5/MG strap only ever
+            // receives a puffin command when the offload path is explicitly enabled — otherwise its
+            // live HR/battery come from the standard profiles and the only frame it gets is CLIENT_HELLO.
+            guard BLEManager.enableWhoop5Backfill else {
+                log("send(\(command.label)) skipped — WHOOP 5/MG offload opt-in off")
+                return
+            }
+            seq = seq &+ 1
+            frameBytes = puffinCommandFrame(cmd: command.rawValue, seq: seq, payload: payload)
         }
-        seq = seq &+ 1
-        let frame = command.frame(seq: seq, payload: payload)
-        p.writeValue(Data(frame), for: ch, type: writeType)
+        p.writeValue(Data(frameBytes), for: ch, type: writeType)
         log("→ \(command.label) payload=\(hex(payload))")
     }
 
@@ -315,6 +331,27 @@ public final class BLEManager: NSObject, ObservableObject {
 
     // MARK: Backfill helpers
 
+    /// MAC-BUILD-PENDING (opt-in `enableWhoop5Backfill`): start the WHOOP 5/MG historical offload once
+    /// per connection, mirroring the hardware-verified Python sequence
+    /// (`whoop_capture.py --history-only --history-ack`): quiet the realtime streams so they don't
+    /// starve the offload, refresh the data range, then request the type-47 store. The Backfiller acks
+    /// each HISTORY_END with a puffin `HISTORICAL_DATA_RESULT`, which advances the strap's trim cursor —
+    /// without that ack the cursor freezes and zero type-47 frames arrive (the whole blocker we cracked).
+    /// Gated on `connectHandshakeDone`, like the 4.0 handshake, so the re-fired `.withResponse` write of
+    /// every ack can't re-storm the strap mid-offload.
+    private func beginWhoop5Offload() {
+        guard !connectHandshakeDone else { return }
+        connectHandshakeDone = true
+        send(.toggleRealtimeHR, payload: [0x00])     // realtime type-40 OFF (give the offload airtime)
+        send(.sendR10R11Realtime, payload: [0x00])   // raw type-43 OFF
+        send(.getDataRange)                          // refresh stored range for the watchdog
+        // Deferred so the quiet/range writes settle first, like the paced capture tool. requestSync is
+        // itself gated on connectHandshakeDone, so this is the single offload kick.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.requestSync(.connect) }
+        startBackfillTimer()                         // re-offload the type-47 store periodically
+        log("WHOOP 5/MG: historical offload handshake started (experimental, opt-in)")
+    }
+
     /// Start a historical-offload session: tell the store machine to begin, flip the routing
     /// flag, kick the strap with sendHistoricalData, and arm the idle timeout.
     private func beginBackfill() {
@@ -330,6 +367,7 @@ public final class BLEManager: NSObject, ObservableObject {
             log("Backfill: store not ready — deferring to next periodic tick")
             return
         }
+        backfiller.family = selectedModel.deviceFamily   // selects the +4 decode / end_data offset
         backfiller.begin()
         backfilling = true
         // Payload MUST be [0x00], NOT empty: verified on-device that this strap serves type-47 only with
@@ -920,6 +958,7 @@ extension BLEManager: CBPeripheralDelegate {
             }
             enableLiveNotifications(reason: "post-bond 5/MG")   // standard HR/battery that failed pre-bond
             startKeepAlive()                                    // re-subscribe + liveness watchdog
+            if BLEManager.enableWhoop5Backfill { beginWhoop5Offload() }
             return
         }
 
