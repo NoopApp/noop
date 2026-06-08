@@ -106,6 +106,10 @@ public final class BLEManager: NSObject, ObservableObject {
     private var dataNotifyCharacteristic: CBCharacteristic?
     private var heartRateCharacteristic: CBCharacteristic?
     private var batteryCharacteristic: CBCharacteristic?
+    /// EXPERIMENTAL WHOOP 5.0/MG puffin notify chars (fd4b0003/4/5/7), remembered at discovery so we
+    /// can re-subscribe them AFTER bonding — the strap refuses them ("Authentication is insufficient")
+    /// until the link is encrypted (issue #17).
+    private var whoop5NotifyCharacteristics: [CBCharacteristic] = []
     private var reassembler = Reassembler()
     private var seq: UInt8 = 0
     private var didBond = false
@@ -473,6 +477,10 @@ public final class BLEManager: NSObject, ObservableObject {
             return
         }
         guard !backfilling else { return }            // never poke the strap mid-offload
+        // The command pings below are WHOOP4-framed; a 5/MG link drops them at the send() guard, so
+        // skip them for 5/MG (it keeps the experimental strap log clean — re-subscribe + the 120s
+        // bounce above are what keep a 5/MG link healthy).
+        guard selectedModel.deviceFamily == .whoop4 else { return }
         if wantsRealtime {
             send(.sendR10R11Realtime, payload: [0x01])
             send(.toggleRealtimeHR, payload: [0x01])
@@ -546,6 +554,7 @@ public final class BLEManager: NSObject, ObservableObject {
         dataNotifyCharacteristic = nil
         heartRateCharacteristic = nil
         batteryCharacteristic = nil
+        whoop5NotifyCharacteristics.removeAll()
     }
 
     private func enableLiveNotifications(reason: String) {
@@ -822,8 +831,15 @@ extension BLEManager: CBPeripheralDelegate {
                 // opens the puffin session. Unverified on real MG hardware.
                 cmdCharacteristic = c
                 if let hello = selectedModel.deviceFamily.clientHello {
-                    log("WHOOP 5/MG: writing CLIENT_HELLO to fd4b0002 (experimental).")
-                    peripheral.writeValue(Data(hello), for: c, type: .withoutResponse)
+                    // CONTRIBUTOR FIX (issue #17 — diagnosed from the logs, unverified on hardware here):
+                    // write CLIENT_HELLO with .withResponse so CoreBluetooth runs just-works bonding when
+                    // the link needs authenticating, AND so didWriteValueFor fires. That callback is where
+                    // we mark the link established and (re)subscribe the puffin notify chars — the strap
+                    // rejects them with "Authentication is insufficient" until the connection is encrypted,
+                    // and the old .withoutResponse write never triggered bonding, so it hung forever at
+                    // "Finishing the secure pairing handshake…".
+                    log("WHOOP 5/MG: writing CLIENT_HELLO to fd4b0002 with response (to trigger bonding, experimental).")
+                    peripheral.writeValue(Data(hello), for: c, type: .withResponse)
                 }
                 if PuffinExperiment.isEnabled {
                     // OPT-IN probe (Settings → Experimental, off by default): ask the strap to start
@@ -850,8 +866,12 @@ extension BLEManager: CBPeripheralDelegate {
                 }
                 requestNotify(c, on: peripheral, reason: "discovery")
             default:
-                // WHOOP 5.0/MG puffin notify characteristics (fd4b0003/0004/0005/0007).
+                // WHOOP 5.0/MG puffin notify characteristics (fd4b0003/0004/0005/0007). Remember them so
+                // didWriteValueFor can re-subscribe AFTER bonding. The attempt here (before the link is
+                // authenticated) is rejected with "Authentication is insufficient", but it also nudges
+                // CoreBluetooth toward pairing alongside the .withResponse CLIENT_HELLO above.
                 if BLEManager.whoop5NotifyChars.contains(c.uuid) {
+                    whoop5NotifyCharacteristics.append(c)
                     requestNotify(c, on: peripheral, reason: "discovery puffin")
                 }
             }
@@ -866,6 +886,27 @@ extension BLEManager: CBPeripheralDelegate {
             log("Confirmed write failed: \(error.localizedDescription)")
             return
         }
+
+        // EXPERIMENTAL WHOOP 5.0/MG (issue #17): the CLIENT_HELLO is now a .withResponse write, so this
+        // fires once the strap acks it — after just-works bonding if the link needed authenticating.
+        // Treat that as the link being established: mark bonded (which clears the "Finishing the secure
+        // pairing handshake…" status) and re-subscribe the puffin notify chars + standard HR/battery,
+        // which the strap refused before the link was encrypted. Do NOT run the WHOOP4 command handshake
+        // below — a 5/MG strap rejects WHOOP4-framed commands (the send() guard drops them anyway).
+        if selectedModel.deviceFamily == .whoop5 {
+            if !didBond {
+                didBond = true
+                state.bonded = true
+                log("WHOOP 5/MG: CLIENT_HELLO acked — link established; (re)subscribing notify chars (experimental).")
+            }
+            for c in whoop5NotifyCharacteristics where !c.isNotifying {
+                requestNotify(c, on: peripheral, reason: "post-bond puffin")
+            }
+            enableLiveNotifications(reason: "post-bond 5/MG")   // standard HR/battery that failed pre-bond
+            startKeepAlive()                                    // re-subscribe + liveness watchdog
+            return
+        }
+
         if !didBond {
             didBond = true
             state.bonded = true

@@ -17,6 +17,18 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 1.5 — WHOOP 5/MG: secure-pairing fix
+
+- **Fixed (experimental): WHOOP 5.0/MG stuck at "Finishing the secure pairing handshake."** The 5/MG
+  strap requires an encrypted (bonded) Bluetooth link before it will let the app subscribe to its
+  characteristics — it was rejecting them with "Authentication is insufficient," so the handshake
+  waited forever and live heart rate never arrived. NOOP now writes the `CLIENT_HELLO` with-response
+  to trigger just-works bonding, then subscribes once the link is authenticated. Diagnosed from a
+  shared strap log by a contributor on issue #17. **Still experimental on 5/MG** — if you have one,
+  please try it and share your strap log so we can keep improving it. WHOOP 4.0 is unaffected.
+
+---
+
 ## 1.4 — Live heart rate that doesn't freeze
 
 - **Fixed: live heart rate freezing mid-session.** The WHOOP firmware lets its realtime stream lapse
