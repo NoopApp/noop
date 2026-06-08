@@ -37,9 +37,9 @@ import kotlin.math.roundToInt
 // ChartCard, and a uniform set of HRV / Resting HR / Day-strain ChartCards (all
 // Metrics.chartHeight tall), followed by a recovery history strip.
 //
-// Windows are taken RELATIVE TO THE LATEST recorded day (not "now"), with the macOS
-// auto-expand rule: if the selected window holds zero points for a metric, the smallest
-// LARGER range that does is used and the card caption notes the widening.
+// Windows are taken relative to the phone's actual local day, with the macOS auto-expand
+// rule: if the selected window holds zero points for a metric, the smallest larger range
+// that does is used and the card caption notes the widening.
 //
 // Data: full history is loaded once via repo.days("my-whoop"); until it arrives the
 // reactive recentDays flow backs the charts, so the screen is never empty when data exists.

@@ -21,8 +21,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -32,6 +35,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.analytics.ReadinessEngine
 import com.noop.data.DailyMetric
+import com.noop.data.WorkoutRow
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -42,20 +50,38 @@ import kotlin.math.roundToInt
  * composition (Strand/Screens/TodayView.swift) with the same locked components.
  *
  * Sparkline series are built off the view model's `recentDays` (oldest → newest,
- * all from the my-whoop source). Steps / Weight / Calories have no on-device daily
- * source on Android, so those tiles read "—" with an empty trend until an Apple
- * Health / metricSeries bridge lands — matching the macOS sparse-data contract.
+ * all from the my-whoop source). Missing current-day values render as explicit
+ * "No Data" states instead of raw dashes, so old imports do not look like today.
  */
 @Composable
 fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
     val today by viewModel.today.collectAsStateWithLifecycle()
     val alert by viewModel.healthAlert.collectAsStateWithLifecycle()
     val days by viewModel.recentDays.collectAsStateWithLifecycle()
+    var footer by remember { mutableStateOf(TodayFooterState()) }
 
-    // 14-day trailing window (oldest → newest), with the macOS fallback: if the
-    // trailing slice has <2 points, fall back to all history so a tile never shows
-    // an empty line when data exists.
+    // 14-day trailing calendar window ending on the phone's actual local day.
+    // Old imports stay in history, but they do not fill the Today trend tiles.
     val window = remember14(days)
+
+    LaunchedEffect(days) {
+        val now = System.currentTimeMillis() / 1000
+        val recentCutoff = LocalDate.now()
+            .minusDays(13)
+            .atStartOfDay(ZoneId.systemDefault())
+            .toEpochSecond()
+        val whoopWorkouts = viewModel.repo.workouts("my-whoop", 0L, now)
+        val appleWorkouts = viewModel.repo.workouts("apple-health", 0L, now)
+        footer = TodayFooterState(
+            recentWorkouts = (viewModel.repo.workouts("my-whoop", recentCutoff, now) +
+                viewModel.repo.workouts("apple-health", recentCutoff, now))
+                .sortedByDescending { it.startTs },
+            whoopDays = days.size,
+            whoopWorkouts = whoopWorkouts.size,
+            appleDays = viewModel.repo.appleDaily("apple-health", "0000-01-01", "9999-12-31").size,
+            appleWorkouts = appleWorkouts.size,
+        )
+    }
 
     ScreenScaffold(title = "Control Center", subtitle = "Your day, read in full") {
 
@@ -94,12 +120,7 @@ fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
         Row(horizontalArrangement = Arrangement.spacedBy(Metrics.gap)) {
             NoopCard(modifier = Modifier.weight(1f)) {
                 Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    RecoveryRing(
-                        score = today?.recovery ?: 0.0,
-                        supporting = ringSupporting(today),
-                        diameter = 168.dp,
-                        lineWidth = 13.dp,
-                    )
+                    TodayRecoveryRing(today)
                 }
             }
             InsightCard(
@@ -119,6 +140,41 @@ fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
         Spacer(Modifier.padding(top = (Metrics.sectionGap - 20.dp) / 2))
         SectionHeader("Key Metrics", overline = "Today", trailing = "14-day trend")
         MetricGrid(today, window)
+        TodayWorkoutsSection(footer.recentWorkouts)
+        TodaySourcesSection(footer)
+    }
+}
+
+@Composable
+private fun TodayRecoveryRing(day: DailyMetric?) {
+    val hasRecovery = day?.recovery != null
+    Box(contentAlignment = Alignment.Center) {
+        RecoveryRing(
+            score = day?.recovery ?: 0.0,
+            supporting = if (hasRecovery) ringSupporting(day) else null,
+            diameter = 168.dp,
+            lineWidth = 13.dp,
+            showsLabel = hasRecovery,
+        )
+        if (!hasRecovery) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = NO_DATA,
+                    style = NoopType.title2,
+                    color = Palette.textTertiary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = ringSupporting(day),
+                    style = NoopType.footnote,
+                    color = Palette.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+        }
     }
 }
 
@@ -135,11 +191,11 @@ private fun MetricGrid(d: DailyMetric?, w: Window) {
             SparkStatTile(
                 modifier = m,
                 label = "Recovery",
-                value = d?.recovery?.let { "${it.roundToInt()}%" } ?: "—",
+                value = d?.recovery?.let { "${it.roundToInt()}%" } ?: NO_DATA,
                 caption = d?.recovery?.let {
                     Palette.recoveryState(it).lowercase().replaceFirstChar { c -> c.uppercase() }
                 },
-                accent = d?.recovery?.let { Palette.recoveryColor(it) } ?: Palette.textPrimary,
+                accent = d?.recovery?.let { Palette.recoveryColor(it) } ?: Palette.textTertiary,
                 spark = w.recovery,
                 sparkColor = Palette.accent,
             )
@@ -148,9 +204,9 @@ private fun MetricGrid(d: DailyMetric?, w: Window) {
             SparkStatTile(
                 modifier = m,
                 label = "Day Strain",
-                value = d?.strain?.let { String.format(Locale.US, "%.1f", it) } ?: "—",
-                caption = "of 21",
-                accent = d?.strain?.let { Palette.strainColor(it) } ?: Palette.textPrimary,
+                value = d?.strain?.let { String.format(Locale.US, "%.1f", it) } ?: NO_DATA,
+                caption = d?.strain?.let { "of 21" },
+                accent = d?.strain?.let { Palette.strainColor(it) } ?: Palette.textTertiary,
                 spark = w.strain,
                 sparkColor = Palette.strain066,
             )
@@ -161,7 +217,7 @@ private fun MetricGrid(d: DailyMetric?, w: Window) {
                 label = "Sleep",
                 value = sleepValue(d),
                 caption = d?.efficiency?.let { String.format(Locale.US, "%.0f%% eff", it) },
-                accent = Palette.textPrimary,
+                accent = d?.totalSleepMin?.let { Palette.textPrimary } ?: Palette.textTertiary,
                 spark = w.sleepMin,
                 sparkColor = Palette.metricPurple,
             )
@@ -170,9 +226,9 @@ private fun MetricGrid(d: DailyMetric?, w: Window) {
             SparkStatTile(
                 modifier = m,
                 label = "HRV",
-                value = d?.avgHrv?.let { "${it.roundToInt()}" } ?: "—",
-                caption = "ms",
-                accent = Palette.metricPurple,
+                value = d?.avgHrv?.let { "${it.roundToInt()}" } ?: NO_DATA,
+                caption = d?.avgHrv?.let { "ms" },
+                accent = d?.avgHrv?.let { Palette.metricPurple } ?: Palette.textTertiary,
                 spark = w.hrv,
                 sparkColor = Palette.metricPurple,
             )
@@ -181,9 +237,9 @@ private fun MetricGrid(d: DailyMetric?, w: Window) {
             SparkStatTile(
                 modifier = m,
                 label = "Resting HR",
-                value = d?.restingHr?.toString() ?: "—",
-                caption = "bpm",
-                accent = Palette.metricRose,
+                value = d?.restingHr?.toString() ?: NO_DATA,
+                caption = d?.restingHr?.let { "bpm" },
+                accent = d?.restingHr?.let { Palette.metricRose } ?: Palette.textTertiary,
                 spark = w.rhr,
                 sparkColor = Palette.metricRose,
             )
@@ -192,9 +248,9 @@ private fun MetricGrid(d: DailyMetric?, w: Window) {
             SparkStatTile(
                 modifier = m,
                 label = "Blood Oxygen",
-                value = d?.spo2Pct?.let { String.format(Locale.US, "%.0f%%", it) } ?: "—",
-                caption = "SpO₂",
-                accent = Palette.metricCyan,
+                value = d?.spo2Pct?.let { String.format(Locale.US, "%.0f%%", it) } ?: NO_DATA,
+                caption = d?.spo2Pct?.let { "SpO₂" },
+                accent = d?.spo2Pct?.let { Palette.metricCyan } ?: Palette.textTertiary,
                 spark = w.spo2,
                 sparkColor = Palette.metricCyan,
             )
@@ -203,21 +259,20 @@ private fun MetricGrid(d: DailyMetric?, w: Window) {
             SparkStatTile(
                 modifier = m,
                 label = "Respiratory",
-                value = d?.respRateBpm?.let { String.format(Locale.US, "%.1f", it) } ?: "—",
-                caption = "rpm",
-                accent = Palette.accent,
+                value = d?.respRateBpm?.let { String.format(Locale.US, "%.1f", it) } ?: NO_DATA,
+                caption = d?.respRateBpm?.let { "rpm" },
+                accent = d?.respRateBpm?.let { Palette.accent } ?: Palette.textTertiary,
                 spark = w.resp,
                 sparkColor = Palette.accent,
             )
         },
         { m ->
-            // No on-device daily steps source on Android yet — show the empty state.
             SparkStatTile(
                 modifier = m,
                 label = "Steps",
-                value = "—",
-                caption = "today",
-                accent = Palette.metricCyan,
+                value = NO_DATA,
+                caption = "not connected",
+                accent = Palette.textTertiary,
                 spark = emptyList(),
                 sparkColor = Palette.metricCyan,
             )
@@ -226,9 +281,9 @@ private fun MetricGrid(d: DailyMetric?, w: Window) {
             SparkStatTile(
                 modifier = m,
                 label = "Weight",
-                value = "—",
-                caption = "latest",
-                accent = Palette.accent,
+                value = NO_DATA,
+                caption = "not connected",
+                accent = Palette.textTertiary,
                 spark = emptyList(),
                 sparkColor = Palette.accent,
             )
@@ -237,9 +292,9 @@ private fun MetricGrid(d: DailyMetric?, w: Window) {
             SparkStatTile(
                 modifier = m,
                 label = "Calories",
-                value = "—",
-                caption = "active",
-                accent = Palette.metricAmber,
+                value = NO_DATA,
+                caption = "not connected",
+                accent = Palette.textTertiary,
                 spark = emptyList(),
                 sparkColor = Palette.metricAmber,
             )
@@ -255,6 +310,88 @@ private fun MetricGrid(d: DailyMetric?, w: Window) {
                 if (rowTiles.size == 1) Spacer(Modifier.weight(1f))
             }
         }
+    }
+}
+
+// MARK: - Today footer sections
+
+private data class TodayFooterState(
+    val recentWorkouts: List<WorkoutRow> = emptyList(),
+    val whoopDays: Int? = null,
+    val whoopWorkouts: Int? = null,
+    val appleDays: Int? = null,
+    val appleWorkouts: Int? = null,
+)
+
+@Composable
+private fun TodayWorkoutsSection(workouts: List<WorkoutRow>) {
+    if (workouts.isEmpty()) return
+
+    SectionHeader("Last Workouts", overline = "Activity", trailing = "14 days")
+    Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
+        workouts.take(4).chunked(2).forEach { rowWorkouts ->
+            Row(horizontalArrangement = Arrangement.spacedBy(Metrics.gap)) {
+                rowWorkouts.forEach { workout ->
+                    StatTile(
+                        modifier = Modifier.weight(1f),
+                        label = workout.sport,
+                        value = workoutDuration(workout),
+                        caption = workoutCaption(workout),
+                        accent = workout.strain?.let { Palette.strainColor(it) } ?: Palette.textPrimary,
+                        delta = workout.energyKcal?.let { "${it.roundToInt()} kcal" },
+                        deltaColor = Palette.metricAmber,
+                    )
+                }
+                if (rowWorkouts.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun TodaySourcesSection(footer: TodayFooterState) {
+    SectionHeader("Data Sources", overline = "Provenance")
+    NoopCard {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            SourceRow(
+                badge = "Whoop",
+                tint = Palette.accent,
+                present = (footer.whoopDays ?: 0) > 0,
+                detail = countDetail(footer.whoopDays, footer.whoopWorkouts, "workouts"),
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(Palette.hairline),
+            )
+            SourceRow(
+                badge = "Apple Health",
+                tint = Palette.metricCyan,
+                present = (footer.appleDays ?: 0) > 0 || (footer.appleWorkouts ?: 0) > 0,
+                detail = countDetail(footer.appleDays, footer.appleWorkouts, "workouts"),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SourceRow(
+    badge: String,
+    tint: Color,
+    present: Boolean,
+    detail: String,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        SourceBadge(badge, tint = if (present) tint else Palette.textTertiary)
+        Spacer(Modifier.weight(1f))
+        Text(
+            text = if (present) detail else "Not connected",
+            style = NoopType.captionNumber,
+            color = if (present) Palette.textSecondary else Palette.textTertiary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -454,9 +591,8 @@ private data class Window(
 )
 
 /**
- * Build the 14-day windows from `recentDays`. Each series drops null days then takes
- * the trailing 14 points; if that slice has <2 points it falls back to all available
- * history (the macOS sparse-data rule) so a tile renders a line whenever data exists.
+ * Build the 14-day windows from `recentDays`. Each series drops null days from the
+ * trailing calendar window only, so stale imports do not draw a current-day trend.
  */
 @Composable
 private fun remember14(days: List<com.noop.data.DailyMetric>): Window =
@@ -501,7 +637,7 @@ private fun synthesisWord(score: Double?): String {
 
 private fun synthesisDetail(d: DailyMetric?): String {
     val rec = d?.recovery
-        ?: return "No metrics yet. Sync your strap to begin."
+        ?: return "No metrics yet. Import your WHOOP export or wear the strap to begin."
     val recPart = when {
         rec < 50 -> "Recovery is low"
         rec < 70 -> "Recovery is steady"
@@ -514,13 +650,42 @@ private fun synthesisDetail(d: DailyMetric?): String {
 }
 
 private fun ringSupporting(d: DailyMetric?): String {
-    val hrv = d?.avgHrv?.let { "${it.roundToInt()} ms" } ?: "— ms"
-    val rhr = d?.restingHr?.toString() ?: "—"
+    val hrv = d?.avgHrv?.let { "${it.roundToInt()} ms" } ?: NO_DATA
+    val rhr = d?.restingHr?.toString() ?: NO_DATA
     return "HRV $hrv · RHR $rhr"
 }
 
 private fun sleepValue(d: DailyMetric?): String {
-    val m = d?.totalSleepMin ?: return "—"
+    val m = d?.totalSleepMin ?: return NO_DATA
     val total = m.roundToInt()
     return "${total / 60}h ${total % 60}m"
 }
+
+private const val NO_DATA = "No Data"
+
+private val workoutDateFmt: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("d MMM", Locale.US).withZone(ZoneId.systemDefault())
+
+private fun countDetail(days: Int?, workouts: Int?, workoutLabel: String): String {
+    if (days == null || workouts == null) return "Counting..."
+    return "${grouped(days)} days · ${grouped(workouts)} $workoutLabel"
+}
+
+private fun workoutDuration(row: WorkoutRow): String {
+    val seconds = row.durationS ?: (row.endTs - row.startTs).coerceAtLeast(0L).toDouble()
+    if (seconds <= 0.0) return NO_DATA
+    val totalMinutes = (seconds / 60.0).roundToInt()
+    return if (totalMinutes >= 60) {
+        "${totalMinutes / 60}h ${totalMinutes % 60}m"
+    } else {
+        "${totalMinutes}m"
+    }
+}
+
+private fun workoutCaption(row: WorkoutRow): String {
+    val date = workoutDateFmt.format(Instant.ofEpochSecond(row.startTs))
+    return row.avgHr?.let { "$date · $it bpm" } ?: date
+}
+
+private fun grouped(value: Int): String =
+    String.format(Locale.US, "%,d", value)
