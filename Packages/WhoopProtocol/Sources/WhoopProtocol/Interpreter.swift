@@ -197,24 +197,54 @@ private func parseFrameWhoop5(_ frame: [UInt8]) -> ParsedFrame {
     fb.add(innerStart, 1, "packet_type", "frame", value: .string(typeName))
     if let seq = seq { fb.add(innerStart + 1, 1, "seq", "frame", value: .int(seq)) }
 
-    // Whoop 5.0 biometric field offsets are a later milestone — for now expose the inner record as
-    // a single unparsed region so the frame is faithfully described without inventing offsets.
+    // WHOOP 5.0 field offsets are the WHOOP 4.0 layout shifted by +4: the inner record starts at
+    // byte 8 here vs byte 4 on 4.0, so every field sits at its 4.0 offset + `delta`. Verified on real
+    // hardware for REALTIME_DATA (type 40) — HR, R-R and the unix timestamp land exactly at +4 (HR
+    // matched the standard 2A37 profile to ~0.4 bpm). We reuse the 4.0 schema with that shift.
     let cmdByte = frame.count > innerStart + 2 ? Int(frame[innerStart + 2]) : 0
-    fb.add(innerStart + 2, 1, "cmd", "cmd",
-           value: frame.count > innerStart + 2 ? .int(cmdByte) : nil)
-    if let declaredLength = declaredLength {
-        let payloadEnd = (declaredLength + 8) - 4   // start of CRC32 trailer
-        if innerStart + 3 < payloadEnd && payloadEnd <= frame.count {
+    let delta = innerStart - 4                       // = 4
+    let payloadEnd = declaredLength.map { ($0 + 8) - 4 }   // start of CRC32 trailer
+    let spec = schema.packet(forType: t)
+    if spec == nil {
+        fb.add(innerStart + 2, 1, "cmd", "cmd",
+               value: frame.count > innerStart + 2 ? .int(cmdByte) : nil)
+        if let payloadEnd = payloadEnd, innerStart + 3 < payloadEnd, payloadEnd <= frame.count {
             fb.region(innerStart + 3, payloadEnd, "payload", "unknown")
         }
-        // crc32 trailer field
-        if payloadEnd + 4 <= frame.count {
-            let crcVal = UInt32(frame[payloadEnd]) | (UInt32(frame[payloadEnd + 1]) << 8)
-                | (UInt32(frame[payloadEnd + 2]) << 16) | (UInt32(frame[payloadEnd + 3]) << 24)
-            fb.add(payloadEnd, 4, "crc32", "frame",
-                   value: .string(String(format: "0x%08X", crcVal)),
-                   note: check.crc32OK == true ? "OK" : "MISMATCH")
+    } else {
+        // Static schema fields at the 4.0 offset + delta.
+        for fld in spec!.fields {
+            guard let dtype = fld.dtype, let val = readDType(frame, fld.off + delta, dtype) else { continue }
+            let value: ParsedValue = fld.`enum`.map { .string(schema.enumName($0, val)) } ?? .int(val)
+            fb.add(fld.off + delta, fld.len, fld.name, fld.cat, value: value, note: fld.note)
         }
+        if spec!.post == "realtime_data" {
+            // Verified variable-length extension: REALTIME_DATA R-R intervals (rr_count @13+delta,
+            // intervals @14+delta…), the same shape as 4.0 shifted by +4.
+            let rrn = readDType(frame, 13 + delta, "u8") ?? 0
+            var rrs: [Int] = []
+            for i in 0..<rrn {
+                let off = 14 + delta + i * 2
+                if let v = readDType(frame, off, "u16"), v > 0 {
+                    fb.add(off, 2, "rr[\(i)]", "rr", value: .int(v), note: "ms")
+                    rrs.append(v)
+                }
+            }
+            fb.parsed["rr_intervals"] = .intArray(rrs)
+        } else if let payloadEnd = payloadEnd, innerStart + 3 < payloadEnd, payloadEnd <= frame.count {
+            // Other types: static fields decoded above; the remaining variable body is kept raw —
+            // its 4.0 post-hook awaits per-type 5.0 hardware verification before we apply it at +4.
+            fb.region(innerStart + 3, payloadEnd, "payload", "unknown")
+        }
+    }
+
+    // crc32 trailer field
+    if let payloadEnd = payloadEnd, payloadEnd + 4 <= frame.count {
+        let crcVal = UInt32(frame[payloadEnd]) | (UInt32(frame[payloadEnd + 1]) << 8)
+            | (UInt32(frame[payloadEnd + 2]) << 16) | (UInt32(frame[payloadEnd + 3]) << 24)
+        fb.add(payloadEnd, 4, "crc32", "frame",
+               value: .string(String(format: "0x%08X", crcVal)),
+               note: check.crc32OK == true ? "OK" : "MISMATCH")
     }
 
     let cmdName = (t == 35 || t == 36 || t == PuffinPacketType.puffinCommandResponse)
