@@ -201,6 +201,44 @@ AA 01 08 00 00 01 E6 71 23 01 91 01 36 3E 5C 8D
 This is a fully-formed type-35 COMMAND frame with a valid CRC16-Modbus header and CRC32 trailer,
 exposed as `DeviceFamily.whoop5ClientHello`.
 
+### Bonding and the puffin session (hardware-verified)
+
+Confirmed against a real WHOOP 5 strap using the Linux capture tooling in `tools/linux-capture/` (a
+`bleak`/BlueZ capture feeding the `whoop-decode` CLI). The notes below supersede the earlier
+"unverified on MG hardware" caveats for the connect path.
+
+**The `fd4b…` service requires an encrypted link.** Unlike WHOOP 4.0 — whose custom characteristics
+are readable after a plain confirmed write — every `fd4b` operation (subscribing to a notify channel,
+writing to `fd4b0002`) needs the link to be **bonded** first. Without a bond the operation simply
+stalls while the stack waits for an encryption that never arrives. So the 5.0 session has a step the
+4.0 does not: establish a BLE bond *before* anything else.
+
+**The bond is "just works"** — no PIN, no passkey, no OOB. On Apple, CoreBluetooth performs it
+transparently the first time an encrypted characteristic is touched (no strap screen, nothing to
+confirm). On Linux it was reproduced with standard pairing: clear any stale bond, put the strap in
+pairing mode, then pair — `Pair()` completes in ~0.2 s and the bond persists, after which connecting
+needs no further pairing. WHOOP's own guidance is to pair only through the app and *not* via the OS
+Bluetooth menu; for interoperability with a strap **you own**, an OS-level just-works bond is
+nonetheless sufficient — no app-side step is required. (The strap holds one central at a time, so the
+phone must be disconnected first; the firmware logs a `BLE Bond failure` for a contended attempt.)
+
+**Once bonded, the session mirrors 4.0** on the new transport:
+
+1. Subscribe `fd4b0003/0004/0005/0007`.
+2. Write `CLIENT_HELLO` to `fd4b0002`. The strap replies with two `COMMAND_RESPONSE` (GET_HELLO, cmd
+   145) frames carrying the device serial and a session token.
+3. Drive the strap with **the 4.0 command numbers, re-framed for puffin** (`puffinCommandFrame` in
+   `Framing.swift`). Verified on hardware: `SEND_HISTORICAL_DATA` (22) starts a full historical
+   offload — trim-cursor acks, `History burst success`, `Historical Dump Complete`, exactly the §5
+   4.0 mechanism; `GET_CLOCK` (11), `TOGGLE_REALTIME_HR` (3) and `SEND_R10_R11_REALTIME` (63) are all
+   accepted. The puffin command set is therefore the 4.0 set on the 5.0 transport, not a new one.
+
+**`CONSOLE_LOGS` (type 50) are plaintext firmware logs.** The 5.0 emits them freely, and they narrate
+the command flow in clear text (`HELLO: Send hello packet`, `Command Send Historical Data`, `History
+burst success. Trim: 0x00000010:0001b635 (16:112181)`, `Historical Dump Complete`, `PullStats:
+Data: 5, Events: 279, Bytes: 21292`). They are a useful cross-check when mapping the rest of the
+protocol.
+
 ### "Puffin" packet types
 
 WHOOP 5.0 introduces parallel packet types that carry the same semantics on the new transport. Rather
@@ -212,9 +250,13 @@ fall through to "unknown":
 | 38 `PUFFIN_COMMAND_RESPONSE` | `COMMAND_RESPONSE` (36) |
 | 56 `PUFFIN_METADATA` | `METADATA` (49) |
 
-> WHOOP 5.0 framing, the hello, and the puffin aliases are implemented and unit-tested. The 5.0
-> **biometric field offsets** are a later milestone: `parseFrameWhoop5` currently exposes the inner
-> record as a single unparsed region rather than inventing offsets.
+> WHOOP 5.0 framing, the hello, the puffin aliases, the bond/session handshake and the command set
+> are implemented and now hardware-verified (see "Bonding and the puffin session" above): the strap
+> bonds, accepts the 4.0 command numbers, and performs a full historical offload, all decoding
+> CRC-valid. The remaining gap is the 5.0 **biometric field offsets** — `parseFrameWhoop5` still
+> exposes the inner record as a single unparsed region rather than inventing offsets. Mapping them
+> needs a clean capture of the historical data records (the type-47 equivalent) correlated against
+> ground truth; capture with `tools/linux-capture/whoop_capture.py --probe` and decode with `whoop-decode`.
 
 ---
 
