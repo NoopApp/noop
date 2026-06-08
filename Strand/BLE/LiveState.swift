@@ -37,6 +37,13 @@ public final class LiveState: ObservableObject {
     /// Kept as a closure so LiveState stays a plain observable snapshot with no alert dependency.
     public var onBatteryUpdate: ((Double) -> Void)?
 
+    /// Number of WHOOP 5/MG ("puffin") frames captured this session (when frame capture is enabled in
+    /// Settings → Experimental). Drives the capture status line + export button.
+    @Published public var puffinCaptureCount: Int = 0
+    /// On-disk location of the current puffin capture file, once anything has been flushed. The
+    /// Settings "Export" / "Reveal" actions target this URL.
+    @Published public var puffinCaptureURL: URL?
+
     public init() {}
 
     /// Single funnel for battery readings — updates the published value AND notifies the hook,

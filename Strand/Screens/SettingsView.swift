@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 import StrandDesign
 import WhoopStore
 
@@ -17,6 +19,9 @@ struct SettingsView: View {
 
     /// Opt-in WHOOP 5/MG protocol experiments (off by default). See [PuffinExperiment].
     @AppStorage(PuffinExperiment.defaultsKey) private var puffinExperiments = false
+
+    /// Opt-in WHOOP 5/MG raw-frame capture to a file (off by default). See [PuffinFrameRecorder].
+    @AppStorage(PuffinFrameRecorder.enabledKey) private var puffinCapture = false
 
     /// "What's New" changelog sheet, reachable any time from About.
     @State private var showWhatsNew = false
@@ -236,8 +241,75 @@ struct SettingsView: View {
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
+
+                Divider().overlay(StrandPalette.hairline)
+
+                Toggle(isOn: $puffinCapture) {
+                    Text("Record puffin frames to a file")
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                }
+                .toggleStyle(.switch)
+                .tint(StrandPalette.accent)
+                Text("Saves every raw 5/MG frame (with a timestamp and the live heart rate) to a JSON file you can share to help map the biometric layout. This only records frames the strap already sent — it never writes to your strap — so it is safe to leave on. Export the file and attach it to a protocol-mapping issue.")
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if live.puffinCaptureCount > 0 {
+                    Text("\(live.puffinCaptureCount) frame\(live.puffinCaptureCount == 1 ? "" : "s") captured this session.")
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                    HStack(spacing: 12) {
+                        Button {
+                            exportPuffinCaptures()
+                        } label: {
+                            Label("Export frames…", systemImage: "square.and.arrow.up")
+                                .padding(.horizontal, 6)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(StrandPalette.accent)
+
+                        Button {
+                            revealPuffinCaptures()
+                        } label: {
+                            Label("Reveal in Finder", systemImage: "folder")
+                                .padding(.horizontal, 6)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(StrandPalette.accent)
+                        Spacer(minLength: 0)
+                    }
+                }
             }
         }
+    }
+
+    /// Flush the in-flight capture, then copy it to a user-chosen location via a save panel.
+    private func exportPuffinCaptures() {
+        model.ble.flushPuffinCaptures()
+        guard let src = live.puffinCaptureURL else { return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = src.lastPathComponent
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let dest = panel.url else { return }
+        let fm = FileManager.default
+        do {
+            if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: dest) }
+            try fm.copyItem(at: src, to: dest)
+        } catch {
+            backupAlertTitle = "Export failed"
+            backupAlertMessage = error.localizedDescription
+            showBackupAlert = true
+        }
+    }
+
+    /// Flush, then reveal the capture file in Finder so the user can grab it directly.
+    private func revealPuffinCaptures() {
+        model.ble.flushPuffinCaptures()
+        guard let url = live.puffinCaptureURL else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
     private var backupCard: some View {
