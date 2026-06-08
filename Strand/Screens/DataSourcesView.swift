@@ -6,32 +6,21 @@ struct DataSourcesView: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var repo: Repository
     @EnvironmentObject var live: LiveState
-    @State private var picking = false
-    @State private var pickingApple = false
+    @State private var showingImporter = false
+    @State private var importTarget: ImportTarget = .whoop
 
     var body: some View {
         ScreenScaffold(title: "Data Sources",
                        subtitle: "Everything stays on this Mac. Bring your history in once, then it's yours.") {
-            // Each importer lives on its OWN card. Two `.fileImporter` modifiers on the
-            // same view silently collapse to one in SwiftUI — which is why the WHOOP
-            // button used to do nothing while Apple Health worked (issue #5).
             whoopCard
-                .fileImporter(isPresented: $picking,
-                              allowedContentTypes: [.zip, .folder],
-                              allowsMultipleSelection: false) { result in
-                    if case .success(let urls) = result, let url = urls.first {
-                        model.importWhoop(url: url)
-                    }
-                }
             appleHealthCard
-                .fileImporter(isPresented: $pickingApple,
-                              allowedContentTypes: [.zip, .folder],
-                              allowsMultipleSelection: false) { result in
-                    if case .success(let urls) = result, let url = urls.first {
-                        model.importAppleHealth(url: url)
-                    }
-                }
             liveCard
+        }
+        // A single target-aware importer avoids SwiftUI collapsing competing importers on the same screen.
+        .fileImporter(isPresented: $showingImporter,
+                      allowedContentTypes: importTarget.allowedContentTypes,
+                      allowsMultipleSelection: false) { result in
+            handleImportResult(result, for: importTarget)
         }
     }
 
@@ -40,7 +29,7 @@ struct DataSourcesView: View {
              subtitle: "Import your full WHOOP history — recovery, strain, sleep, workouts — from a data export (.zip). Works for WHOOP 4.0, 5.0 and MG. Get one at app.whoop.com → Data Management.") {
             HStack(spacing: 12) {
                 Button {
-                    picking = true
+                    presentImporter(.whoop)
                 } label: {
                     Label(model.importing ? "Importing…" : "Choose export…",
                           systemImage: "tray.and.arrow.down")
@@ -63,7 +52,7 @@ struct DataSourcesView: View {
         card(title: "Apple Health", icon: "heart.fill",
              subtitle: "Import an Apple Health export (Health app → profile → Export All Health Data → export.zip). 7 years of HR, HRV, sleep, SpO₂, steps and more — streamed locally. Large exports take a minute or two.") {
             HStack(spacing: 12) {
-                Button { pickingApple = true } label: {
+                Button { presentImporter(.appleHealth) } label: {
                     Label(model.importing ? "Working…" : "Choose export.zip…", systemImage: "tray.and.arrow.down")
                         .padding(.horizontal, 6)
                 }
@@ -74,6 +63,34 @@ struct DataSourcesView: View {
         }
     }
 
+    private func presentImporter(_ target: ImportTarget) {
+        importTarget = target
+        showingImporter = true
+    }
+
+    private func handleImportResult(_ result: Result<[URL], Error>, for target: ImportTarget) {
+        guard case .success(let urls) = result, let url = urls.first else { return }
+        switch target {
+        case .whoop:
+            model.importWhoop(url: url)
+        case .appleHealth:
+            model.importAppleHealth(url: url)
+        }
+    }
+
+    private enum ImportTarget {
+        case whoop
+        case appleHealth
+
+        var allowedContentTypes: [UTType] {
+            switch self {
+            case .whoop:
+                return [.zip, .folder]
+            case .appleHealth:
+                return [.zip, .xml, .folder]
+            }
+        }
+    }
     private var liveCard: some View {
         card(title: "WHOOP Strap (Live BLE)", icon: "antenna.radiowaves.left.and.right",
              subtitle: "Pairs directly with your strap over Bluetooth — no WHOOP app, no cloud.") {

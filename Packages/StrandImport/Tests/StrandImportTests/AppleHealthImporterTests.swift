@@ -3,9 +3,11 @@ import XCTest
 
 final class AppleHealthImporterTests: XCTestCase {
 
+    private let fixtureName = "sample_health_data.xml"
+
     private func parsed() throws -> AppleHealthImportResult {
-        let data = Fixtures.data("export.xml")
-        XCTAssertFalse(data.isEmpty, "export.xml fixture missing")
+        let data = Fixtures.data(fixtureName)
+        XCTAssertFalse(data.isEmpty, "\(fixtureName) fixture missing")
         return try AppleHealthImporter().importXML(data: data)
     }
 

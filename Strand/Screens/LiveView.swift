@@ -16,6 +16,7 @@ struct LiveView: View {
 
     /// Smoothed, spike-filtered live HR from AppModel (median over a short window).
     private var displayHR: Int? { model.bpm }
+    private var activeConnection: Bool { live.connected && live.bonded }
 
     var body: some View {
         ScreenScaffold(title: "Live",
@@ -29,11 +30,10 @@ struct LiveView: View {
                 logCard
             }
         }
-        .onAppear { if live.bonded { model.startRealtimeHR(); model.getBattery() } }
+        .onAppear { refreshLiveSession() }
         .onDisappear { model.stopRealtimeHR() }
-        .onChange(of: live.bonded) { bonded in
-            if bonded { model.startRealtimeHR(); model.getBattery() }
-        }
+        .onChange(of: live.bonded) { _ in refreshLiveSession() }
+        .onChange(of: live.connected) { _ in refreshLiveSession() }
     }
 
     // MARK: - Connection
@@ -47,8 +47,9 @@ struct LiveView: View {
 
     private var connectionPill: some View {
         let (label, color): (String, Color) =
-            live.bonded ? ("Bonded", StrandPalette.accent)
+            activeConnection ? ("Streaming", StrandPalette.accent)
             : live.connected ? ("Connected", StrandPalette.statusWarning)
+            : live.bonded ? ("Paired · idle", StrandPalette.statusWarning)
             : ("Disconnected", StrandPalette.metricRose)
         return HStack(spacing: 8) {
             Circle().fill(color).frame(width: 9, height: 9)
@@ -138,8 +139,8 @@ struct LiveView: View {
                     .frame(maxWidth: .infinity).padding(.vertical, 8)
             }
             .buttonStyle(.bordered).tint(StrandPalette.accent)
-            .disabled(!live.bonded)
-            .help("Fire a test haptic buzz on the strap (requires a bonded connection)")
+            .disabled(!activeConnection)
+            .help("Fire a test haptic buzz on the strap (requires an active strap connection)")
 
             Button(role: .destructive) { model.disconnect() } label: {
                 Label("Disconnect", systemImage: "xmark.circle")
@@ -148,6 +149,12 @@ struct LiveView: View {
             .buttonStyle(.bordered)
             .disabled(!live.connected)
         }
+    }
+
+    private func refreshLiveSession() {
+        guard activeConnection else { return }
+        model.startRealtimeHR()
+        model.getBattery()
     }
 
     // MARK: - Strap log

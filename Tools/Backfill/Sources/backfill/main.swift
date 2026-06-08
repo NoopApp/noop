@@ -8,9 +8,16 @@ import WhoopStore
 // AppleHealthImport (app target is the source of truth; duplicated here for this dev tool).
 
 let home = FileManager.default.homeDirectoryForCurrentUser.path
-let dbPath = "\(home)/Library/Containers/com.noopapp.noop/Data/Library/Application Support/OpenWhoop/whoop.sqlite"
-let whoopZip = URL(fileURLWithPath: "\(home)/Downloads/my_whoop_data_2026_06_06.zip")
-let appleZip = URL(fileURLWithPath: "\(home)/Downloads/export.zip")
+let env = ProcessInfo.processInfo.environment
+let dbPath = env["NOOP_DB_PATH"]
+    ?? "\(home)/Library/Containers/com.noopapp.noop/Data/Library/Application Support/OpenWhoop/whoop.sqlite"
+func exportURL(from key: String) -> URL? {
+    guard let path = env[key]?.trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty else { return nil }
+    return URL(fileURLWithPath: path)
+}
+let whoopExport = exportURL(from: "WHOOP_EXPORT_PATH")
+let appleExport = exportURL(from: "APPLE_HEALTH_EXPORT_PATH")
+let skipAppleHealth = env["SKIP_APPLE_HEALTH"] == "1"
 
 func dayString(_ d: Date, tzOffsetMin: Int) -> String {
     var cal = Calendar(identifier: .gregorian)
@@ -29,8 +36,9 @@ let store = try await WhoopStore(path: dbPath)
 print("opened \(dbPath)")
 
 // ───── Whoop ─────
-if FileManager.default.fileExists(atPath: whoopZip.path) {
-    let r = try ImportCoordinator().importWhoopExport(from: whoopZip)
+if let whoopExport, FileManager.default.fileExists(atPath: whoopExport.path) {
+    print("importing Whoop export from \(whoopExport.path)")
+    let r = try ImportCoordinator().importWhoopExport(from: whoopExport)
     var metrics: [DailyMetric] = []
     for c in r.cycles {
         guard let s = c.cycleStart else { continue }
@@ -120,12 +128,16 @@ if FileManager.default.fileExists(atPath: whoopZip.path) {
     }
     try await store.upsertWorkouts(workouts, deviceId: "my-whoop")
     print("Whoop: \(metrics.count) days · \(points.count) metric points · \(journal.count) journal · \(workouts.count) workouts")
-} else { print("Whoop zip not found at \(whoopZip.path)") }
+} else if let whoopExport {
+    print("Whoop export not found at \(whoopExport.path)")
+} else {
+    print("WHOOP_EXPORT_PATH not set; skipping Whoop import")
+}
 
 // ───── Apple Health ─────
-if FileManager.default.fileExists(atPath: appleZip.path) {
+if !skipAppleHealth, let appleExport, FileManager.default.fileExists(atPath: appleExport.path) {
     print("parsing Apple Health (large — ~90s)…")
-    let res = try ImportCoordinator().importAppleHealth(from: appleZip)
+    let res = try ImportCoordinator().importAppleHealth(from: appleExport)
     let daily = AppleHealthAggregator.aggregate(res)
     let rows = daily.map { d in AppleDaily(day: d.day, steps: d.steps.map { Int($0) },
         activeKcal: d.activeKcal, basalKcal: d.basalKcal, vo2max: d.vo2max,
@@ -140,6 +152,12 @@ if FileManager.default.fileExists(atPath: appleZip.path) {
     let pts = AppleHealthAggregator.metricPoints(daily).map { MetricPoint(day: $0.day, key: $0.key, value: $0.value) }
     try await store.upsertMetricSeries(pts, deviceId: "apple-health")
     print("Apple: \(daily.count) days · \(pts.count) metric points")
-} else { print("Apple zip not found at \(appleZip.path)") }
+} else if skipAppleHealth {
+    print("Apple Health skipped")
+} else if let appleExport {
+    print("Apple export not found at \(appleExport.path)")
+} else {
+    print("APPLE_HEALTH_EXPORT_PATH not set; skipping Apple Health import")
+}
 
 print("DONE")

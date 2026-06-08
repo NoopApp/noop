@@ -101,6 +101,11 @@ public final class BLEManager: NSObject, ObservableObject {
     /// specific peripheral rather than starting a fresh scan.
     private var restoredPeripheral: CBPeripheral?
     private var cmdCharacteristic: CBCharacteristic?
+    private var cmdNotifyCharacteristic: CBCharacteristic?
+    private var eventNotifyCharacteristic: CBCharacteristic?
+    private var dataNotifyCharacteristic: CBCharacteristic?
+    private var heartRateCharacteristic: CBCharacteristic?
+    private var batteryCharacteristic: CBCharacteristic?
     private var reassembler = Reassembler()
     private var seq: UInt8 = 0
     private var didBond = false
@@ -110,6 +115,7 @@ public final class BLEManager: NSObject, ObservableObject {
     /// and which service we discover after connecting. Hydrated from the persisted
     /// pick so restoration/reconnect after a relaunch target the right strap.
     private var selectedModel: WhoopModel = .persisted
+    private var lastStandardHRLogAt: Date?
 
     /// Stable device id; matches the server's existing device for sync parity. Overridable.
     let deviceId: String
@@ -180,6 +186,26 @@ public final class BLEManager: NSObject, ObservableObject {
             log("Bluetooth not powered on (state=\(central.state.rawValue)); cannot scan yet")
             return
         }
+        if let p = peripheral, p.state == .connected {
+            state.connected = true
+            p.delegate = self
+            log("Already connected to \(model.displayName) — refreshing services and notifications")
+            discoverPrimaryServices(on: p)
+            enableLiveNotifications(reason: "manual refresh")
+            return
+        }
+        if let p = central.retrieveConnectedPeripherals(withServices: [model.scanService]).first {
+            log("Found existing \(model.displayName) connection \(p.identifier) — attaching")
+            preparePeripheral(p)
+            if p.state == .connected {
+                state.connected = true
+                discoverPrimaryServices(on: p)
+                enableLiveNotifications(reason: "attached connection")
+            } else {
+                central.connect(p, options: nil)
+            }
+            return
+        }
         log("Scanning for \(model.displayName)…")
         central.scanForPeripherals(
             withServices: [model.scanService],
@@ -244,8 +270,9 @@ public final class BLEManager: NSObject, ObservableObject {
     ///     sites are unaffected. Pass `.withResponse` for acked commands (e.g. historicalDataResult).
     public func send(_ command: WhoopCommand, payload: [UInt8] = [0x00],
                      writeType: CBCharacteristicWriteType = .withoutResponse) {
-        guard let p = peripheral, let ch = cmdCharacteristic else {
-            log("send(\(command.label)) ignored — not connected")
+        guard state.connected, let p = peripheral, p.state == .connected, let ch = cmdCharacteristic else {
+            let reason = state.connected ? "command characteristic unavailable" : "not connected"
+            log("send(\(command.label)) ignored — \(reason)")
             return
         }
         // WHOOP 5.0/MG uses a different (CRC16/puffin) command framing we don't build yet. Never
@@ -408,10 +435,22 @@ public final class BLEManager: NSObject, ObservableObject {
     /// offload while connected+bonded and not already backfilling — the primary metric sync.
     // MARK: - Keep-alive (always-ping + liveness watchdog)
 
-    /// Enable the heavy realtime stream (type-40/43) and remember we want it re-armed by keep-alive.
-    public func startRealtime() { wantsRealtime = true; send(.toggleRealtimeHR, payload: [0x01]) }
-    /// Stop the realtime stream. The lightweight 0x2A37 HR keeps recording continuously regardless.
-    public func stopRealtime() { wantsRealtime = false; send(.toggleRealtimeHR, payload: [0x00]) }
+    /// Enable live HR and remember we want it re-armed by keep-alive.
+    /// Some WHOOP firmware acknowledges TOGGLE_REALTIME_HR but only emits usable live samples once
+    /// the R10/R11 realtime stream is also on. Keep that stream scoped to the Live tab and stop it
+    /// on disappear so it does not permanently compete with historical offload.
+    public func startRealtime() {
+        wantsRealtime = true
+        enableLiveNotifications(reason: "start realtime")
+        send(.sendR10R11Realtime, payload: [0x01])
+        send(.toggleRealtimeHR, payload: [0x01])
+    }
+    /// Stop the Live-tab realtime streams. The lightweight 0x2A37 HR keeps recording if firmware emits it.
+    public func stopRealtime() {
+        wantsRealtime = false
+        send(.toggleRealtimeHR, payload: [0x00])
+        send(.sendR10R11Realtime, payload: [0x00])
+    }
 
     private func startKeepAlive() {
         keepAliveTimer?.cancel()
@@ -425,6 +464,7 @@ public final class BLEManager: NSObject, ObservableObject {
 
     private func keepAliveFire() {
         guard state.connected, didBond else { return }
+        enableLiveNotifications(reason: "keepalive")
         // Liveness watchdog: if NOTHING has arrived for a while, the stream/link stalled.
         // Bounce the connection — the auto-rescan on disconnect re-bonds and resumes streaming.
         if Date().timeIntervalSince(lastDataAt) > 120 {
@@ -433,7 +473,10 @@ public final class BLEManager: NSObject, ObservableObject {
             return
         }
         guard !backfilling else { return }            // never poke the strap mid-offload
-        if wantsRealtime { send(.toggleRealtimeHR, payload: [0x01]) }   // re-arm so it can't lapse
+        if wantsRealtime {
+            send(.sendR10R11Realtime, payload: [0x01])
+            send(.toggleRealtimeHR, payload: [0x01])
+        }   // re-arm so it can't lapse
         keepAliveTick += 1
         if keepAliveTick % 2 == 0 { send(.getBatteryLevel, payload: []) }  // ~every 60s
     }
@@ -482,6 +525,54 @@ public final class BLEManager: NSObject, ObservableObject {
     }
     private func hex(_ bytes: [UInt8]) -> String {
         bytes.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func preparePeripheral(_ p: CBPeripheral) {
+        peripheral = p
+        p.delegate = self
+        resetCharacteristics()
+    }
+
+    private func discoverPrimaryServices(on p: CBPeripheral) {
+        p.discoverServices([
+            selectedModel.scanService, BLEManager.heartRateService, BLEManager.batteryService,
+        ])
+    }
+
+    private func resetCharacteristics() {
+        cmdCharacteristic = nil
+        cmdNotifyCharacteristic = nil
+        eventNotifyCharacteristic = nil
+        dataNotifyCharacteristic = nil
+        heartRateCharacteristic = nil
+        batteryCharacteristic = nil
+    }
+
+    private func enableLiveNotifications(reason: String) {
+        guard let p = peripheral, p.state == .connected else { return }
+        let chars = [
+            cmdNotifyCharacteristic,
+            eventNotifyCharacteristic,
+            dataNotifyCharacteristic,
+            heartRateCharacteristic,
+            batteryCharacteristic,
+        ].compactMap { $0 }
+        for c in chars where !c.isNotifying {
+            requestNotify(c, on: p, reason: reason)
+        }
+    }
+
+    private func requestNotify(_ c: CBCharacteristic, on p: CBPeripheral, reason: String) {
+        guard c.properties.contains(.notify) || c.properties.contains(.indicate) else {
+            log("Notify unavailable \(c.uuid) (\(reason))")
+            return
+        }
+        if c.isNotifying {
+            log("Notify already active \(c.uuid) (\(reason))")
+            return
+        }
+        p.setNotifyValue(true, for: c)
+        log("Notify requested \(c.uuid) (\(reason))")
     }
 
     // MARK: Alarm API (M6 — additive; does NOT touch connect/offload/sync flows)
@@ -536,7 +627,16 @@ public final class BLEManager: NSObject, ObservableObject {
 
     /// Parse a standard BLE Heart Rate Measurement (0x2A37) via the pure StandardHeartRate parser.
     private func parseStandardHR(_ data: [UInt8]) {
-        guard let m = StandardHeartRate.parse(data) else { return }
+        guard let m = StandardHeartRate.parse(data) else {
+            log("HR notify parse failed: \(hex(data))")
+            return
+        }
+        let now = Date()
+        if lastStandardHRLogAt.map({ now.timeIntervalSince($0) >= 30 }) ?? true {
+            lastStandardHRLogAt = now
+            let plausibility = (30...220).contains(m.hr) ? "" : " ignored"
+            log("HR notify: \(m.hr) bpm\(plausibility), rr=\(m.rr.count)")
+        }
         // R-R: the standard profile is the RELIABLE source (the custom REALTIME_DATA stream
         // usually reports rr_count=0), so always surface intervals when present.
         if !m.rr.isEmpty { state.rr = m.rr }
@@ -561,9 +661,7 @@ extension BLEManager: CBCentralManagerDelegate {
             if p.state != .connected {
                 central.connect(p, options: nil)
             } else {
-                p.discoverServices([
-                    selectedModel.scanService, BLEManager.heartRateService, BLEManager.batteryService,
-                ])
+                discoverPrimaryServices(on: p)
             }
         } else {
             connect()
@@ -577,18 +675,17 @@ extension BLEManager: CBCentralManagerDelegate {
         let name = (advertisementData[CBAdvertisementDataLocalNameKey] as? String) ?? peripheral.name ?? "unknown"
         log("Discovered \(name) (rssi \(RSSI)) — connecting")
         central.stopScan()
-        self.peripheral = peripheral
-        peripheral.delegate = self
+        preparePeripheral(peripheral)
         central.connect(peripheral, options: nil)
     }
 
     public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         restoredPeripheral = nil
+        preparePeripheral(peripheral)
         state.connected = true
+        lastDataAt = Date()
         log("Connected — discovering services")
-        peripheral.discoverServices([
-            selectedModel.scanService, BLEManager.heartRateService, BLEManager.batteryService,
-        ])
+        discoverPrimaryServices(on: peripheral)
     }
 
     public func centralManager(_ central: CBCentralManager,
@@ -612,6 +709,7 @@ extension BLEManager: CBCentralManagerDelegate {
         backfillTimer = nil
         keepAliveTimer?.cancel()
         keepAliveTimer = nil
+        resetCharacteristics()
         Task { @MainActor in await collector?.flushStandardHR() }   // persist any buffered 0x2A37 HR
         if !intentionalDisconnect {
             log("Disconnected\(error.map { " — \($0.localizedDescription)" } ?? ""); rescanning in 3s")
@@ -644,6 +742,7 @@ extension BLEManager: CBCentralManagerDelegate {
         self.peripheral = p
         self.restoredPeripheral = p
         p.delegate = self
+        resetCharacteristics()
         // Collection only runs post-bond, so a restored link was already bonded;
         // seed those flags now. `didWriteValueFor` won't re-fire on its own.
         state.bonded = true
@@ -656,9 +755,7 @@ extension BLEManager: CBCentralManagerDelegate {
         if p.state == .connected {
             state.connected = true
             log("Restored CONNECTED peripheral \(p.identifier) — re-discovering services")
-            p.discoverServices([
-                selectedModel.scanService, BLEManager.heartRateService, BLEManager.batteryService,
-            ])
+            discoverPrimaryServices(on: p)
         } else {
             state.connected = false
             log("Restored DISCONNECTED peripheral \(p.identifier) — reconnect on poweredOn")
@@ -670,7 +767,12 @@ extension BLEManager: CBCentralManagerDelegate {
 // MARK: - CBPeripheralDelegate
 extension BLEManager: CBPeripheralDelegate {
     public func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        if let error {
+            log("Service discovery failed: \(error.localizedDescription)")
+            return
+        }
         guard let services = peripheral.services else { return }
+        log("Services discovered: \(services.map { $0.uuid.uuidString }.joined(separator: ", "))")
         for s in services {
             switch s.uuid {
             case BLEManager.customService:
@@ -697,6 +799,10 @@ extension BLEManager: CBPeripheralDelegate {
     public func peripheral(_ peripheral: CBPeripheral,
                            didDiscoverCharacteristicsFor service: CBService,
                            error: Error?) {
+        if let error {
+            log("Characteristic discovery failed for \(service.uuid): \(error.localizedDescription)")
+            return
+        }
         guard let chars = service.characteristics else { return }
         for c in chars {
             switch c.uuid {
@@ -734,13 +840,19 @@ extension BLEManager: CBPeripheralDelegate {
                  BLEManager.dataNotifyChar,
                  BLEManager.heartRateChar,
                  BLEManager.batteryChar:
-                peripheral.setNotifyValue(true, for: c)
-                log("Subscribed \(c.uuid)")
+                switch c.uuid {
+                case BLEManager.cmdNotifyChar: cmdNotifyCharacteristic = c
+                case BLEManager.eventNotifyChar: eventNotifyCharacteristic = c
+                case BLEManager.dataNotifyChar: dataNotifyCharacteristic = c
+                case BLEManager.heartRateChar: heartRateCharacteristic = c
+                case BLEManager.batteryChar: batteryCharacteristic = c
+                default: break
+                }
+                requestNotify(c, on: peripheral, reason: "discovery")
             default:
                 // WHOOP 5.0/MG puffin notify characteristics (fd4b0003/0004/0005/0007).
                 if BLEManager.whoop5NotifyChars.contains(c.uuid) {
-                    peripheral.setNotifyValue(true, for: c)
-                    log("Subscribed \(c.uuid) (puffin)")
+                    requestNotify(c, on: peripheral, reason: "discovery puffin")
                 }
             }
         }
@@ -791,6 +903,12 @@ extension BLEManager: CBPeripheralDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.requestSync(.connect) }
         startBackfillTimer()   // re-offload the type-47 store every backfillIntervalSeconds
         startKeepAlive()       // always-ping: re-arm realtime, poll battery, watchdog the link
+        enableLiveNotifications(reason: "post-bond")
+        if wantsRealtime {
+            log("Realtime HR: arming after bond")
+            send(.sendR10R11Realtime, payload: [0x01])
+            send(.toggleRealtimeHR, payload: [0x01])
+        }
     }
 
     /// SET_CLOCK(10) payload = the strap's 8-byte form: [seconds u32 LE][subseconds
@@ -819,6 +937,10 @@ extension BLEManager: CBPeripheralDelegate {
     public func peripheral(_ peripheral: CBPeripheral,
                            didUpdateValueFor characteristic: CBCharacteristic,
                            error: Error?) {
+        if let error {
+            log("Notify update failed for \(characteristic.uuid): \(error.localizedDescription)")
+            return
+        }
         guard let data = characteristic.value else { return }
         let bytes = [UInt8](data)
         lastDataAt = Date()   // feed the liveness watchdog on every notification
@@ -898,6 +1020,8 @@ extension BLEManager: CBPeripheralDelegate {
                            error: Error?) {
         if let error = error {
             log("Notify enable failed for \(characteristic.uuid): \(error.localizedDescription)")
+        } else {
+            log("Notify \(characteristic.isNotifying ? "active" : "off") \(characteristic.uuid)")
         }
     }
 }

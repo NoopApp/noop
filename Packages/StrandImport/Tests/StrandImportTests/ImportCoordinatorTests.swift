@@ -4,6 +4,7 @@ import ZIPFoundation
 
 final class ImportCoordinatorTests: XCTestCase {
 
+    private let appleHealthFixture = "sample_health_data.xml"
     private var tempDirs: [URL] = []
 
     override func tearDownWithError() throws {
@@ -58,7 +59,7 @@ final class ImportCoordinatorTests: XCTestCase {
 
     func testAppleHealthFromZipNested() throws {
         let zip = try makeZip(named: "export.zip", entries: [
-            ("apple_health_export/export.xml", "export.xml"),
+            ("apple_health_export/export.xml", appleHealthFixture),
         ])
         let result = try ImportCoordinator().importAppleHealth(from: zip)
         XCTAssertGreaterThan(result.samples.count, 0)
@@ -72,7 +73,7 @@ final class ImportCoordinatorTests: XCTestCase {
     // MARK: - Auto detection
 
     func testDetectKindAppleHealthByXMLExtension() throws {
-        let result = try ImportCoordinator().detectAndImport(from: Fixtures.url("export.xml"))
+        let result = try ImportCoordinator().detectAndImport(from: Fixtures.url(appleHealthFixture))
         XCTAssertEqual(result.kind, .appleHealth)
         if case .appleHealth(let r) = result {
             XCTAssertGreaterThan(r.samples.count, 0)
@@ -97,7 +98,7 @@ final class ImportCoordinatorTests: XCTestCase {
 
     func testDetectKindAppleHealthByZipEntry() throws {
         let zip = try makeZip(named: "export.zip", entries: [
-            ("apple_health_export/export.xml", "export.xml"),
+            ("apple_health_export/export.xml", appleHealthFixture),
         ])
         let result = try ImportCoordinator().detectAndImport(from: zip)
         XCTAssertEqual(result.kind, .appleHealth)

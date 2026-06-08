@@ -29,8 +29,10 @@ public final class FrameRouter {
         state.lastFrameType = parsed.typeName
 
         switch parsed.typeName {
-        case "REALTIME_DATA":
-            // Reject 0 / out-of-range spikes from the realtime stream; AppModel medians the rest.
+        case "REALTIME_DATA", "REALTIME_RAW_DATA":
+            // Reject 0 / out-of-range spikes from realtime streams; AppModel medians the rest.
+            // Some firmware exposes live BPM only on the R10/R11 raw stream after acknowledging
+            // BLE_REALTIME_HR_ON, so the UI can consume it even though persistence still ignores raw43.
             if let hr = parsed.parsed["heart_rate"]?.intValue, hr >= 30, hr <= 220 {
                 state.heartRate = hr
             }

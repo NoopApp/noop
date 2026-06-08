@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<HealthData locale="en_US">
+  <Record type="HKQuantityTypeIdentifierBodyMass" sourceName="Apple Watch" unit="kg" startDate="2024-01-02 06:30:00 +0100" endDate="2024-01-02 06:30:00 +0100" value="72.5"/>
+  <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Apple Watch" unit="count/min" startDate="2024-01-02 08:00:00 +0100" endDate="2024-01-02 08:00:00 +0100" value="61"/>
+  <Record type="HKQuantityTypeIdentifierRestingHeartRate" sourceName="Apple Watch" unit="count/min" startDate="2024-01-02 06:00:00 +0100" endDate="2024-01-02 06:00:00 +0100" value="58"/>
+  <Record type="HKQuantityTypeIdentifierOxygenSaturation" sourceName="Apple Watch" unit="%" startDate="2024-01-02 06:05:00 +0100" endDate="2024-01-02 06:05:00 +0100" value="0.97"/>
+  <Record type="HKQuantityTypeIdentifierRespiratoryRate" sourceName="Apple Watch" unit="count/min" startDate="2024-01-02 06:10:00 +0100" endDate="2024-01-02 06:10:00 +0100" value="15.8"/>
+  <Record type="HKQuantityTypeIdentifierStepCount" sourceName="iPhone" unit="count" startDate="2024-01-02 09:00:00 +0100" endDate="2024-01-02 10:00:00 +0100" value="1200"/>
+  <Record type="HKQuantityTypeIdentifierDietaryWater" sourceName="iPhone" unit="mL" startDate="2024-01-02 09:00:00 +0100" endDate="2024-01-02 09:00:00 +0100" value="250"/>
+  <Record type="HKCategoryTypeIdentifierSleepAnalysis" sourceName="Apple Watch" startDate="2024-01-01 23:15:00 +0100" endDate="2024-01-02 00:15:00 +0100" value="HKCategoryValueSleepAnalysisAsleepCore"/>
+  <Record type="HKCategoryTypeIdentifierSleepAnalysis" sourceName="Apple Watch" startDate="2024-01-02 00:15:00 +0100" endDate="2024-01-02 01:15:00 +0100" value="HKCategoryValueSleepAnalysisAsleepDeep"/>
+  <Record type="HKCategoryTypeIdentifierSleepAnalysis" sourceName="Apple Watch" startDate="2024-01-02 01:15:00 +0100" endDate="2024-01-02 01:30:00 +0100" value="HKCategoryValueSleepAnalysisAwake"/>
+  <Correlation type="HKCorrelationTypeIdentifierBloodPressure" sourceName="Apple Watch" startDate="2024-01-02 08:00:00 +0100" endDate="2024-01-02 08:00:00 +0100">
+    <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Apple Watch" unit="count/min" startDate="2024-01-02 08:00:00 +0100" endDate="2024-01-02 08:00:00 +0100" value="61"/>
+  </Correlation>
+  <Workout workoutActivityType="HKWorkoutActivityTypeRunning" sourceName="Apple Watch" duration="45" durationUnit="min" totalDistance="8.05" totalDistanceUnit="km" totalEnergyBurned="540" totalEnergyBurnedUnit="kcal" startDate="2024-01-02 17:00:00 +0100" endDate="2024-01-02 17:45:00 +0100"/>
+</HealthData>
