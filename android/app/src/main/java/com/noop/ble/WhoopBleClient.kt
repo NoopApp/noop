@@ -199,6 +199,11 @@ class WhoopBleClient(
         /** Stream gone quiet this long (but not yet stall) ⇒ re-subscribe in case a CCCD silently dropped. */
         private const val KEEPALIVE_QUIET_MS = 45_000L
 
+        /** A CCCD write can transiently return BUSY if the stack slot hasn't freed yet; retry the same
+         *  subscribe a few times (short backoff) before giving up, rather than dropping the stream. */
+        private const val CCCD_RETRY_DELAY_MS = 60L
+        private const val MAX_CCCD_RETRIES = 8
+
         /**
          * True when a frame is part of the historical offload (HISTORICAL_DATA=47, EVENT=48,
          * METADATA=49, CONSOLE_LOGS=50) rather than the live stream (REALTIME_DATA=40,
@@ -379,6 +384,9 @@ class WhoopBleClient(
     /** Descriptor-write queue: enabling notifications is also a one-at-a-time GATT operation. */
     private val cccdQueue = ConcurrentLinkedQueue<BluetoothGattCharacteristic>()
     private var cccdInFlight = false
+    /** Bounded retries for a transiently-BUSY CCCD write, so a single rejected subscribe doesn't
+     *  permanently kill a stream (HR/battery/events). Reset per connection in [reset]. */
+    private var cccdRetries = 0
     /** Set once startSession() has fired the first command, so it runs exactly once per connection. */
     private var sessionStarted = false
 
@@ -551,10 +559,25 @@ class WhoopBleClient(
         reset()
         // autoConnect = false for a fast, direct connect (CoreBluetooth central.connect default).
         // TRANSPORT_LE pins the connection to BLE on dual-mode devices.
-        gatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
-        } else {
-            device.connectGatt(context, false, gattCallback)
+        gatt = when {
+            // Pin EVERY GATT callback to the main looper. Without a handler, Android delivers
+            // callbacks on arbitrary binder-pool threads: onServicesDiscovered then races a
+            // concurrent callback, the CCCD queue gets drained to empty, and the bond's
+            // with-response write fires BEFORE the notification subscriptions. The bond then
+            // holds the stack's single GATT slot, so every writeDescriptor is rejected as BUSY
+            // (logged by the stack as "isCallbackThread: Failed! / Callback env fail") and the
+            // subscriptions are abandoned — leaving HR, battery, worn and events permanently
+            // empty even though the strap is bonded and commands (e.g. buzz) still work.
+            // One consistent thread serialises discovery → subscribe → bond in the right order.
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ->
+                device.connectGatt(
+                    context, false, gattCallback, BluetoothDevice.TRANSPORT_LE,
+                    BluetoothDevice.PHY_LE_1M_MASK, handler,
+                )
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ->
+                device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+            else ->
+                device.connectGatt(context, false, gattCallback)
         }
     }
 
@@ -1015,6 +1038,12 @@ class WhoopBleClient(
 
     @SuppressLint("MissingPermission")
     private fun drainWriteQueue() {
+        // Serialise onto the GATT thread (main looper) — see connectGatt(..., handler). A command
+        // issued from a ViewModel coroutine (buzz/send) must not touch the stack off-thread.
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            handler.post { drainWriteQueue() }
+            return
+        }
         if (writeInFlight) return
         val g = gatt ?: return
         val ch = cmdCharacteristic ?: return
@@ -1171,6 +1200,12 @@ class WhoopBleClient(
 
     @SuppressLint("MissingPermission")
     private fun drainCccdQueue(g: BluetoothGatt) {
+        // All GATT mutations must run on the one thread the callbacks are pinned to (the main looper,
+        // via connectGatt(..., handler)). Re-post if we got here from any other thread.
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            handler.post { drainCccdQueue(g) }
+            return
+        }
         if (cccdInFlight) return
         val ch = cccdQueue.poll()
         if (ch == null) {
@@ -1204,8 +1239,17 @@ class WhoopBleClient(
         }
         if (!ok) {
             cccdInFlight = false
-            log("writeDescriptor rejected for ${ch.uuid}")
-            drainCccdQueue(g)
+            if (cccdRetries < MAX_CCCD_RETRIES) {
+                // Transient BUSY (the stack slot hasn't freed): re-queue this subscribe and retry
+                // shortly. Order among the notify chars doesn't matter, so re-add at the tail.
+                cccdRetries++
+                log("writeDescriptor busy for ${ch.uuid}; retry $cccdRetries/$MAX_CCCD_RETRIES")
+                cccdQueue.add(ch)
+                handler.postDelayed({ drainCccdQueue(g) }, CCCD_RETRY_DELAY_MS)
+            } else {
+                log("writeDescriptor rejected for ${ch.uuid} (gave up after $MAX_CCCD_RETRIES retries)")
+                drainCccdQueue(g)
+            }
         }
     }
 
@@ -1437,6 +1481,7 @@ class WhoopBleClient(
         cccdQueue.clear()
         writeInFlight = false
         cccdInFlight = false
+        cccdRetries = 0
         sessionStarted = false
 
         // Reset offload state so the next connect starts a fresh session (port of the backfill
