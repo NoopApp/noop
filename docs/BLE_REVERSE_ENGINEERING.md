@@ -425,6 +425,30 @@ region for any version other than 18, so an unknown record is described, never m
 > capture from the device in hand — do not assume one generation's documented layout transfers to
 > another, even within the same generation.
 
+### WHOOP 5.0 COMMAND_RESPONSE (type 36)
+
+WHOOP 5 reuses the 4.0 command **numbers** on the puffin transport (`resp_cmd` at frame[10], the 4.0
+frame[6] + 4), but the response **payloads** mostly differ from 4.0 — so each field is mapped from a
+real capture (firmware **50.38.1.0**), never ported on faith (`decodeWhoop5CommandResponse`):
+
+| Response | Field | Notes |
+|---|---|---|
+| `GET_BATTERY_LEVEL` (26) | `battery_pct` | **direct percent** at `pay[2]` — the 4.0 deci-percent ÷10 is gone (47 = 47%, confirmed vs the app) |
+| `GET_DATA_RANGE` (34) | `history_oldest` / `history_newest` | the long response carries real-unix timestamps as 4-byte-aligned u32s from `pay[3]`; the window is their min/max |
+| `GET_HELLO` (145) | `device_name`, `fw_version` | the user-facing strap name (ASCII at `pay[16]`) and firmware (4 bytes at `pay[93]`, e.g. `50.38.1.0`) |
+
+What does **not** transfer: `REPORT_VERSION_INFO` (7) and `GET_EXTENDED_BATTERY_INFO` (98) return short
+stub payloads on this firmware (so the firmware version lives in the `GET_HELLO` block instead), and
+`GET_CLOCK` (11) isn't served at all — WHOOP 5 doesn't need it, since realtime (type-40) and historical
+(type-47) both carry real unix rather than a device epoch.
+
+> **Privacy.** The `GET_HELLO` response also contains a **session token**, which the decoder never
+> reads or exposes — only the device name and firmware version are surfaced. The `device_name`/
+> `fw_version` parity tests use a **synthetic** hello frame (fake name, version bytes at their real
+> offsets), so no real device name or token ever enters a committed fixture. The version offset sits
+> after the variable name+token region, so it is anchored to a 50.38.1.0 capture and guarded on the
+> "5.0" generation byte (`pay[93] == 50`) — re-verify it across firmwares.
+
 ---
 
 ## 6. Haptic preset discovery (GET_ALL_HAPTICS_PATTERN)

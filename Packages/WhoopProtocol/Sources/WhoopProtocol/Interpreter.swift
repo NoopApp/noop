@@ -241,6 +241,8 @@ private func parseFrameWhoop5(_ frame: [UInt8]) -> ParsedFrame {
             decodeWhoop5Historical(frame, fb: fb, payloadEnd: payloadEnd)
         } else if spec!.post == "metadata" {
             decodeWhoop5Metadata(frame, fb: fb)
+        } else if spec!.post == "command_response" {
+            decodeWhoop5CommandResponse(frame, fb: fb, schema: schema, payloadEnd: payloadEnd)
         } else if let payloadEnd = payloadEnd, innerStart + 3 < payloadEnd, payloadEnd <= frame.count {
             // Other types: static fields decoded above; the remaining variable body is kept raw —
             // its 4.0 post-hook awaits per-type 5.0 hardware verification before we apply it at +4.
@@ -341,6 +343,58 @@ private func decodeWhoop5Metadata(_ frame: [UInt8], fb: FieldBuilder) {
 /// in `BLEManager`, and the byte-for-byte twin of the Python `build_history_ack` proven on hardware.
 public func whoop5HistoricalAckFrame(endData: [UInt8], seq: UInt8) -> [UInt8] {
     puffinCommandFrame(cmd: 23, seq: seq, payload: [0x01] + endData)
+}
+
+/// Decode a WHOOP 5.0 COMMAND_RESPONSE (type 36) — battery %, history data-range, firmware version.
+///
+/// The response command is at frame[10] (the 4.0 frame[6] + 4) and its payload at frame[11]. WHOOP 5
+/// reuses the 4.0 command NUMBERS, but the response PAYLOADS differ from 4.0 — so each field below is
+/// mapped from a real WHOOP 5 capture (firmware 50.38.1.0), not ported on faith. Commands that return
+/// a short stub on this firmware (REPORT_VERSION_INFO / GET_EXTENDED_BATTERY_INFO) or aren't served
+/// (GET_CLOCK — unneeded, since realtime + historical carry real unix) are intentionally left undecoded.
+private func decodeWhoop5CommandResponse(_ frame: [UInt8], fb: FieldBuilder, schema: Schema, payloadEnd: Int?) {
+    guard let payloadEnd = payloadEnd, 11 < payloadEnd, payloadEnd <= frame.count else { return }
+    let respCmd = Int(frame[10])
+    let name = schema.enumName("CommandNumber", respCmd)   // e.g. "GET_BATTERY_LEVEL(26)"
+    let pay = Array(frame[11..<payloadEnd])
+    fb.region(11, payloadEnd, "response payload", "cmd")
+    if name.hasPrefix("GET_BATTERY_LEVEL"), pay.count >= 3 {
+        // Direct percent at pay[2] (47% confirmed against the app) — the 4.0 deci-percent ÷10 is gone.
+        fb.add(11 + 2, 1, "battery_pct", "battery", value: .double(Double(pay[2])), note: "%")
+    } else if name.hasPrefix("GET_DATA_RANGE"), pay.count >= 7 {
+        // The long response carries record cursors + real-unix timestamps as 4-byte-aligned u32s from
+        // pay[3]; the history window is their min/max. (A short ack response also exists — no
+        // timestamps — so this no-ops on it.)
+        var oldest = UInt32.max, newest: UInt32 = 0
+        var o = 3
+        while o + 4 <= pay.count {
+            let v = UInt32(pay[o]) | (UInt32(pay[o + 1]) << 8) | (UInt32(pay[o + 2]) << 16) | (UInt32(pay[o + 3]) << 24)
+            if v >= 1_600_000_000 && v <= 1_800_000_000 { oldest = min(oldest, v); newest = max(newest, v) }
+            o += 4
+        }
+        if newest > 0 {
+            fb.parsed["history_oldest"] = .int(Int(oldest))
+            fb.parsed["history_newest"] = .int(Int(newest))
+        }
+    } else if respCmd == 145, pay.count >= 26 {
+        // GET_HELLO info block. We surface the two user-facing fields the app shows — the device NAME
+        // (the model-style label the strap calls itself) and the firmware VERSION — and deliberately never
+        // read the session token (also in this response). Both offsets are anchored to a real
+        // 50.38.1.0 capture: the name is printable ASCII at pay[16]; the version is 4 bytes at pay[93],
+        // after the (fixed-width on this firmware) name+token region. Re-verify the version offset
+        // across firmwares; the guards (printable name / pay[93]==50 "5.0" generation) fail closed.
+        var nameBytes: [UInt8] = []
+        var i = 16
+        while i < pay.count, pay[i] != 0, (32...126).contains(pay[i]), nameBytes.count < 24 {
+            nameBytes.append(pay[i]); i += 1
+        }
+        if nameBytes.count >= 6 {
+            fb.parsed["device_name"] = .string(String(decoding: nameBytes, as: UTF8.self))
+        }
+        if pay.count >= 97, pay[93] == 50 {
+            fb.parsed["fw_version"] = .string("\(pay[93]).\(pay[94]).\(pay[95]).\(pay[96])")
+        }
+    }
 }
 
 @inline(__always)

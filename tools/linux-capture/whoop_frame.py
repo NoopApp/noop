@@ -96,6 +96,13 @@ PUFFIN_CMD_HISTORICAL_DATA_RESULT = 23
 PUFFIN_CMD_GET_CLOCK = 11
 PUFFIN_CMD_GET_DATA_RANGE = 34
 PUFFIN_CMD_SEND_R10_R11_REALTIME = 63
+# Read-only "GET" commands that elicit a COMMAND_RESPONSE (type 36) — used to map the WHOOP 5
+# command-response payloads at the +4 offsets. All are non-destructive reads; the response echoes the
+# command number in its cmd byte (frame[10] on 5.0), which selects the payload layout.
+PUFFIN_CMD_REPORT_VERSION_INFO = 7          # → fw version block
+PUFFIN_CMD_GET_BATTERY_LEVEL = 26           # → battery %
+PUFFIN_CMD_GET_EXTENDED_BATTERY_INFO = 98   # → battery mV
+PUFFIN_CMD_GET_BATTERY_PACK_INFO = 151      # WHOOP 5 removable battery pack (no 4.0 analogue)
 
 
 def build_puffin_command(cmd: int, seq: int = 0, payload: bytes = b"\x00",

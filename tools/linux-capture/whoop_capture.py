@@ -213,9 +213,21 @@ async def run(args):
         # EXPERIMENTAL post-hello probes (WHOOP 5 only): try to coax the strap into streaming by
         # sending candidate puffin commands. The command numbers are UNVERIFIED guesses (4.0 numbers
         # on the 5.0 transport) — all non-destructive reads/toggles. Off unless --probe.
-        if (args.probe or args.history_only) and args.model == "whoop5":
+        if (args.probe or args.history_only or args.commands) and args.model == "whoop5":
             await asyncio.sleep(1.0)
-            if args.history_only:
+            if args.commands:
+                # Elicit COMMAND_RESPONSE (type 36) frames to map the WHOOP 5 response payloads at +4.
+                # Each is a non-destructive read; the response echoes the command number, which selects
+                # the payload layout. GET_CLOCK takes an EMPTY payload (a wrong length is ignored).
+                probes = [
+                    (wf.PUFFIN_CMD_GET_BATTERY_LEVEL, b"\x00", "GET_BATTERY_LEVEL"),
+                    (wf.PUFFIN_CMD_GET_CLOCK, b"", "GET_CLOCK"),
+                    (wf.PUFFIN_CMD_REPORT_VERSION_INFO, b"\x00", "REPORT_VERSION_INFO"),
+                    (wf.PUFFIN_CMD_GET_EXTENDED_BATTERY_INFO, b"\x00", "GET_EXTENDED_BATTERY_INFO"),
+                    (wf.PUFFIN_CMD_GET_BATTERY_PACK_INFO, b"\x00", "GET_BATTERY_PACK_INFO"),
+                    (wf.PUFFIN_CMD_GET_DATA_RANGE, b"\x00", "GET_DATA_RANGE"),
+                ]
+            elif args.history_only:
                 # Turn the realtime streams OFF first so they don't starve the historical offload
                 # (mirrors the 4.0 handshake, which disables the type-43 flood before requesting
                 # history), then ask for the data range + the historical store.
@@ -367,6 +379,10 @@ def main():
     p.add_argument("--probe", action="store_true",
                    help="WHOOP 5 only: after CLIENT_HELLO, send candidate puffin commands (realtime "
                         "toggles + history request) to try to start the biometric stream. Experimental.")
+    p.add_argument("--commands", action="store_true",
+                   help="WHOOP 5 only: after CLIENT_HELLO, send the read-only GET commands (battery, "
+                        "clock, version, ext-battery, battery-pack, data-range) to capture their "
+                        "COMMAND_RESPONSE (type 36) frames for mapping the +4 response payloads.")
     p.add_argument("--history-only", dest="history_only", action="store_true",
                    help="WHOOP 5 only: turn the realtime streams OFF, then request the historical "
                         "offload (type-47 records). Use instead of --probe to avoid the realtime "
