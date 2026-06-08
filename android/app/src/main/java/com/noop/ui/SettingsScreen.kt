@@ -1,10 +1,13 @@
 package com.noop.ui
 
 import android.content.ActivityNotFoundException
+import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -58,6 +61,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.BuildConfig
 import com.noop.analytics.Zones
@@ -164,6 +168,30 @@ fun SettingsScreen(vm: AppViewModel) {
     fun mutate(block: () -> Unit) { block(); rev++ }
 
     var backupBusy by remember { mutableStateOf(false) }
+
+    val blePerms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+        arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+    else
+        arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+    val blePermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { grants ->
+        if (grants.values.all { it }) {
+            vm.connect()
+        } else {
+            Toast.makeText(
+                context,
+                "NOOP needs Nearby devices / Bluetooth permission to scan.",
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+    }
+    fun requestConnect() {
+        val granted = blePerms.all {
+            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+        }
+        if (granted) vm.connect() else blePermLauncher.launch(blePerms)
+    }
 
     // "What's New" changelog sheet, reachable any time from About (mirrors the macOS
     // Settings → About "What's new" button). Persistence/gating lives in NoopRoot; this
@@ -323,9 +351,9 @@ fun SettingsScreen(vm: AppViewModel) {
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     StatePill(
-                        title = strapStatusTitle(live.bonded, live.connected),
-                        tone = strapTone(live.bonded, live.connected),
-                        pulsing = live.connected,
+                        title = strapStatusTitle(live.bonded, live.connected, live.scanning),
+                        tone = strapTone(live.bonded, live.connected, live.scanning),
+                        pulsing = live.connected || live.scanning,
                     )
                     live.batteryPct?.let { pct ->
                         StatePill(
@@ -336,18 +364,39 @@ fun SettingsScreen(vm: AppViewModel) {
                     }
                 }
                 Text(
-                    strapStatusDetail(live.bonded, live.connected),
+                    strapStatusDetail(live.bonded, live.connected, live.scanning),
                     style = NoopType.subhead,
                     color = Palette.textSecondary,
                 )
+                live.statusNote?.let { note ->
+                    Text(
+                        note,
+                        style = NoopType.footnote,
+                        color = Palette.textTertiary,
+                    )
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Button(
-                        onClick = { vm.connect() },
+                        onClick = { requestConnect() },
+                        enabled = !live.scanning,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Palette.accent,
                             contentColor = Palette.surfaceBase,
                         ),
-                    ) { Text("Re-scan", style = NoopType.captionNumber) }
+                    ) {
+                        if (live.scanning) {
+                            CircularProgressIndicator(
+                                modifier = Modifier
+                                    .size(14.dp)
+                                    .padding(end = 4.dp),
+                                strokeWidth = 2.dp,
+                                color = Palette.surfaceBase,
+                            )
+                            Text("Scanning", style = NoopType.captionNumber)
+                        } else {
+                            Text("Re-scan", style = NoopType.captionNumber)
+                        }
+                    }
 
                     OutlinedButton(
                         onClick = { vm.disconnect() },
@@ -686,20 +735,23 @@ private const val SUPPORT_EMAIL = "thenoopapp@gmail.com"
 
 // MARK: - Strap status helpers (mirror SettingsView's computed properties)
 
-private fun strapStatusTitle(bonded: Boolean, connected: Boolean): String = when {
+internal fun strapStatusTitle(bonded: Boolean, connected: Boolean, scanning: Boolean): String = when {
+    scanning -> "Searching..."
     bonded && connected -> "Bonded · streaming"
     connected -> "Connected"
     bonded -> "Bonded · idle"
     else -> "Disconnected"
 }
 
-private fun strapTone(bonded: Boolean, connected: Boolean): StrandTone = when {
+private fun strapTone(bonded: Boolean, connected: Boolean, scanning: Boolean): StrandTone = when {
+    scanning -> StrandTone.Warning
     connected -> StrandTone.Positive
     bonded -> StrandTone.Warning
     else -> StrandTone.Critical
 }
 
-private fun strapStatusDetail(bonded: Boolean, connected: Boolean): String = when {
+internal fun strapStatusDetail(bonded: Boolean, connected: Boolean, scanning: Boolean): String = when {
+    scanning -> "Scanning for your WHOOP. Keep the strap nearby and leave NOOP open."
     bonded && connected -> "Your strap is paired and sending data. Open Live for a real-time heart rate."
     connected -> "Connected. Finishing the secure pairing handshake…"
     bonded -> "Previously paired but not currently connected. Re-scan to reconnect."
