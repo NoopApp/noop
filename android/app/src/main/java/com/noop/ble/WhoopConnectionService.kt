@@ -24,8 +24,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -96,7 +96,12 @@ class WhoopConnectionService : Service() {
                 val todayKey = java.time.LocalDate.now().toString()
                 state to days.lastOrNull { it.day == todayKey }?.recovery
             }.catch { /* belt-and-braces: a frozen notification beats a dead process */ }
-                .collectLatest { (state, recovery) ->
+                // conflate + collect, NOT collectLatest (#82): the widget push suspends in Glance
+                // machinery longer than the live-HR emission interval, so collectLatest cancelled
+                // every push mid-flight and the widget starved on stale data the moment HR started
+                // streaming. Conflation still processes only the latest value — just without the axe.
+                .conflate()
+                .collect { (state, recovery) ->
                 postNotification(state, recovery)
                 // Feed the home-screen widget from the same stream — this service is its heartbeat
                 // while the app UI is closed. Throttled + no-op without a placed widget (the store

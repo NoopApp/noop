@@ -25,7 +25,7 @@ object AppChangelog {
      * Bump this when you add a release below. The "What's New" sheet shows automatically when the
      * stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
      */
-    const val CURRENT_VERSION = "1.60"
+    const val CURRENT_VERSION = "1.61"
 
     data class Release(
         val version: String,
@@ -36,6 +36,14 @@ object AppChangelog {
 
     /** Newest first. */
     val releases: List<Release> = listOf(
+        Release(
+            version = "1.61",
+            title = "Android: the widget now actually updates",
+            date = "June 2026",
+            items = listOf(
+                "Fixed (Android): the home-screen widget could freeze on \"—\" for heart rate and battery while the app itself streamed live HR perfectly well (#82, second find). The widget update was being cancelled mid-write every time a new heart-rate sample arrived — and with samples landing every second, no update ever finished once streaming started. Updates now run to completion, and the first heart-rate sample after connecting shows on the widget immediately instead of waiting out a refresh window. Thanks to the reporter whose precise symptoms — live HR fine in the app, widget stuck with \"Connected\" underneath — pointed straight at it. Mac: version bump only.",
+            ),
+        ),
         Release(
             version = "1.60",
             title = "Android: notification recovery fix + widget armour",

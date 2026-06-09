@@ -17,6 +17,23 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 1.61 — Android: the widget now actually updates (#82, second find)
+
+- **Fixed: widget starvation under live HR.** The reporter's follow-up symptoms (live HR fine in-app,
+  widget frozen at "♥ —"/"⚡ —" with "Connected" underneath, surviving re-adds and reboots, on a Pixel)
+  pinned a textbook coroutine bug: the service collected the notification/widget stream with
+  **`collectLatest`, whose body is cancelled on every new emission** — and `WidgetSnapshotStore.push()`
+  suspends in Glance machinery (`getGlanceIds` + `updateAll`) longer than the ~1 s live-HR emission
+  interval. Once streaming started, **every push was cancelled mid-flight, forever**; only the sparse
+  post-connect pushes (connected=true, HR/battery not yet present) ever completed — exactly what the
+  widget showed. Compounding it, the throttle marked `lastPushAtMs` BEFORE the write, so each doomed
+  attempt also burned the 60 s refresh window. The notification was immune (synchronous post).
+- **Fix:** `conflate()` + `collect` (process the latest value, never cancel in-flight) + throttle
+  decision extracted to a pure `PushGate` (mark **after** save; save **before** the placed-widget
+  check so a widget added later renders fresh data; **HR-presence joins the key** so the first sample
+  pushes immediately instead of waiting out the window). Regression-pinned by `PushGateTests` (7 tests).
+- macOS: **version bump only.**
+
 ## 1.60 — Android: notification recovery fix + widget armour (#82)
 
 - **Fixed: the v1.56 notification Recovery %** — `buildNotification` accepted the value but the
