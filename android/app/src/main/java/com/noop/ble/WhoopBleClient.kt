@@ -230,8 +230,11 @@ class WhoopBleClient(
          *  worst on Android 16) when the previous write hasn't physically completed. Retry the SAME
          *  frame a few times (short backoff) instead of dropping it — a dropped TOGGLE_REALTIME_HR /
          *  SET_CLOCK / offload-ack silently breaks live HR, the clock, or the backfill (issue #77). */
+        // Base backoff; the per-frame delay ESCALATES (× attempt) so a sustained-BUSY stack — a Pixel 7
+        // on Android 16 logged ~56 busy retries + a few hard drops in 10 min (#77) — gets progressively
+        // more time to clear instead of burning the whole budget in ~70ms.
         private const val WRITE_RETRY_DELAY_MS = 12L
-        private const val MAX_WRITE_RETRIES = 6
+        private const val MAX_WRITE_RETRIES = 12
         /** Pacing gap before freeing the slot after a WITHOUT-response write. A bare post fires the next
          *  write on the same looper tick — before Android's GATT has accepted the previous one, which it
          *  then rejects. A small gap lets the stack settle and largely eliminates the rejections (#77). */
@@ -427,6 +430,10 @@ class WhoopBleClient(
     @Volatile private var wantsRealtime = false
     /** Wall-clock of the last inbound notification — drives the keep-alive liveness watchdog. */
     @Volatile private var lastDataAtMs = 0L
+    /** True once we've re-subscribed during the CURRENT quiet episode, so the keep-alive re-subscribes
+     *  at most once between data arrivals instead of flooding descriptor writes every 30s tick (#77).
+     *  Reset to false in [onInbound] when fresh data lands. */
+    @Volatile private var resubscribedSinceData = false
 
     /**
      * Pending outbound writes. Android's GATT stack allows ONE in-flight write at a time:
@@ -942,6 +949,7 @@ class WhoopBleClient(
 
     private fun onInbound(uuid: UUID, bytes: ByteArray) {
         lastDataAtMs = System.currentTimeMillis()   // feeds the keep-alive liveness watchdog
+        resubscribedSinceData = false               // data is flowing again — re-arm the one-shot resubscribe
         when {
             uuid == HEART_RATE_CHAR -> parseStandardHr(bytes)       // 0x2A37
             uuid == BATTERY_CHAR -> bytes.firstOrNull()?.let {      // 0x2A19 = percent
@@ -1201,8 +1209,14 @@ class WhoopBleClient(
                 intentionalDisconnect = false    // make sure the auto-reconnect fires
                 gatt?.disconnect()               // → handleDisconnect → reset() (cancels this) → reconnect
             } else {
-                // Recover a silently-dropped subscription once the stream has gone quiet (any family).
-                if (silentMs > KEEPALIVE_QUIET_MS) enableLiveNotifications()
+                // Recover a silently-dropped subscription once the stream has gone quiet (any family) —
+                // but only ONCE per quiet episode. Re-subscribing all notify chars every 30s tick floods
+                // descriptor writes that collide with the command queue on a slow stack (#77); a single
+                // re-subscribe recovers a dropped CCCD, repeating it just adds congestion. Re-armed on data.
+                if (silentMs > KEEPALIVE_QUIET_MS && !resubscribedSinceData) {
+                    resubscribedSinceData = true
+                    enableLiveNotifications()
+                }
                 // WHOOP 4.0 only: re-arm realtime HR so the firmware can't let it lapse (while the Live
                 // screen wants it), and poll battery (~60s) — which also keeps the link warm. A 5/MG
                 // strap rejects WHOOP4-framed commands, so we skip them and rely on re-subscribe + bounce.
@@ -1328,7 +1342,9 @@ class WhoopBleClient(
                 writeRetries++
                 log("writeCharacteristic busy; retry $writeRetries/$MAX_WRITE_RETRIES")
                 pendingRetry = item
-                handler.postDelayed({ drainWriteQueue() }, WRITE_RETRY_DELAY_MS)
+                // Escalating backoff (12, 24, … capped ~96ms) — ride out a congestion spike instead of
+                // exhausting the budget in a few tens of ms while the stack is still busy (#77).
+                handler.postDelayed({ drainWriteQueue() }, WRITE_RETRY_DELAY_MS * minOf(writeRetries, 8))
             } else {
                 // Genuinely stuck after several tries — drop this one frame so it can't wedge the queue.
                 log("writeCharacteristic rejected by stack; dropping one frame (after $MAX_WRITE_RETRIES retries)")
@@ -1729,6 +1745,7 @@ class WhoopBleClient(
         writeInFlight = false
         pendingRetry = null
         writeRetries = 0
+        resubscribedSinceData = false
         cccdInFlight = false
         cccdRetries = 0
         sessionStarted = false

@@ -17,7 +17,24 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
-## 1.49 — Spanish WHOOP exports now import (#76)
+## 1.50 — Steadier Bluetooth on congested Android stacks (#77)
+
+- **Fixed (Android): sustained command-write congestion on slow GATT stacks.** A Pixel 7 on Android 16
+  logged ~56 `writeCharacteristic busy` retries **and 6 hard `dropped after 6 retries`** in ten minutes
+  (v1.48). Two changes:
+  - **Bigger, escalating write-retry budget** — `MAX_WRITE_RETRIES` 6 → 12, and the backoff now grows
+    per attempt (12, 24, … capped ~96ms) so a stack that's busy for a while gets time to clear instead
+    of exhausting the budget in ~70ms. Nothing hard-drops.
+  - **Re-subscribe at most once per quiet episode.** The keep-alive re-subscribed all notify chars on
+    every 30s tick while the stream was quiet, flooding descriptor writes that collide with the command
+    queue (Android serves **one** GATT op at a time across reads/writes/descriptors). It now re-subscribes
+    once per quiet spell and re-arms when data next arrives — a dropped CCCD is still recovered, the churn
+    is gone.
+- Context (from #77): the "no overnight scores" reports are usually an **empty strap buffer** — the
+  official WHOOP app, bonded overnight, trims the strap's history as it syncs, so NOOP finds little to
+  offload. The reliable history path is the WHOOP CSV import. This release fixes the *separate* congestion
+  bug those logs surfaced.
+- macOS: **version bump only** (CoreBluetooth queues GATT ops internally).
 
 - **Fixed: a Spanish WHOOP export imported 0 items.** WHOOP's Spanish export translates **both** the
   column headers (`Puntuación de recuperación (%)`, `Variabilidad de la frecuencia cardíaca (ms)`, …)
