@@ -45,6 +45,10 @@
          must be granted at runtime. Requested in MainActivity alongside the BLE permissions. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Optional call alerts. Requested only when the user enables "Phone calls"; NOOP does not
+         request READ_CALL_LOG and never reads incoming numbers, contacts, or call history. -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+
     <!-- BLE is mandatory hardware for this app. -->
     <uses-feature
         android:name="android.hardware.bluetooth_le"
@@ -133,6 +137,17 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!-- Optional native phone-call alerts. The receiver only reacts to ringing/offhook/idle state
+             and never reads the incoming-number extra. Delivery is gated by the Notifications screen
+             settings and by the just-in-time READ_PHONE_STATE runtime permission. -->
+        <receiver
+            android:name="com.noop.notif.PhoneCallReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.PHONE_STATE" />
+            </intent-filter>
+        </receiver>
 
         <!-- Shares the strap log (a cache file) for bug reports. Not exported; read access is granted
              per-share via FLAG_GRANT_READ_URI_PERMISSION. Authority is applicationId-scoped so the

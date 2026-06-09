@@ -1,12 +1,10 @@
 package com.noop.notif
 
 import android.app.Notification
-import android.content.Context
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import com.noop.NoopApplication
 import com.noop.ui.NotifPrefs
-import java.util.Calendar
 
 /**
  * Wrist alerts — mirror selected app notifications to a strap buzz.
@@ -26,18 +24,27 @@ class NoopNotificationListener : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         val ctx = applicationContext
+        val n = sbn.notification ?: return
+
+        if (VoipCallClassifier.isKnownVoipPackage(sbn.packageName)) {
+            val metadata = VoipCallClassifier.metadataOf(n, isOngoing = sbn.isOngoing)
+            if (VoipCallClassifier.isIncomingCallNotification(sbn.packageName, metadata)) {
+                if (CallAlertController.start(ctx, CallAlertSource.VOIP, sbn.key)) return
+            } else {
+                CallAlertController.stop(CallAlertSource.VOIP, sbn.key)
+            }
+        }
 
         // Master gate + per-app opt-in (both default off — nothing buzzes until the user turns it on).
         if (!NotifPrefs.getBool(ctx, NotifPrefs.MASTER, false)) return
         if (!NotifPrefs.appEnabled(ctx, sbn.packageName)) return
 
         // Skip noise: ongoing/foreground-service notifications and group summaries aren't user-facing alerts.
-        val n = sbn.notification ?: return
         if (sbn.isOngoing) return
         if ((n.flags and Notification.FLAG_GROUP_SUMMARY) != 0) return
         if ((n.flags and Notification.FLAG_FOREGROUND_SERVICE) != 0) return
 
-        if (inQuietHours(ctx)) return
+        if (NotifPrefs.inQuietHours(ctx)) return
 
         val ble = (application as? NoopApplication)?.ble ?: return
         // Only-when-worn (default on): don't buzz an empty strap on the desk.
@@ -47,13 +54,9 @@ class NoopNotificationListener : NotificationListenerService() {
         ble.buzz(NotifPrefs.appLoops(ctx, sbn.packageName))
     }
 
-    private fun inQuietHours(ctx: Context): Boolean {
-        if (!NotifPrefs.getBool(ctx, NotifPrefs.QUIET, false)) return false
-        val start = NotifPrefs.getInt(ctx, NotifPrefs.QUIET_START, 22 * 60)
-        val end = NotifPrefs.getInt(ctx, NotifPrefs.QUIET_END, 7 * 60)
-        val cal = Calendar.getInstance()
-        val now = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
-        // Quiet window may wrap midnight (e.g. 22:00 → 07:00).
-        return if (start <= end) now in start until end else (now >= start || now < end)
+    override fun onNotificationRemoved(sbn: StatusBarNotification) {
+        if (VoipCallClassifier.isKnownVoipPackage(sbn.packageName)) {
+            CallAlertController.stop(CallAlertSource.VOIP, sbn.key)
+        }
     }
 }
