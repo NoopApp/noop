@@ -37,6 +37,7 @@ final class IntelligenceEngine: ObservableObject {
     /// Personal baselines (HRV / resting HR) are folded from the imported history, so even the first
     /// live night can be scored against your norm.
     func analyzeRecent(maxDays: Int = 21) async {
+        guard !computing else { return }
         guard let store = await repo.storeHandle() else { note = "No on-device store yet."; return }
         guard let hrvCfg = Baselines.metricCfg["hrv"],
               let rhrCfg = Baselines.metricCfg["resting_hr"] else { return }
@@ -72,13 +73,16 @@ final class IntelligenceEngine: ObservableObject {
             let resp = (try? await store.respSamples(deviceId: deviceId, from: from, to: to, limit: 200_000)) ?? []
             let grav = (try? await store.gravitySamples(deviceId: deviceId, from: from, to: to, limit: 200_000)) ?? []
 
-            let res = AnalyticsEngine.analyzeDay(day: day, hr: hr, rr: rr, resp: resp, gravity: grav,
-                                                 profile: up, baselines: baselines, maxHROverride: maxHR)
+            let res = await Task.detached(priority: .utility) {
+                AnalyticsEngine.analyzeDay(day: day, hr: hr, rr: rr, resp: resp, gravity: grav,
+                                           profile: up, baselines: baselines, maxHROverride: maxHR)
+            }.value
             out.append(Computed(day: day, recovery: res.recovery, strain: res.strain,
                                 sleepMin: res.daily.totalSleepMin, hrv: res.daily.avgHrv,
                                 rhr: res.daily.restingHr))
             dailies.append(res.daily)
             cachedSleep.append(contentsOf: res.cachedSleep)
+            await Task.yield()
         }
 
         // Persist the computed scores under a dedicated "-noop" source so the WHOLE dashboard

@@ -91,6 +91,16 @@ final class AppModel: ObservableObject {
             guard let self, bonded, self.behavior.smartAlarmEnabled else { return }
             self.applySmartAlarm()
         }.store(in: &hrCancellables)
+        // A completed backfill has just written strap history. Refresh the dashboard cache,
+        // but leave heavyweight analysis to its own guarded/background-friendly path.
+        live.$lastSyncedAt
+            .dropFirst()
+            .compactMap { $0 }
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                Task { [weak self] in await self?.refreshAfterCompletedBackfill() }
+            }
+            .store(in: &hrCancellables)
 
         moments = (UserDefaults.standard.array(forKey: "moments") as? [Double] ?? [])
             .map { Date(timeIntervalSince1970: $0) }
@@ -107,6 +117,11 @@ final class AppModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: 900_000_000_000)  // 15 min, matches the offload cadence
             }
         }
+    }
+
+    private func refreshAfterCompletedBackfill() async {
+        live.append(log: "Backfill: refreshing dashboard cache from completed sync")
+        await repo.refresh(days: 120)
     }
 
     /// Fold a fresh reading into the smoothing window and republish a stable bpm.
