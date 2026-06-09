@@ -60,7 +60,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Which strap the user is pairing — drives the scan filter in [connect]. Defaults to WHOOP 4.0. */
     private val _selectedModel = MutableStateFlow(WhoopModel.WHOOP4)
     val selectedModel: StateFlow<WhoopModel> = _selectedModel.asStateFlow()
-    fun setSelectedModel(model: WhoopModel) { _selectedModel.value = model }
+    fun setSelectedModel(model: WhoopModel) {
+        if (model == _selectedModel.value) return
+        _selectedModel.value = model
+        // Drop the previous strap's sticky bond/connection so the next scan targets the new family's
+        // service and bonds it fresh (lets a user move between a WHOOP 4 and a 5/MG).
+        ble.prepareForModelSwitch()
+    }
 
     // MARK: - Smoothed BPM (median over a short window, mirrors AppModel.bpm)
 
@@ -92,10 +98,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     init {
-        // Smooth HR from each LiveState emission.
+        // Smooth HR from each LiveState emission, and re-arm the strap's firmware alarm whenever it
+        // (re)bonds. A smart-alarm time changed while the strap was away never reached it — the send
+        // is gated on bond — so the strap kept the OLD time and fired at it (#59). Gated on enabled so
+        // a disabled alarm doesn't disarm on every reconnect.
         viewModelScope.launch {
+            var lastBonded = false
             ble.state.collect { state ->
                 state.heartRate?.let { ingestHr(it) }
+                if (state.bonded && !lastBonded && _smartAlarmEnabled.value) applySmartAlarm()
+                lastBonded = state.bonded
             }
         }
         // Recompute the illness banner + today's row whenever cached days change.
@@ -150,6 +162,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _bpm.value = sorted[sorted.size / 2]
     }
 
+    /**
+     * Drop the smoothing window and blank the hero number so a resume / re-attach shows "—" until a
+     * genuinely fresh sample arrives, instead of republishing the stale pre-gap median. Called on
+     * Live/Health screen entry (requestRealtimeHr 0->1), NOT on keep-alive re-arm, so steady-state
+     * smoothing is untouched. Mirrors AppModel.resetSmoothing and the existing disconnect() clear.
+     * Fixes #46 (HR jumped to a stale ~100 on reopen, then settled as fresh low samples refilled).
+     */
+    private fun resetSmoothing() {
+        hrWindow.clear()
+        _bpm.value = null
+    }
+
     // MARK: - Strap controls (thin pass-throughs to the BLE client)
 
     fun connect() {
@@ -185,14 +209,31 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Flip "Debug logging" (driven by Settings → Strap). Persists the preference and pushes it to the
+     * live BLE client so it takes effect immediately. Default OFF: the strap log stays in the in-app
+     * ring buffer (and the "Share strap log" export) but is not mirrored to logcat unless the user opts
+     * in — so a normal user never writes the connection log to the system log. With it on, developers
+     * can watch the connection live over `adb logcat -s WhoopBleClient`.
+     */
+    fun setDebugLogging(enabled: Boolean) {
+        NoopPrefs.setDebugLogging(appContext, enabled)
+        ble.debugLogcat = enabled
+    }
+
     /** How many screens currently want the live HR stream (Live, Health Monitor, …). The stream stays
      *  on while ANY of them is visible, so navigating between them doesn't stop it (issue #18: leaving
      *  Live sent TOGGLE_REALTIME_HR=0, leaving Health Monitor with a frozen value). */
     private var realtimeWanters = 0
 
-    /** A screen that shows live HR appeared. Arms the realtime stream on the 0→1 transition. */
+    /** A screen that shows live HR appeared. Arms the realtime stream on the 0→1 transition, and
+     *  blanks the stale smoothing window so a resume shows "—" until a fresh sample lands (#46).
+     *  Guarded on 0→1 so a second concurrent HR screen doesn't re-clear an already-live window. */
     fun requestRealtimeHr() {
-        if (realtimeWanters++ == 0) ble.startRealtime()
+        if (realtimeWanters++ == 0) {
+            resetSmoothing()
+            ble.startRealtime()
+        }
     }
 
     /** A live-HR screen went away. Stops the realtime stream only when the last one leaves. */
@@ -201,8 +242,46 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (realtimeWanters == 0) ble.stopRealtime()
     }
 
-    /** Ask the strap for its current battery level. */
-    fun getBattery() = ble.send(CommandNumber.GET_BATTERY_LEVEL)
+    /** Refresh the battery reading. Reads the standard 0x2A19 characteristic (works on 5/MG, where the
+     *  proprietary command is dropped) and also fires the legacy command on WHOOP 4. */
+    fun getBattery() = ble.refreshBattery()
+
+    // --- Smart alarm (persisted; arms the strap's firmware alarm). Port of macOS BehaviorStore +
+    // AppModel.applySmartAlarm. The previous Android UI was a non-persisted mock-up (issue #51). ---
+    private val _smartAlarmEnabled = MutableStateFlow(NoopPrefs.smartAlarmEnabled(appContext))
+    val smartAlarmEnabled: StateFlow<Boolean> = _smartAlarmEnabled.asStateFlow()
+    private val _smartAlarmMinutes = MutableStateFlow(NoopPrefs.smartAlarmMinutes(appContext))
+    val smartAlarmMinutes: StateFlow<Int> = _smartAlarmMinutes.asStateFlow()
+
+    fun setSmartAlarmEnabled(enabled: Boolean) {
+        _smartAlarmEnabled.value = enabled
+        NoopPrefs.setSmartAlarmEnabled(appContext, enabled)
+        applySmartAlarm()
+    }
+
+    fun setSmartAlarmMinutes(minutes: Int) {
+        _smartAlarmMinutes.value = minutes.coerceIn(0, 24 * 60 - 1)
+        NoopPrefs.setSmartAlarmMinutes(appContext, _smartAlarmMinutes.value)
+        applySmartAlarm()
+    }
+
+    /** Arm or clear the strap's firmware alarm from the current setting, computing the next occurrence
+     *  of the wake time (today, or tomorrow if it's already passed). Needs the strap connected — if it
+     *  isn't, `send()` logs "ignored — not connected" and arming happens next time you connect + toggle. */
+    private fun applySmartAlarm() {
+        if (!_smartAlarmEnabled.value) {
+            ble.disableStrapAlarm()
+            return
+        }
+        val cal = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, _smartAlarmMinutes.value / 60)
+            set(java.util.Calendar.MINUTE, _smartAlarmMinutes.value % 60)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        if (cal.timeInMillis <= System.currentTimeMillis()) cal.add(java.util.Calendar.DAY_OF_YEAR, 1)
+        ble.armStrapAlarm(cal.timeInMillis / 1000)
+    }
 
     /** Fire a haptic buzz on the strap (requires a bonded connection). */
     fun buzz(loops: Int = 2) = ble.buzz(loops)

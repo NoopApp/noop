@@ -23,9 +23,16 @@ struct LiveView: View {
                        subtitle: "Your strap in real time — heart rate and frames as they arrive.") {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                 connectionRow
+                // Bond-refused guidance, shown right here on Live where people actually connect (it
+                // also appears in Settings). A 5/MG strap still bonded to the WHOOP app refuses pairing
+                // with "Encryption is insufficient" — this tells the user to free it and re-pair.
+                if let hint = live.pairingHint { pairingHintBanner(hint) }
                 heartRateCard
                 statusGrid
-                if !live.bonded { modelPicker }
+                // Show the strap picker whenever we're not actively streaming, so a user with both a
+                // WHOOP 4 and a 5/MG can switch between them. (It used to hide once `bonded`, which is
+                // sticky across disconnects — so after the first pairing the picker vanished for good.)
+                if !activeConnection { modelPicker }
                 controls
                 logCard
             }
@@ -104,10 +111,32 @@ struct LiveView: View {
         }
     }
 
+    private func pairingHintBanner(_ hint: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(StrandPalette.statusWarning)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Pairing refused — free the strap from the WHOOP app")
+                    .font(StrandFont.subhead).foregroundStyle(StrandPalette.textPrimary)
+                Text(hint)
+                    .font(StrandFont.footnote).foregroundStyle(StrandPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(StrandPalette.surfaceRaised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(StrandPalette.statusWarning.opacity(0.5), lineWidth: 1))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Pairing help: \(hint)")
+    }
+
     // MARK: - Strap picker
 
-    /// Pick the strap family before scanning. Hidden once bonded — by then we know
-    /// what's on the wrist.
+    /// Pick the strap family to scan for. Switching the selection drops the current strap's bond so the
+    /// newly-picked one connects fresh — letting a user move between a WHOOP 4 and a 5/MG.
     private var modelPicker: some View {
         HStack(spacing: 10) {
             Text("Strap").font(StrandFont.caption).foregroundStyle(StrandPalette.textSecondary)
@@ -115,7 +144,13 @@ struct LiveView: View {
                 WhoopModel.allCases,
                 selection: Binding(
                     get: { selectedModel },
-                    set: { selectedModelRaw = $0.rawValue }
+                    set: { newModel in
+                        guard newModel.rawValue != selectedModelRaw else { return }
+                        selectedModelRaw = newModel.rawValue
+                        // Clear the previous strap's sticky bond/connection so the next scan targets the
+                        // new family's service and bonds it fresh.
+                        model.prepareStrapSwitch()
+                    }
                 ),
                 label: { $0.displayName }
             )

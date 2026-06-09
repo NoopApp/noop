@@ -289,6 +289,10 @@ private func decodeWhoop5Historical(_ frame: [UInt8], fb: FieldBuilder, payloadE
     let version = frame.count > 9 ? Int(frame[9]) : -1
     fb.parsed["hist_version"] = .int(version)
     fb.add(9, 1, "hist_version", "meta", value: .int(version))
+    if version == 26 {
+        decodeWhoop5HistoricalV26(frame, fb: fb)
+        return
+    }
     guard version == 18 else {
         // Unknown historical layout — describe it faithfully without inventing offsets.
         if let payloadEnd = payloadEnd, 11 < payloadEnd, payloadEnd <= frame.count {
@@ -318,10 +322,71 @@ private func decodeWhoop5Historical(_ frame: [UInt8], fb: FieldBuilder, payloadE
             fb.add(off, 4, name, "accel", value: .double(d), note: "g")
         }
     }
-    // Optical channels (PPG green/red-IR, SpO₂ red/IR, skin-temp, ambient) sit past offset 57 but
-    // are not yet ground-truth-mapped; keep them as one honest raw region.
-    if let payloadEnd = payloadEnd, 57 < payloadEnd, payloadEnd <= frame.count {
-        fb.region(57, payloadEnd, "unmapped optical (PPG/SpO₂/skin-temp)", "unknown")
+    // Per-second biometric fields beyond HR/gravity. Each is gated to a physically-real range and was
+    // cross-validated against real v18 frames (worn vs off-wrist), so a wrong offset on an unmapped
+    // firmware revision stores nothing rather than garbage (the data is the arbiter). Fields the report
+    // listed but that did NOT decode consistently on this device's firmware (cardiac_flags@33,
+    // state_bitfield@81, perfusion@69/71) are deliberately left in the raw region pending more captures.
+    if let d = readF32(frame, 41), d.isFinite, (0...8).contains(d) {
+        fb.add(41, 4, "dynamic_acceleration", "accel", value: .double(d), note: "g, gravity-removed magnitude")
+    }
+    if let raw = readDType(frame, 57, "u16") {
+        // Cumulative motion/step counter — monotonic across a stream (validated downstream), no midnight
+        // reset. Single-frame value is unbounded so it carries no physical gate here.
+        fb.add(57, 2, "step_motion_counter", "activity", value: .int(raw), note: "cumulative motion counter")
+    }
+    if let wear = readDType(frame, 63, "u8"), (0...2).contains(wear) {
+        fb.add(63, 1, "motion_wear_quality", "quality", value: .int(wear), note: "0=still/good, 1, 2=poor contact")
+    }
+    if let raw = readDType(frame, 73, "u16") {
+        let celsius = Double(raw) / 100.0
+        if (20...45).contains(celsius) {
+            fb.add(73, 2, "skin_temperature", "temp", value: .double(celsius),
+                   note: "°C, raw thermistor (AS6221); off-wrist reads ambient, not the cloud's calibrated summary")
+        }
+    }
+    // The remaining bytes (perfusion, cardiac block, AFE mode register, sleep FSM) are not yet
+    // ground-truth-mapped on this firmware; keep them as one honest raw region.
+    if let payloadEnd = payloadEnd, 75 < payloadEnd, payloadEnd <= frame.count {
+        fb.region(75, payloadEnd, "unmapped (perfusion/cardiac/AFE-mode/sleep-state)", "unknown")
+    }
+}
+
+/// Decode a WHOOP 5.0 type-47 **version-26** record — the high-rate optical PPG buffer.
+///
+/// Unlike the v18 per-second summary, v26 is a 24 Hz waveform: **24 little-endian i16 samples at bytes
+/// [27:75]**, one record per second (`unix` u32 LE @15, the same slot v18 uses). It was verified to be
+/// an OPTICAL PPG trace — not IMU/motion — using the heart rate as *internal* ground truth (no external
+/// reference): the concatenated waveform's autocorrelation peaks at the HR (lag 14 = 102.9 bpm vs a
+/// measured 101.7 bpm), trough-detection gives a 563 ms inter-beat interval (≈106 bpm), the pulse stays
+/// HR-locked even when the wrist is still, and its amplitude is not motion-driven. (Reproduce with
+/// `tools/linux-capture/analyze_v26_waveform.py`; see docs §5.)
+///
+/// The samples are raw AC-coupled ADC counts — PPG has no absolute unit — so they are exposed verbatim
+/// as `ppg_waveform` with NO invented scale. The bytes before [27] (header + a block index) and the
+/// footer after [75] are not mapped; SpO₂/skin-temp have no internal proxy and are left untouched.
+private func decodeWhoop5HistoricalV26(_ frame: [UInt8], fb: FieldBuilder) {
+    // Optical channel index @21: the strap time-multiplexes 26 optical channels, sweeping 1→26 in
+    // ~40-frame blocks (one channel per block, revisited ~20 min later). Verified against a 22 h overnight
+    // corpus — frame[21] takes exactly 26 distinct values (1–26), and on our own two real fixtures reads
+    // 1 then 2. An earlier read at frame[12] (the 0x41/0x46 "two channels") was a high-entropy counter byte
+    // mistaken for the channel during a short 2-burst capture. Gate to 1…26 so a wrong offset stores nothing.
+    if let ch = readDType(frame, 21, "u8"), (1...26).contains(ch) {
+        fb.add(21, 1, "ppg_channel", "ppg", value: .int(ch),
+               note: "time-multiplexed optical channel 1–26 (40-frame blocks)")
+    }
+    if let unix = readDType(frame, 15, "u32") {
+        fb.add(15, 4, "unix", "time", value: .int(unix), note: "real unix seconds")
+    }
+    var samples: [Int] = []
+    for off in stride(from: 27, to: 75, by: 2) {
+        guard let v = readI16(frame, off) else { break }
+        samples.append(v)
+    }
+    if !samples.isEmpty {
+        fb.add(27, samples.count * 2, "ppg_waveform", "ppg", value: .intArray(samples),
+               note: "optical PPG @24 Hz, LE-i16 ADC counts")
+        fb.parsed["ppg_sample_count"] = .int(samples.count)
     }
 }
 

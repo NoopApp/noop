@@ -71,12 +71,13 @@ fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
             .atStartOfDay(ZoneId.systemDefault())
             .toEpochSecond()
         val whoopWorkouts = viewModel.repo.workouts("my-whoop", 0L, now)
-        // External health = Apple Health export + Health Connect (separate sources since #34); union both
-        // for the provenance footer so Health Connect data still shows.
-        val externalWorkouts = viewModel.repo.workouts("apple-health", 0L, now) +
-            viewModel.repo.workouts("health-connect", 0L, now)
-        val externalDays = viewModel.repo.appleDaily("apple-health", "0000-01-01", "9999-12-31").size +
-            viewModel.repo.appleDaily("health-connect", "0000-01-01", "9999-12-31").size
+        // Apple Health and Health Connect are separate sources (since #34) — keep them separate in the
+        // provenance footer too, so Health Connect data isn't mislabelled under the "Apple Health" pill
+        // (issue #53). The recent-workouts list below still unions all sources for a combined feed.
+        val appleWorkouts = viewModel.repo.workouts("apple-health", 0L, now)
+        val hcWorkouts = viewModel.repo.workouts("health-connect", 0L, now)
+        val appleDaysCount = viewModel.repo.appleDaily("apple-health", "0000-01-01", "9999-12-31").size
+        val hcDaysCount = viewModel.repo.appleDaily("health-connect", "0000-01-01", "9999-12-31").size
         footer = TodayFooterState(
             recentWorkouts = (viewModel.repo.workouts("my-whoop", recentCutoff, now) +
                 viewModel.repo.workouts("apple-health", recentCutoff, now) +
@@ -84,8 +85,10 @@ fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
                 .sortedByDescending { it.startTs },
             whoopDays = days.size,
             whoopWorkouts = whoopWorkouts.size,
-            appleDays = externalDays,
-            appleWorkouts = externalWorkouts.size,
+            appleDays = appleDaysCount,
+            appleWorkouts = appleWorkouts.size,
+            hcDays = hcDaysCount,
+            hcWorkouts = hcWorkouts.size,
         )
     }
 
@@ -327,6 +330,8 @@ private data class TodayFooterState(
     val whoopWorkouts: Int? = null,
     val appleDays: Int? = null,
     val appleWorkouts: Int? = null,
+    val hcDays: Int? = null,
+    val hcWorkouts: Int? = null,
 )
 
 @Composable
@@ -376,6 +381,18 @@ private fun TodaySourcesSection(footer: TodayFooterState) {
                 tint = Palette.metricCyan,
                 present = (footer.appleDays ?: 0) > 0 || (footer.appleWorkouts ?: 0) > 0,
                 detail = countDetail(footer.appleDays, footer.appleWorkouts, "workouts"),
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(Palette.hairline),
+            )
+            SourceRow(
+                badge = "Health Connect",
+                tint = Palette.metricPurple,
+                present = (footer.hcDays ?: 0) > 0 || (footer.hcWorkouts ?: 0) > 0,
+                detail = countDetail(footer.hcDays, footer.hcWorkouts, "workouts"),
             )
         }
     }

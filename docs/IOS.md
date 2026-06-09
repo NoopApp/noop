@@ -1,5 +1,12 @@
 # iOS Provisions & Port Plan
 
+> **Experimental, build-from-source community port — not an officially distributed app.** This
+> document describes an **experimental, build-it-yourself iOS port of NOOP** ([PR #42](../../../pull/42)),
+> **not** an officially maintained or distributed product. There is no download: iOS has no
+> anonymous distribution path — the App Store and TestFlight both require a real Apple Developer
+> identity — so distribution is impossible while NOOP stays anonymous. Build it yourself in Xcode if
+> you want to run it. (macOS remains the reference implementation; Android ships as a full app.)
+
 This document describes how NOOP — a standalone, fully offline companion app for
 WHOOP straps — is positioned for iOS, what already works, and the concrete plan
 for a native iOS app target.
@@ -85,7 +92,8 @@ charts, and palette render on iOS as-is.
 ## The macOS app today (the reference implementation)
 
 The macOS app target lives in [`Strand/`](../Strand/). It is the reference
-implementation; an iOS app and an Android app are planned. The macOS app composes
+implementation; Android ships as a full app (`android/`), and the iOS app is an
+experimental, build-from-source community port ([PR #42](../../../pull/42)). The macOS app composes
 the packages like this:
 
 - `Strand/App/StrandApp.swift` — the `@main` SwiftUI `App`. Declares a `WindowGroup`

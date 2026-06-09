@@ -60,8 +60,9 @@ A few principles run through the whole codebase. Internalize them before opening
 ## Repository layout
 
 The codebase is split into reusable, cross-platform Swift packages plus a thin platform-specific app
-layer. The **macOS app is the reference implementation**; iOS and Android targets are planned and
-reuse the same packages where they can.
+layer. The **macOS app is the reference implementation**; **Android ships as a full app** under
+`android/`, and **iOS is an experimental, build-from-source community port** (see
+[PR #42](../../../pull/42)). All reuse the same packages where they can.
 
 ```
 Strand/
@@ -89,7 +90,7 @@ Strand/
 ├── tools/
 │   └── linux-capture/          # Headless Linux capture workbench (Python/bleak + whoop-decode)
 ├── Fixtures/                   # Sample WHOOP export used by tests
-└── android/                    # Planned Android client (Kotlin/Gradle, separate module)
+└── android/                    # Android client — full shipped app (Kotlin/Gradle, separate module)
 ```
 
 ### Where logic belongs
@@ -485,26 +486,29 @@ Schema lives in `Packages/WhoopStore/Sources/WhoopStore/Database.swift` as a **v
 
 ## Roadmap
 
-NOOP's logic already lives in cross-platform packages, so most roadmap items are app-layer wiring
-rather than rewrites of the core. Today the **macOS app is the working reference implementation**;
-everything below is planned or deferred. Contributions toward these are welcome — open an issue to
-coordinate first.
+NOOP's logic already lives in cross-platform packages, so most platform work is app-layer wiring
+rather than rewrites of the core. Today the **macOS app is the working reference implementation**
+and **Android ships as a full app**; the items below are planned, experimental, or deferred.
+Contributions toward these are welcome — open an issue to coordinate first.
 
-### Planned platforms
+### Other platforms
 
-- **Windows app.** A native desktop client for Windows. The protocol facts in
+- **Windows app (planned).** A native desktop client for Windows. The protocol facts in
   `WhoopProtocol/Resources/whoop_protocol.json` and the framing/CRC rules are language-agnostic, so
   the wire behavior is portable; the work is a Windows BLE stack + UI re-implementation that matches
   the shared packages' behavior.
-- **Android device validation.** An `android/` module is scaffolded for a native Kotlin/Gradle
-  client that re-implements the same wire protocol against Android's BLE stack. The near-term task is
-  **validating bond + offload against real WHOOP hardware** on Android and confirming parity with the
-  Swift decode path. (An emulator can't reach a physical strap — this needs a device.)
-- **iOS app.** Every package already declares `.iOS(.v16)` and guards UI-framework code with
-  `#if canImport(UIKit)/AppKit`, so the non-UI core compiles for iOS today. Adding the app is mostly
-  app-layer wiring: an iOS application target depending on the same packages, the iOS Bluetooth
-  Info.plist/entitlements + background mode, and AppKit→UIKit swaps for the handful of macOS-only app
-  files. See [`IOS.md`](IOS.md) for the detailed port plan.
+- **Android (shipped).** A full, native Kotlin/Gradle client lives under `android/`, re-implementing
+  the same wire protocol against Android's BLE stack — it pairs, offloads, persists and scores
+  on-device, and imports WHOOP / Apple Health / Health Connect. Pre-built APKs are in
+  [Releases](../../../releases). Continued real-hardware testing across more devices is always welcome
+  (an emulator can't reach a physical strap).
+- **iOS (experimental community port).** An experimental, build-from-source port lives in
+  [PR #42](../../../pull/42) — an app target plus widgets, a Live Activity, and HealthKit that builds
+  for the iOS simulator. It is **build-it-yourself only, not officially maintained or distributed:**
+  iOS has no anonymous distribution path (the App Store and TestFlight both require a real Apple
+  Developer identity), which is at odds with NOOP staying anonymous. Every package already declares
+  `.iOS(.v16)` and guards UI-framework code with `#if canImport(UIKit)/AppKit`, so the non-UI core
+  compiles for iOS today; [`IOS.md`](IOS.md) is the detailed port plan.
 
 ### Deferred ideas
 

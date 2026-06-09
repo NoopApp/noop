@@ -55,6 +55,32 @@ final class Whoop5HistoricalTests: XCTestCase {
         XCTAssertEqual(60000.0 / meanRR, 102, accuracy: 8)
     }
 
+    func testHistoricalV18BiometricFields() {
+        // The cross-validated per-second fields beyond HR/gravity, each gated to a physical range and
+        // verified against this real worn frame. (Fields that did NOT decode consistently on this
+        // firmware — cardiac_flags@33, state@81, perfusion@69/71 — are deliberately not decoded.)
+        let p = parseFrame(bytes(historicalHex), family: .whoop5).parsed
+        // skin temperature (AS6221 thermistor) u16/100 °C — ~30.6 °C on a worn wrist.
+        XCTAssertEqual(p["skin_temperature"]?.doubleValue ?? 0, 30.57, accuracy: 0.05)
+        // dynamic (gravity-removed) acceleration — small for a still wrist, gated to [0, 8] g.
+        let dyn = p["dynamic_acceleration"]?.doubleValue ?? -1
+        XCTAssertTrue((0.0...8.0).contains(dyn))
+        XCTAssertEqual(dyn, 0.0092, accuracy: 0.001)
+        // cumulative motion counter + wear/contact quality enum.
+        XCTAssertEqual(p["step_motion_counter"]?.intValue, 50)
+        XCTAssertEqual(p["motion_wear_quality"]?.intValue, 0)
+    }
+
+    func testHistoricalV18SkinTempTracksWristContact() {
+        // Proof @73 is the real skin-temp sensor: worn it reads skin (~30.6 °C); off-wrist the same
+        // thermistor reads ambient (~22.5 °C) — both pass the [20, 45] guard, so a valid-but-cooler
+        // off-wrist reading is still captured rather than dropped.
+        let worn = parseFrame(bytes(historicalHex), family: .whoop5).parsed
+        let off = parseFrame(bytes(historicalOffWristHex), family: .whoop5).parsed
+        XCTAssertEqual(worn["skin_temperature"]?.doubleValue ?? 0, 30.57, accuracy: 0.05)
+        XCTAssertEqual(off["skin_temperature"]?.doubleValue ?? 0, 22.47, accuracy: 0.05)
+    }
+
     func testHeartRateOffsetIsNotTheNaivePlusFour() {
         // Guard the firmware caveat: v18 HR is at offset 22, NOT v24's 21+4=25. If a future change
         // wrongly reuses the 4.0 v24 layout at +4, this fails instead of silently shipping HR=0.

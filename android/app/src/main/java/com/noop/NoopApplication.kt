@@ -4,6 +4,7 @@ import android.app.Application
 import com.noop.ble.WhoopBleClient
 import com.noop.data.WhoopDatabase
 import com.noop.data.WhoopRepository
+import com.noop.ui.NoopPrefs
 
 /**
  * Application entry point.
@@ -27,6 +28,10 @@ class NoopApplication : Application() {
 
     /** Process-wide BLE client. Owns the GATT connection and outlives any single Activity/ViewModel. */
     val ble: WhoopBleClient by lazy {
-        WhoopBleClient(applicationContext, repository = repository)
+        WhoopBleClient(applicationContext, repository = repository).apply {
+            // Apply the persisted "Debug logging" preference at the composition root so the low-level
+            // client never has to read the UI/prefs layer. Default OFF — see WhoopBleClient.debugLogcat.
+            debugLogcat = NoopPrefs.debugLogging(applicationContext)
+        }
     }
 }

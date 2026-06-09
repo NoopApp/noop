@@ -7,7 +7,7 @@ enum AppChangelog {
 
     /// Bump this when you add a release below. The "What's New" sheet shows automatically when the
     /// stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
-    static let currentVersion = "1.18"
+    static let currentVersion = "1.33"
 
     struct Release: Identifiable {
         let version: String
@@ -19,6 +19,114 @@ enum AppChangelog {
 
     /// Newest first.
     static let releases: [Release] = [
+        Release(
+            version: "1.33",
+            title: "Smart alarm: the time you set is the time that fires",
+            date: "June 2026",
+            items: [
+                "Fixed: the Smart alarm wake time didn't always reach the strap. If you changed the time while the strap wasn't actively connected, the new time silently never transmitted — so the strap kept its old time (you set 07:15, but it still buzzed at 07:00). NOOP now re-sends the alarm time every time the strap reconnects, so the time you set is the time that fires. Mac and Android.",
+            ]),
+        Release(
+            version: "1.32",
+            title: "Today trends stay within their window (Mac)",
+            date: "June 2026",
+            items: [
+                "Fixed (Mac): the Today screen's metric sparklines are labelled a \"14-day trend\", but if a metric had fewer than two readings in that window it quietly fell back to your entire history — so an old import could draw months-old data as if it were a current trend. The sparklines now stay strictly within their window, and a metric whose latest reading is older than the window shows \"—\" rather than a stale number. Thanks to a community contributor (#49). (Android already windowed these correctly.)",
+            ]),
+        Release(
+            version: "1.31",
+            title: "No more HR spike when you reopen the app",
+            date: "June 2026",
+            items: [
+                "Fixed: when you reopened NOOP or returned to the Live screen, your heart rate could briefly show a high stale number (around 100) and then drift back down over several seconds. The strap was fine — the app was re-showing the last smoothed value from before the gap, until fresh readings refilled the averaging window. The hero number now blanks to \"—\" on resume and shows your real heart rate the instant the first fresh reading arrives. Both Mac and Android.",
+            ]),
+        Release(
+            version: "1.30",
+            title: "Workouts: correct source pill for Health Connect (Android)",
+            date: "June 2026",
+            items: [
+                "Fixed (Android): on the Workouts page, sessions imported from Health Connect showed an \"Apple\" pill in the Src column. The badge only knew \"Whoop or Apple\", so anything that wasn't a WHOOP workout was labelled Apple. It now shows a distinct \"HC\" (Health Connect) pill in its own colour, alongside \"Whoop\" and \"Apple\". Follow-up to #53 — the Today page was fixed in 1.28; this is the Workouts list.",
+            ]),
+        Release(
+            version: "1.29",
+            title: "Re-scan actually scans on Android",
+            date: "June 2026",
+            items: [
+                "Fixed (Android): tapping Re-scan in Settings — or Connect on the Live screen — could do nothing at all. On Android 12 and newer a Bluetooth scan needs the Nearby devices permission, and if you'd dismissed or revoked it the button failed silently with no prompt (the Pixel 9 report in #1). Both buttons now ask for the permission first, so the scan actually starts, and they show a clear \"Searching…\" state while looking for your strap (and can't be re-tapped mid-scan). The Live control buttons also stay on one line on narrow phones. Thanks to the reporter (#1) and to a community contributor (#54/#55).",
+            ]),
+        Release(
+            version: "1.28",
+            title: "Health Connect: correct labels + workout types (Android)",
+            date: "June 2026",
+            items: [
+                "Fixed (Android): two Health Connect issues. On the Today page, Health Connect data was shown under an \"Apple Health\" pill — it now has its own \"Health Connect\" row in the Data Sources footer, matching the Data Sources screen. And workout types were mislabelled (a walking workout could show as swimming) because the exercise-type code map had the wrong numbers; it now uses Health Connect's own constants, so walking is walking, swimming is swimming, and so on. New imports are right immediately; re-import your Health Connect data to relabel any that came in before.",
+            ]),
+        Release(
+            version: "1.27",
+            title: "Wrist alerts work on Android",
+            date: "June 2026",
+            items: [
+                "Fixed (Android): you couldn't turn wrist alerts on — NOOP didn't show up in your phone's Notification Access list, so there was nothing to grant. NOOP now registers a notification listener (so it appears there); grant access and enable wrist alerts, and your strap buzzes when your chosen apps notify you — respecting your per-app patterns, quiet hours, and only-when-worn. Privacy: it reads only WHICH app notified, never the message content, and nothing leaves your phone. (The buzz works on WHOOP 4.0; 5.0/MG haptics are still being decoded.)",
+            ]),
+        Release(
+            version: "1.26",
+            title: "Smart alarm actually works on Android",
+            date: "June 2026",
+            items: [
+                "Fixed (Android): the Smart alarm in Automations didn't work — the toggle reset the moment you left the screen, and the wake time was stuck at 07:00 with no way to change it. It's now a real, saved setting with a proper time picker, and on WHOOP 4.0 it arms the strap's own firmware alarm, so your wrist buzzes at your wake time even if your phone is asleep or NOOP is closed (matching the Mac). Connect the strap to arm it. (On 5.0/MG the alarm command isn't verified yet — same situation as the buzz.)",
+            ]),
+        Release(
+            version: "1.25",
+            title: "WHOOP 5.0/MG history download (experimental) + pairing help (Mac)",
+            date: "June 2026",
+            items: [
+                "Experimental (Mac): once your WHOOP 5.0/MG is properly paired (see below), NOOP now attempts to download the strap's stored history — the missing piece for on-device 5.0 recovery, strain and sleep. It's brand-new and needs real-hardware testing; if it works you'll see the offload run in the strap log. WHOOP 4.0 is completely unaffected.",
+                "Clearer 5.0/MG pairing: you can't just scan for a 5.0/MG — it has to be in pairing mode and freed from the official WHOOP app first (otherwise pairing is refused with \"Encryption is insufficient\"). The \"free your strap\" tip now shows right on the Live screen (it was hidden in Settings), and the README has a step-by-step pairing guide.",
+            ]),
+        Release(
+            version: "1.24",
+            title: "Switch between your WHOOP 4 and 5.0 (Mac + Android)",
+            date: "June 2026",
+            items: [
+                "Fixed: if you own both a WHOOP 4 and a 5.0/MG, you couldn't switch between them — the strap picker on the Live screen disappeared after your first pairing and never came back. It now stays available whenever you're not actively streaming, and choosing the other model cleanly drops the old strap so the new one connects fresh. Pick your strap, hit Scan & Connect, done.",
+            ]),
+        Release(
+            version: "1.23",
+            title: "WHOOP 5.0 history decoding comes to Android",
+            date: "June 2026",
+            items: [
+                "Decoding progress (WHOOP 5.0, Android): Android now decodes the same WHOOP 5.0/MG history the Mac learned to read in 1.21 — heart rate, R-R, motion, wrist-contact and skin temperature — each verified against real captured data and only kept when it's physically sensible. This brings Android to parity with the Mac on 5.0 history decoding; it's the groundwork that lights up when the strap's history download lands for 5.0.",
+            ]),
+        Release(
+            version: "1.22",
+            title: "Battery refresh on WHOOP 5.0/MG (Mac + Android)",
+            date: "June 2026",
+            items: [
+                "Fixed: the \"Refresh battery\" button did nothing on WHOOP 5.0/MG. It was sending a WHOOP 4-only command the 5.0 ignores, so the battery only updated on its own schedule. Both apps now read the strap's standard battery level directly the moment you tap refresh — and once more as soon as you connect, so a fresh reading shows up right away. WHOOP 4 is unchanged.",
+            ]),
+        Release(
+            version: "1.21",
+            title: "Reading more from your WHOOP 5.0 (Mac)",
+            date: "June 2026",
+            items: [
+                "Decoding progress (WHOOP 5.0): NOOP now reads skin temperature, motion/activity and wrist-contact from your 5.0's stored history — each verified against real data (e.g. ~30.6 °C on the wrist, dropping to room temperature off it) and only stored when it's physically sensible. These are building blocks toward on-device 5.0 sleep and recovery; nothing changes on screen yet.",
+                "Fixed (Mac): corrected which byte NOOP reads the 5.0's optical-pulse channel from — a community reverse-engineering report, cross-checked against our own captured frames, showed it was a counter byte, not the channel. The pulse waveform itself was always decoded correctly; this only affects the channel label.",
+            ]),
+        Release(
+            version: "1.20",
+            title: "Strap log stays off the system log (Android)",
+            date: "June 2026",
+            items: [
+                "Changed (Android): the strap connection log is no longer copied to the phone's system log (logcat) by default. A normal user has no reason to write the Bluetooth connection log to the device-wide log, so it's now off unless you turn on Settings → Strap → \"Debug logging\" (there for developers watching a session over adb). The in-app log and \"Share strap log\" export work exactly as before, so bug reports are unaffected.",
+            ]),
+        Release(
+            version: "1.19",
+            title: "Import polish (Mac) + WHOOP 5 optical decode",
+            date: "June 2026",
+            items: [
+                "Changed (Mac): while an import is running, both Data Sources buttons now lock and only the source that's actually importing shows a spinner — so you can't start a WHOOP and an Apple Health import at the same time, and the loading state always points at the right card. Follow-up to the 1.18 status-message fix.",
+                "Decoding progress (WHOOP 5.0): NOOP now reads the strap's raw optical pulse (PPG) waveform from its stored history — a 24 Hz trace verified against your own heart rate, with no external reference. Nothing changes on screen yet; it's a building block toward 5.0 recovery and strain.",
+            ]),
         Release(
             version: "1.18",
             title: "Import fixes — both sources, all data types",

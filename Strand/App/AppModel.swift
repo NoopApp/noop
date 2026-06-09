@@ -3,6 +3,12 @@ import Combine
 import WhoopProtocol
 import WhoopStore
 
+/// Data source currently running an import from the Data Sources screen.
+enum DataSourceImportKind {
+    case whoop
+    case appleHealth
+}
+
 /// Root app state: owns the live BLE connection state and the CoreBluetooth engine.
 /// More subsystems (Repository, AnalyticsEngine, ImportCoordinator) get wired in here
 /// in later milestones.
@@ -38,14 +44,20 @@ final class AppModel: ObservableObject {
     private var hrvBaseline: Double = 0
     private var lastStressBuzzAt: Date = .distantPast
 
-    /// Import status surfaced to the Data Sources screen.
-    // Per-source import state so a WHOOP import and an Apple Health import don't share one status line
-    // (importing one was overwriting the other's message in the WHOOP card — issue #40). They land in
-    // separate stores already; this just keeps the UI honest.
-    @Published var whoopImporting = false
+    /// Import source currently writing to the local store, if any.
+    @Published private var activeImportSource: DataSourceImportKind?
+    /// Last WHOOP export import result surfaced in the WHOOP card.
     @Published var whoopImportSummary: String?
-    @Published var appleImporting = false
-    @Published var appleImportSummary: String?
+    /// Last Apple Health import result surfaced in the Apple Health card.
+    @Published var appleHealthImportSummary: String?
+
+    /// True while any data-source import is writing to the local store.
+    var hasActiveImport: Bool { activeImportSource != nil }
+
+    /// Returns true only for the source currently importing.
+    func isImporting(_ source: DataSourceImportKind) -> Bool {
+        activeImportSource == source
+    }
 
     /// Smoothed, display-ready live heart rate — median over a short window, spike-filtered.
     /// Every screen should show THIS, not the raw per-beat value (which swings with HRV).
@@ -71,6 +83,14 @@ final class AppModel: ObservableObject {
         $bpm.sink { [weak self] hr in self?.coachZone(hr) }.store(in: &hrCancellables)
         // Illness/strain early-warning recomputes when the daily history changes.
         repo.$days.sink { [weak self] days in self?.evaluateIllness(days) }.store(in: &hrCancellables)
+        // Re-arm the strap's firmware alarm whenever it (re)bonds. A smart-alarm time changed while the
+        // strap was away never reached it — the send is gated on bond — so the strap kept the OLD time
+        // and fired at it (#59). removeDuplicates() fires once per bond; gated on enabled so a disabled
+        // alarm doesn't disarm on every reconnect.
+        live.$bonded.removeDuplicates().sink { [weak self] bonded in
+            guard let self, bonded, self.behavior.smartAlarmEnabled else { return }
+            self.applySmartAlarm()
+        }.store(in: &hrCancellables)
 
         moments = (UserDefaults.standard.array(forKey: "moments") as? [Double] ?? [])
             .map { Date(timeIntervalSince1970: $0) }
@@ -108,6 +128,16 @@ final class AppModel: ObservableObject {
         let vals = hrWindow.map(\.v).sorted()
         bpm = vals.isEmpty ? nil : Int(vals[vals.count / 2].rounded())
         evaluateStress()
+    }
+
+    /// Drop the smoothing window and blank the hero number so a resume / re-attach shows "—"
+    /// until a genuinely fresh sample arrives, instead of republishing the stale pre-gap median.
+    /// Called on Live-tab entry / manual Start HR (see `startRealtimeHR`), NOT on the 30s keep-alive
+    /// re-arm — so steady-state smoothing is untouched. Fixes #46 (HR jumped to a stale ~100 on
+    /// reopen, then "slowly came back down" as fresh low samples refilled the window).
+    func resetSmoothing() {
+        hrWindow.removeAll()
+        bpm = nil
     }
 
     /// Experimental resting stress nudge: track RMSSD vs a slow baseline; when HRV drops well below
@@ -150,12 +180,22 @@ final class AppModel: ObservableObject {
     }
     func disconnect() { ble.disconnect() }
 
+    /// Drop the current strap and clear bond state so a newly-picked strap model connects fresh
+    /// (lets a user with both a WHOOP 4 and a 5/MG switch between them).
+    func prepareStrapSwitch() { ble.prepareForModelSwitch() }
+
     /// Enable the realtime stream + mark it wanted so the keep-alive re-arms it (can't lapse).
-    func startRealtimeHR() { ble.startRealtime() }
+    /// Blanks the stale smoothing window first (#46): on Live-tab entry / resume we don't want the
+    /// pre-gap median republished, so the hero shows "—" until a fresh sample lands. The keep-alive
+    /// re-arm goes through `ble.startRealtime()` directly, NOT here, so steady-state is untouched.
+    func startRealtimeHR() {
+        resetSmoothing()
+        ble.startRealtime()
+    }
     /// Stop the realtime stream (the lightweight 0x2A37 HR keeps recording regardless).
     func stopRealtimeHR() { ble.stopRealtime() }
     /// Ask the strap for a fresh battery reading.
-    func getBattery() { ble.send(.getBatteryLevel, payload: [0x00]) }
+    func getBattery() { ble.refreshBattery() }
 
     /// Fire a haptic buzz on the strap. patternId=2 is the graduated buzz confirmed on-device;
     /// `loops` sets the length. Used by the in-app test button and (later) notification alerts.
@@ -266,14 +306,14 @@ final class AppModel: ObservableObject {
 
     /// Import a Whoop CSV export (.zip or folder) → on-device store, then refresh the dashboard.
     func importWhoop(url: URL) {
-        whoopImporting = true
-        whoopImportSummary = nil
+        beginImport(.whoop)
         Task {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             do {
                 guard let store = await repo.storeHandle() else {
-                    whoopImportSummary = "Couldn't open the local store."; whoopImporting = false; return
+                    finishImport(.whoop, summary: "Couldn't open the local store.")
+                    return
                 }
                 let summary = try await WhoopImporter.importExport(url: url, into: store, deviceId: deviceId)
                 await repo.refresh()
@@ -282,33 +322,53 @@ final class AppModel: ObservableObject {
                     let f = DateFormatter(); f.dateFormat = "MMM yyyy"
                     span = " · \(f.string(from: a))–\(f.string(from: b))"
                 } else { span = "" }
-                whoopImportSummary = "Imported \(summary.recordCount) records\(span)"
+                finishImport(.whoop, summary: "Imported \(summary.recordCount) records\(span)")
             } catch {
-                whoopImportSummary = "Import failed: \(error)"
+                finishImport(.whoop, summary: "Import failed: \(error)")
             }
-            whoopImporting = false
         }
     }
 
     /// Import an Apple Health export (export.zip) — streams + aggregates per-day into the store
     /// under the `apple-health` source, then refreshes. Large exports take ~1–2 minutes.
     func importAppleHealth(url: URL) {
-        appleImporting = true
-        appleImportSummary = nil
+        beginImport(.appleHealth)
         Task {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             do {
                 guard let store = await repo.storeHandle() else {
-                    appleImportSummary = "Couldn't open the local store."; appleImporting = false; return
+                    finishImport(.appleHealth, summary: "Couldn't open the local store.")
+                    return
                 }
                 let summary = try await AppleHealthImport.importExport(url: url, into: store, deviceId: appleDeviceId)
                 await repo.refresh()
-                appleImportSummary = "Apple Health: imported \(summary.recordCount) records"
+                finishImport(.appleHealth, summary: "Imported \(summary.recordCount) records")
             } catch {
-                appleImportSummary = "Apple Health import failed: \(error)"
+                finishImport(.appleHealth, summary: "Import failed: \(error)")
             }
-            appleImporting = false
         }
+    }
+
+    /// Marks a source as importing and clears only that source's old status text.
+    private func beginImport(_ source: DataSourceImportKind) {
+        activeImportSource = source
+        switch source {
+        case .whoop:
+            whoopImportSummary = nil
+        case .appleHealth:
+            appleHealthImportSummary = nil
+        }
+    }
+
+    /// Stores the completed import summary on the matching source card.
+    private func finishImport(_ source: DataSourceImportKind, summary: String) {
+        switch source {
+        case .whoop:
+            whoopImportSummary = summary
+        case .appleHealth:
+            appleHealthImportSummary = summary
+        }
+        activeImportSource = nil
     }
 }
