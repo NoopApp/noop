@@ -68,3 +68,7 @@ export.xml
 export.zip
 *whoop_export*.zip
 *apple_health*.zip
+
+# Python bytecode
+__pycache__/
+*.pyc
