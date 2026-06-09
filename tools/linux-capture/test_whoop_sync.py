@@ -79,10 +79,10 @@ class FamilyTests(unittest.TestCase):
         # synth a whoop5 type-47 frame: inner type @ 8 = 47, hist_version @ 9, unix @ 15, hr @ 22
         frame = bytearray(60)
         frame[8] = ws.PACKET_HISTORICAL_DATA
-        frame[15:19] = (1780940412).to_bytes(4, "little")
+        frame[15:19] = (1700000000).to_bytes(4, "little")
         frame[22] = 106
         frame[9] = 18                                    # v18 → decodes
-        self.assertEqual(f.rec_unix(bytes(frame)), 1780940412)
+        self.assertEqual(f.rec_unix(bytes(frame)), 1700000000)
         self.assertEqual(f.rec_hr(bytes(frame)), 106)
         frame[9] = 26                                    # v26 → different layout, must NOT mis-decode
         self.assertIsNone(f.rec_unix(bytes(frame)))
@@ -147,6 +147,42 @@ class WhoopDBTests(unittest.TestCase):
         self.db.add_label(did, 1000, 2000, "walking", "evening")
         labs = self.db.labels(did)
         self.assertEqual(labs, [(1000, 2000, "walking", "evening")])
+
+
+class DecodeWiringTests(unittest.TestCase):
+    """The decode_features wiring on WhoopDB: feature schema on open, the decode-cursor read
+    (frames_after), and the persisted-cursor write (set_state) that decode_new relies on."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.db = ws.WhoopDB(os.path.join(self.tmp, "t.db"))
+
+    def _frame(self, hexstr, t=47, unix=1000, hr=60):
+        return (1, "61080005", t, unix, hr, hexstr)   # (recv_ms, char, inner_type, unix, hr, hex)
+
+    def test_feature_schema_applied_on_open(self):
+        # apply_schema ran in __init__ → the feature table exists.
+        r = self.db.db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='feat_second'").fetchone()
+        self.assertIsNotNone(r)
+
+    def test_frames_after_orders_and_filters_by_id(self):
+        did = self.db.upsert_device("AA:BB:CC:DD:EE:FF", model="whoop4")
+        self.db.commit_chunk(did, [self._frame("aa01", unix=100),
+                                   self._frame("aa02", unix=101),
+                                   self._frame("aa03", unix=102)], trim=1, complete=False)
+        rows = self.db.frames_after(did, 0)
+        self.assertEqual([r[1] for r in rows], ["aa01", "aa02", "aa03"])  # ascending id order
+        ids = [r[0] for r in rows]
+        self.assertEqual(ids, sorted(ids))
+        first_id = ids[0]
+        after = self.db.frames_after(did, first_id)
+        self.assertEqual([r[1] for r in after], ["aa02", "aa03"])         # first excluded
+
+    def test_set_state_persists_cursor(self):
+        did = self.db.upsert_device("AA:BB:CC:DD:EE:FF", model="whoop4")
+        self.db.set_state(did, "last_decoded_frame_id", "5")
+        self.assertEqual(self.db.state(did)["last_decoded_frame_id"], "5")
 
 
 if __name__ == "__main__":

@@ -424,6 +424,7 @@ garbage (HR `0`, gravity overflow). The fields below were read off real frames a
 | 23 | `rr_count` (u8) | matches #valid R-R intervals 100 % (1141/1143) |
 | 24 + 2·i | `rr[i]` (u16, ms) | 60000/mean(R-R) ≈ HR for 88 % (rest are HR-averaging) |
 | 45 / 49 / 53 | `gravity_x/y/z` (f32, g) | \|g\| ≈ 1.0 for 100 % of 500 records; v18 has **one** triplet (not v24's two) |
+| 73 | `skin_temp_raw` (u16); °C = raw / 128 | **AS6221** digital skin sensor (named in the firmware console logs); `/128` = its native 7.8125 m°C/LSB. Verified by the on-wrist **warming curve 17.5 → 28 °C** as the sensor equilibrates after donning — a thermal signature nothing else has. Stored **raw** (scale-agnostic; the absolute `/128` vs `/100` reading awaits a contact-thermometer). Decoded in `decodeWhoop5Historical` (`Interpreter.swift`); flows to the decode-features store as `skin_temp_raw` + derived `skin_temp_c`. |
 
 The strongest check on the HR offset: where a historical record and a live `REALTIME_DATA` (§5, 2A37
 ground-truth-verified) frame share a timestamp, the historical HR equalled the live HR at **96/96**
@@ -435,10 +436,10 @@ overlapping 1 Hz samples, with a **rest-only mean absolute error of 0.7 bpm** (t
 exercise, as two independent PPG sensors do). That is a large-sample, cross-generation check on HR@22
 on top of the live-vs-historical match above.
 
-PPG / SpO₂ / skin-temp live further in the 124-byte record but lack on-device ground truth, so they
-are left as a single raw region rather than guessed (project rule: real captures, never invented
-offsets). The decoded fields feed the existing `extractHistoricalStreams` path unchanged, so WHOOP 5
-historical HR / HRV / gravity land in the datastore exactly like 4.0.
+Skin temperature @73 **is** decoded (above); PPG / SpO₂ still live further in the 124-byte record but
+lack on-device ground truth, so that region is left raw rather than guessed (project rule: real
+captures, never invented offsets). The decoded fields feed the existing `extractHistoricalStreams`
+path unchanged, so WHOOP 5 historical HR / HRV / gravity / skin-temp land in the datastore like 4.0.
 
 ### The WHOOP 5.0 type-47 record (version 26) — high-rate optical PPG
 
