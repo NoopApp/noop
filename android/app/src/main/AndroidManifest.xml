@@ -69,6 +69,11 @@
     <uses-permission android:name="android.permission.health.READ_WEIGHT" />
     <uses-permission android:name="android.permission.health.READ_EXERCISE" />
 
+    <!-- Optional: lets the periodic auto-sync worker read Health Connect while NOOP is in the
+         background. Granted only if the user enables auto-sync and approves it; foreground imports
+         (and the on-open catch-up sync) work without it. Read-only; nothing is uploaded. -->
+    <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND" />
+
     <!-- Resolve the Health Connect provider on Android 14+ (platform) and earlier (app). -->
     <queries>
         <package android:name="com.google.android.apps.healthdata" />

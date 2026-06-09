@@ -154,6 +154,9 @@ dependencies {
     // Pinned to alpha07: alpha11+ require compileSdk 35; this module is compileSdk 34.
     implementation("androidx.health.connect:connect-client:1.1.0-alpha07")
 
+    // --- WorkManager (periodic background Health Connect auto-sync) ---
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
+
     // --- Unit / instrumentation tests ---
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")

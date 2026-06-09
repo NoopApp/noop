@@ -140,6 +140,33 @@ object NoopPrefs {
         of(context).edit().putBoolean(KEY_DEBUG_LOGGING, enabled).apply()
     }
 
+    /** Health Connect periodic auto-sync (Samsung Health → Health Connect → NOOP). Default OFF.
+     *  Interval in hours (default 12). Last successful sync as epoch millis (0 = never). */
+    const val KEY_HC_AUTO_SYNC = "noop.hcAutoSync"
+    const val KEY_HC_SYNC_HOURS = "noop.hcSyncHours"
+    const val KEY_HC_LAST_SYNC = "noop.hcLastSync"
+
+    fun hcAutoSync(context: Context): Boolean =
+        of(context).getBoolean(KEY_HC_AUTO_SYNC, false)
+
+    fun setHcAutoSync(context: Context, enabled: Boolean) {
+        of(context).edit().putBoolean(KEY_HC_AUTO_SYNC, enabled).apply()
+    }
+
+    fun hcSyncHours(context: Context): Int =
+        of(context).getInt(KEY_HC_SYNC_HOURS, 12)
+
+    fun setHcSyncHours(context: Context, hours: Int) {
+        of(context).edit().putInt(KEY_HC_SYNC_HOURS, hours).apply()
+    }
+
+    fun hcLastSync(context: Context): Long =
+        of(context).getLong(KEY_HC_LAST_SYNC, 0L)
+
+    fun setHcLastSync(context: Context, epochMs: Long) {
+        of(context).edit().putLong(KEY_HC_LAST_SYNC, epochMs).apply()
+    }
+
     /** Smart alarm: arm the strap's firmware alarm to buzz at a wake time. Default off; default time 07:00. */
     const val KEY_SMART_ALARM = "noop.smartAlarmEnabled"
     const val KEY_SMART_ALARM_MINUTES = "noop.smartAlarmMinutes"

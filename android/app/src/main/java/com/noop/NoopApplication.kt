@@ -4,6 +4,7 @@ import android.app.Application
 import com.noop.ble.WhoopBleClient
 import com.noop.data.WhoopDatabase
 import com.noop.data.WhoopRepository
+import com.noop.ingest.HealthConnectSync
 import com.noop.ui.NoopPrefs
 
 /**
@@ -33,5 +34,12 @@ class NoopApplication : Application() {
             // client never has to read the UI/prefs layer. Default OFF — see WhoopBleClient.debugLogcat.
             debugLogcat = NoopPrefs.debugLogging(applicationContext)
         }
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        // Re-register the periodic Health Connect auto-sync to match the saved preference, so the job
+        // survives reboots and app updates (WorkManager persists it; this keeps the interval in sync).
+        HealthConnectSync.reschedule(this)
     }
 }
