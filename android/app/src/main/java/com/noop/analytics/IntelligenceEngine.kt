@@ -77,6 +77,7 @@ object IntelligenceEngine {
     ): List<Computed> {
         val hrvCfg = Baselines.metricCfg["hrv"] ?: return emptyList()
         val rhrCfg = Baselines.metricCfg["resting_hr"] ?: return emptyList()
+        val skinCfg = Baselines.metricCfg["skin_temp"] ?: return emptyList()
 
         val computedId = importedDeviceId + "-noop"
 
@@ -102,6 +103,9 @@ object IntelligenceEngine {
         // Keyed by day so the union with imported history de-dupes cleanly per UTC day.
         val nightlyHrvByDay = LinkedHashMap<String, Double?>()
         val nightlyRhrByDay = LinkedHashMap<String, Double?>()
+        // Wear-gated nightly skin-temp means (on-device only — imported rows carry the deviation, not
+        // the raw mean, so the skin-temp baseline is seeded purely from these).
+        val nightlySkinByDay = LinkedHashMap<String, Double?>()
 
         for (offset in 0 until maxDays) {
             val dayStart = nowSeconds - offset * SECONDS_PER_DAY
@@ -117,6 +121,7 @@ object IntelligenceEngine {
             val resp = repo.respSamples(importedDeviceId, from, to, STREAM_LIMIT)
             val grav = repo.gravitySamples(importedDeviceId, from, to, STREAM_LIMIT)
             val steps = repo.stepSamples(importedDeviceId, from, to, STREAM_LIMIT)
+            val skin = repo.skinTempSamples(importedDeviceId, from, to, STREAM_LIMIT)
 
             // Calendar-day window for the ADDITIVE daily totals (steps + calories). The night window
             // above is anchored to the current UTC time-of-day and ends at dayStart+12h, so for a PAST
@@ -137,6 +142,7 @@ object IntelligenceEngine {
                 resp = resp,
                 gravity = grav,
                 steps = steps,
+                skinTemp = skin,
                 dayHr = dayHr,
                 daySteps = daySteps,
                 profile = profile,
@@ -149,6 +155,7 @@ object IntelligenceEngine {
             // streams (hr/rr/...) go out of scope here and are freed before the next night.
             nightlyHrvByDay[day] = res.daily.avgHrv
             nightlyRhrByDay[day] = res.daily.restingHr?.toDouble()
+            nightlySkinByDay[day] = res.nightlySkinTempC
             scoredNights.add(res)
         }
 
@@ -173,7 +180,11 @@ object IntelligenceEngine {
         val rhrSeq = histRhrByDay.entries.sortedBy { it.key }.map { it.value }
         val hrvBase2 = Baselines.foldHistory(hrvSeq, hrvCfg)
         val rhrBase2 = Baselines.foldHistory(rhrSeq, rhrCfg)
-        val baselines2 = ProfileBaselines(hrv = hrvBase2, restingHR = rhrBase2)
+        // Skin-temp baseline is on-device-only (imported rows carry skinTempDevC, not the raw mean),
+        // so fold purely over the pass-1 nightly means in chronological order.
+        val skinSeq = nightlySkinByDay.entries.sortedBy { it.key }.map { it.value }
+        val skinBase2 = Baselines.foldHistory(skinSeq, skinCfg)
+        val baselines2 = ProfileBaselines(hrv = hrvBase2, restingHR = rhrBase2, skinTemp = skinBase2)
 
         // Imported workouts in the scored window, used to de-duplicate detected bouts so a
         // user who BOTH imports real WHOOP workouts AND wears the strap doesn't see the same
@@ -193,6 +204,7 @@ object IntelligenceEngine {
 
         for (res in scoredNights) {
             val recovery = recomputeRecovery(res.daily, baselines2)
+            val skinTempDevC = recomputeSkinTempDev(res.nightlySkinTempC, baselines2.skinTemp)
 
             out.add(
                 Computed(
@@ -204,8 +216,8 @@ object IntelligenceEngine {
                     rhr = res.daily.restingHr,
                 ),
             )
-            // Stamp the computed source id + the re-scored recovery onto the daily row.
-            dailies.add(res.daily.copy(deviceId = computedId, recovery = recovery))
+            // Stamp the computed source id + the re-scored recovery & skin-temp deviation onto the row.
+            dailies.add(res.daily.copy(deviceId = computedId, recovery = recovery, skinTempDevC = skinTempDevC))
             // Map the rich DetectedSleep sessions → Room SleepSession cache rows.
             for (s in res.sleepSessions) {
                 sleepRows.add(
@@ -277,6 +289,18 @@ object IntelligenceEngine {
             respBaseline = baselines.resp,
             sleepPerf = daily.efficiency,
         )
+    }
+
+    /**
+     * Re-derive the skin-temperature deviation (°C) for a night against the freshly-seeded personal
+     * baseline, mirroring the avgHrv→recovery re-score. Null when the night had no wear-gated mean or
+     * the skin-temp baseline isn't usable yet (< minNightsSeed) — honest cold-start. Rounded to 2 dp
+     * to match the imported/demo precision. APPROXIMATE.
+     */
+    private fun recomputeSkinTempDev(nightly: Double?, base: BaselineState?): Double? {
+        val v = nightly ?: return null
+        val b = base?.takeIf { it.usable } ?: return null
+        return Math.round(Baselines.deviation(v, b).delta * 100.0) / 100.0
     }
 
     /**

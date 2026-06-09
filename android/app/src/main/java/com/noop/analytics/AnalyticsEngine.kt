@@ -5,6 +5,7 @@ import com.noop.data.GravitySample
 import com.noop.data.HrSample
 import com.noop.data.RespSample
 import com.noop.data.RrInterval
+import com.noop.data.SkinTempSample
 import com.noop.data.StepSample
 import org.json.JSONArray
 import org.json.JSONObject
@@ -30,6 +31,52 @@ import java.time.format.DateTimeFormatter
  * uses Int seconds.
  */
 object AnalyticsEngine {
+
+    /**
+     * Minimum worn, in-bed skin-temperature samples (1 Hz ⇒ seconds) before a nightly mean is
+     * trusted. ~5 min guards against a few stray samples fabricating a baseline value.
+     */
+    const val MIN_SKIN_TEMP_SAMPLES: Int = 300
+
+    /** Plausible worn skin-temperature range (°C). Off-wrist/charging samples drift to ambient
+     *  (~20–27 °C seen on hardware) and are excluded; the strap's own decode gate is 20–45. */
+    private const val SKIN_TEMP_MIN_C: Double = 28.0
+    private const val SKIN_TEMP_MAX_C: Double = 42.0
+
+    /**
+     * Wear-gated mean in-bed skin temperature (°C) for the night, or null when too few worn samples.
+     *
+     * WHOOP treats skin temperature as a SLEEP signal, so the mean is taken over the detected
+     * in-bed [sessions] only. A sample counts when (a) its timestamp falls inside a session,
+     * (b) a concurrent HR sample reads a worn, alive BPM (the strap streams HR only on-wrist), and
+     * (c) the value is in the plausible worn range — so an on-charger interval that drifts to ambient
+     * (which still passes the strap's looser 20–45 decode gate, e.g. the ~22 °C off-wrist vector in
+     * the decode fixtures) cannot poison the nightly mean. All values APPROXIMATE.
+     */
+    internal fun wornNightlySkinTempC(
+        sessions: List<DetectedSleep>,
+        hr: List<HrSample>,
+        skinTemp: List<SkinTempSample>,
+        minSamples: Int = MIN_SKIN_TEMP_SAMPLES,
+    ): Double? {
+        if (sessions.isEmpty() || skinTemp.isEmpty()) return null
+        val wornSeconds = HashSet<Long>(hr.size)
+        for (h in hr) if (h.bpm in 30..220) wornSeconds.add(h.ts)
+        var sum = 0.0
+        var n = 0
+        for (t in skinTemp) {
+            if (t.ts !in wornSeconds) continue
+            if (sessions.none { t.ts in it.start..it.end }) continue
+            val c = t.raw / 100.0
+            if (c < SKIN_TEMP_MIN_C || c > SKIN_TEMP_MAX_C) continue
+            sum += c
+            n++
+        }
+        return if (n >= minSamples) sum / n else null
+    }
+
+    /** Round to 2 decimal places (matches the imported/demo skin-temp deviation precision). */
+    private fun round2(v: Double): Double = kotlin.math.round(v * 100.0) / 100.0
 
     // ─────────────────────────────────────────────────────────────────────────
     // Day-string helper (UTC YYYY-MM-DD), mirrors Swift AnalyticsEngine.isoDay.
@@ -82,6 +129,7 @@ object AnalyticsEngine {
         resp: List<RespSample> = emptyList(),
         gravity: List<GravitySample> = emptyList(),
         steps: List<StepSample> = emptyList(),
+        skinTemp: List<SkinTempSample> = emptyList(),
         // Calendar-day-scoped overrides for the ADDITIVE daily totals (steps + activeKcalEst) ONLY.
         // When null, the totals fall back to the same window the rest of the analysis uses (preserving
         // the pure-function contract). The caller (IntelligenceEngine) supplies a full
@@ -243,6 +291,16 @@ object AnalyticsEngine {
             )
         }
 
+        // ── Skin-temperature deviation (APPROXIMATE) ──────────────────────────
+        // Wear-gated mean in-bed skin temp for the night (baseline-independent); the caller seeds a
+        // personal baseline from these means across nights and re-derives skinTempDevC in pass 2 (same
+        // shape as avgHrv→recovery). In the single-pass path a usable baseline here yields the
+        // deviation directly; null until the baseline crosses the seed gate (honest cold-start).
+        val nightlySkinTempC = wornNightlySkinTempC(matched, hr, skinTemp)
+        val skinTempDevC: Double? = nightlySkinTempC?.let { v ->
+            baselines.skinTemp?.takeIf { it.usable }?.let { round2(Baselines.deviation(v, it).delta) }
+        }
+
         // ── Assemble DailyMetric ──────────────────────────────────────────────
         // deviceId is stamped by the caller (IntelligenceEngine persists under
         // "<deviceId>-noop"); use the imported source id as a placeholder here so
@@ -262,7 +320,7 @@ object AnalyticsEngine {
             strain = strain,
             exerciseCount = workouts.size,
             spo2Pct = null,
-            skinTempDevC = null,
+            skinTempDevC = skinTempDevC,
             respRateBpm = respRateDaily,
             steps = stepsTotal,
             activeKcalEst = activeKcalEst,
@@ -274,6 +332,7 @@ object AnalyticsEngine {
             workouts = workouts,
             recovery = recovery,
             strain = strain,
+            nightlySkinTempC = nightlySkinTempC,
         )
     }
 }
