@@ -92,6 +92,8 @@ public final class BLEManager: NSObject, ObservableObject {
     private var backfillFrameQueue: [[UInt8]] = []
     /// True while the drain task is running (prevents a second drain task from launching).
     private var backfillDraining = false
+    /// Keep each main-actor drain slice small enough that SwiftUI can process input/paint between slices.
+    private static let backfillDrainBatchSize = 12
 
     /// Records WHOOP 5/MG puffin frames to a JSON file for protocol mapping. Passive (read-only on the
     /// strap) and gated by the Settings → Experimental "Record puffin frames" toggle; a no-op for
@@ -129,6 +131,9 @@ public final class BLEManager: NSObject, ObservableObject {
     /// startBackfillTimer). Stops the HISTORY_END acks re-entering didWriteValueFor from re-triggering
     /// the offload mid-stream (the 5/MG twin of the WHOOP4 connectHandshakeDone ack-storm guard).
     private var whoop5SessionStarted = false
+    /// Backfill ACKs can arrive hundreds or thousands of times in one offload. Keep the strap log
+    /// readable and avoid forcing SwiftUI to auto-scroll on every ACK row.
+    private var historicalAckLogCounter = 0
     private var clockRequested = false
     private var intentionalDisconnect = false
     /// The strap family the user chose to pair. Drives which service we scan for
@@ -335,6 +340,13 @@ public final class BLEManager: NSObject, ObservableObject {
             let frame = puffinCommandFrame(cmd: puffinCmd, seq: seq, payload: puffinPayload)
             p.writeValue(Data(frame), for: ch, type: writeType)
             let cmdNote = isHaptics ? " cmd=0x13" : ""
+            if command == .historicalDataResult {
+                historicalAckLogCounter += 1
+                if historicalAckLogCounter == 1 || historicalAckLogCounter.isMultiple(of: 25) {
+                    log("→ \(command.label) ack #\(historicalAckLogCounter) payload=\(hex(puffinPayload)) (puffin)")
+                }
+                return
+            }
             log("→ \(command.label) payload=\(hex(puffinPayload)) (puffin\(cmdNote))")
             return
         }
@@ -385,23 +397,25 @@ public final class BLEManager: NSObject, ObservableObject {
 
     /// Start a historical-offload session: tell the store machine to begin, flip the routing
     /// flag, kick the strap with sendHistoricalData, and arm the idle timeout.
-    private func beginBackfill() {
+    @discardableResult
+    private func beginBackfill() -> Bool {
         // Never offload before the connect handshake has run: a racing foreground/restore trigger
         // firing SEND_HISTORICAL ahead of hello/SET_CLOCK was part of the storm that stopped serving.
         guard connectHandshakeDone else {
             log("Backfill: deferred — connect handshake not done yet")
-            return
+            return false
         }
         guard let backfiller else {
             // Store not ready yet. Do NOT force live HR — the type-47 backfill is the metric
             // source. Just log; the next periodic backfill tick will run once the store is ready.
             log("Backfill: store not ready — deferring to next periodic tick")
-            return
+            return false
         }
         // Capture the family at begin() (not init): selectedModel is reliably set by connect() before any
         // backfill starts, whereas bootstrapStore() can build the Backfiller before the family is known.
         backfiller.begin(family: selectedModel.deviceFamily)
         backfilling = true
+        historicalAckLogCounter = 0
         // Payload MUST be [0x00], NOT empty: verified on-device that this strap serves type-47 only with
         // [0x00] (empty → 0 frames on a clean stable link with ~2k records pending); the Mac ground-truth
         // offload (re/sync_openwhoop.py, re/diagnose_biometrics.py) uses [0x00] too. Plain offload — the
@@ -409,23 +423,39 @@ public final class BLEManager: NSObject, ObservableObject {
         send(.sendHistoricalData, payload: [0x00], writeType: .withResponse)
         armBackfillTimeout()
         log("Backfill: session started — historical offload requested")
+        return true
     }
 
     /// Feed a frame to the Backfiller preserving exact arrival order. Frames are appended
-    /// synchronously (delegate order) and drained sequentially by a single task, so START /
-    /// data / END chunk assembly is never reordered (Backfiller.ingest is async).
+    /// synchronously (delegate order) and drained sequentially in small slices, so START /
+    /// data / END chunk assembly is never reordered while the UI still gets time to paint.
     private func routeBackfillFrame(_ frame: [UInt8]) {
         backfillFrameQueue.append(frame)
         guard !backfillDraining else { return }
         backfillDraining = true
-        Task { @MainActor in
-            while !backfillFrameQueue.isEmpty {
-                let f = backfillFrameQueue.removeFirst()
+        Task { @MainActor in await drainBackfillFrames() }
+    }
+
+    private func drainBackfillFrames() async {
+        while !backfillFrameQueue.isEmpty {
+            let count = min(Self.backfillDrainBatchSize, backfillFrameQueue.count)
+            let batch = Array(backfillFrameQueue.prefix(count))
+            backfillFrameQueue.removeFirst(count)
+
+            for f in batch {
                 await backfiller?.ingest(f)
                 afterBackfillIngest()
+                if !backfilling {
+                    backfillFrameQueue.removeAll(keepingCapacity: true)
+                    break
+                }
             }
-            backfillDraining = false
+
+            if !backfillFrameQueue.isEmpty {
+                await Task.yield()
+            }
         }
+        backfillDraining = false
     }
 
     /// Called after every Backfiller.ingest completes. If the Backfiller has consumed all
@@ -436,7 +466,7 @@ public final class BLEManager: NSObject, ObservableObject {
     }
 
     /// True when a frame is part of the historical offload (HISTORICAL_DATA=47, EVENT=48,
-    /// METADATA=49, CONSOLE_LOGS=50) rather than the live stream (REALTIME_DATA=40,
+    /// METADATA=49 / puffin METADATA=56, CONSOLE_LOGS=50) rather than the live stream (REALTIME_DATA=40,
     /// REALTIME_RAW_DATA=43). The live type-43 raw flood streams continuously and unprompted on
     /// this firmware, so the backfill idle-watchdog must NOT be re-armed by it — only by genuine
     /// offload progress — otherwise the session can neither complete nor time out.
@@ -447,7 +477,7 @@ public final class BLEManager: NSObject, ObservableObject {
         let typeIndex = family == .whoop5 ? 8 : 4
         guard frame.count > typeIndex else { return false }
         switch frame[typeIndex] {
-        case 47, 48, 49, 50: return true   // HISTORICAL_DATA / EVENT / METADATA / CONSOLE_LOGS
+        case 47, 48, 49, 50, 56: return true   // HISTORICAL_DATA / EVENT / METADATA / CONSOLE_LOGS
         default: return false              // 40 REALTIME_DATA, 43 REALTIME_RAW_DATA (live flood)
         }
     }
@@ -594,8 +624,9 @@ public final class BLEManager: NSObject, ObservableObject {
             log("Backfill: \(trigger) skipped (rate-limited; last \(last.map { Int(now - $0) } ?? -1)s ago)")
             return
         }
-        UserDefaults.standard.set(now, forKey: BLEManager.backfillLastAtKey)
-        beginBackfill()
+        if beginBackfill() {
+            UserDefaults.standard.set(now, forKey: BLEManager.backfillLastAtKey)
+        }
     }
 
     /// Periodic-timer callback: routes through the rate-limited requestSync entry point.
@@ -1128,7 +1159,15 @@ extension BLEManager: CBPeripheralDelegate {
              BLEManager.eventNotifyChar:
             // Reassemble (no-op for already-complete frames) then route each complete frame.
             for frame in reassembler.feed(bytes) {
-                router.handle(frame: frame)                       // UI (always)
+                if backfilling, BLEManager.isOffloadFrame(frame, family: .whoop4) {
+                    // Historical replay is bulk sync traffic, not live UI traffic. Feed it only to
+                    // the Backfiller; parsing every record through FrameRouter updates SwiftUI for
+                    // no user-visible benefit and can make the app feel hung during long offloads.
+                    armBackfillTimeout()
+                    routeBackfillFrame(frame)
+                    continue
+                }
+                router.handle(frame: frame)                       // live/UI path
                 if frame.count > 6, frame[6] == WhoopCommand.getDataRange.rawValue,
                    let newest = BLEManager.dataRangeNewestUnix(from: frame) {
                     strapNewestTs = newest                        // feeds the liveness watchdog
@@ -1151,18 +1190,7 @@ extension BLEManager: CBPeripheralDelegate {
                         }
                     }
                 }
-                if backfilling {
-                    // Historical offload path: route ONLY genuine offload frames (47/48/49/50)
-                    // through the serial drain (preserves START/data/END chunk order) and re-arm the
-                    // idle watchdog on them. The live type-40/43 flood (esp. the ~2/s, ~1.9 KB type-43
-                    // raw) is IGNORED by extractHistoricalStreams, so feeding it to the drain only
-                    // delays each chunk's insert→trim-ack — the strap then stalls waiting for the ack
-                    // and the 20 s watchdog fires (the residual timeout). Drop the flood during offload.
-                    if BLEManager.isOffloadFrame(frame, family: .whoop4) {
-                        armBackfillTimeout()
-                        routeBackfillFrame(frame)
-                    }
-                } else {
+                if !backfilling {
                     // Live path (unchanged): synchronous ingest preserves delegate arrival order.
                     collector?.ingest(frame)
                 }
@@ -1175,16 +1203,17 @@ extension BLEManager: CBPeripheralDelegate {
             // battery come from the standard 0x2A37 / 0x2A19 profiles handled above.
             if BLEManager.whoop5NotifyChars.contains(characteristic.uuid) {
                 for frame in reassembler.feed(bytes) {
+                    if backfilling, BLEManager.isOffloadFrame(frame, family: .whoop5) {
+                        // Same policy as WHOOP4: historical offload frames are bulk sync traffic.
+                        // Keep them out of the live UI parser during backfill and let Backfiller
+                        // preserve/order/process them in the sliced drain.
+                        armBackfillTimeout()
+                        routeBackfillFrame(frame)
+                        continue
+                    }
                     router.handle(frame: frame)
                     // Capture for protocol mapping (no-op unless the Settings toggle is on). PR #20.
                     puffinRecorder.capture(frame: frame, char: characteristic.uuid)
-                    // Historical offload: during a backfill, route genuine offload frames (type 47/48/49/50,
-                    // read at the puffin type byte @8) to the Backfiller too — the live router above keeps
-                    // REALTIME_DATA (type 40) for live HR, so that path is untouched. Mirrors the WHOOP4 block.
-                    if backfilling, BLEManager.isOffloadFrame(frame, family: .whoop5) {
-                        armBackfillTimeout()
-                        routeBackfillFrame(frame)
-                    }
                 }
             }
         }
