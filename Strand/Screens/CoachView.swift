@@ -3,10 +3,10 @@ import StrandDesign
 
 /// Coach — the one feature in NOOP that talks to the network.
 ///
-/// It is strictly opt-in and bring-your-own-key: the user pastes their own OpenAI
-/// or Anthropic API key (stored in the macOS Keychain by `AICoachEngine`), and only
-/// a compact text summary of their metrics plus their question ever leaves the Mac.
-/// Nothing is sent until a key is saved and a question asked.
+/// It is strictly opt-in: the user either signs in with ChatGPT/Codex or pastes
+/// their own provider API key, and only a compact text summary of their metrics
+/// plus their question ever leaves the Mac.
+/// Nothing is sent until a provider is connected and a question asked.
 ///
 /// This screen compiles against `AICoachEngine`'s public API (the macos-core agent's
 /// contract): `hasKey`, `provider` / `provider.modelOptions`, `model`, `messages`,
@@ -58,10 +58,10 @@ struct CoachView: View {
                         coach.clearKey()
                         keyDraft = ""
                     } label: {
-                        Label("Reset key", systemImage: "gearshape")
+                        Label(coach.provider.usesAPIKey ? "Reset key" : "Disconnect", systemImage: "gearshape")
                     }
-                    .help("Forget the saved key and disconnect")
-                    .accessibilityLabel("Reset API key")
+                    .help(coach.provider.usesAPIKey ? "Forget the saved key and disconnect" : "Sign out of ChatGPT/Codex")
+                    .accessibilityLabel(coach.provider.usesAPIKey ? "Reset API key" : "Disconnect ChatGPT")
                 }
             }
         }
@@ -108,7 +108,7 @@ struct CoachView: View {
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
 
-                Text("Coach uses your own API key. Pick a provider, paste a key, and choose a model. Your key is stored securely in the macOS Keychain and never leaves your Mac except as the request you make.")
+                Text("Use ChatGPT/Codex sign-in for subscription-backed Coach, or paste an API key for direct API billing. Your credentials stay local, and only the request you make is sent.")
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -129,36 +129,117 @@ struct CoachView: View {
                 // Model
                 modelSelector
 
-                // Key
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("API key").strandOverline()
-                    SecureField("Paste your \(coach.provider.displayName) API key", text: $keyDraft)
-                        .textFieldStyle(.plain)
-                        .font(StrandFont.body)
-                        .foregroundStyle(StrandPalette.textPrimary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 9)
-                        .background(StrandPalette.surfaceInset, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .strokeBorder(StrandPalette.hairline, lineWidth: 1))
-                        .onSubmit(saveKey)
-                        .accessibilityLabel("API key")
+                if coach.provider.usesAPIKey {
+                    apiKeySetup
+                } else {
+                    codexSetup
                 }
 
-                HStack {
-                    Button(action: saveKey) {
-                        Text("Save key").frame(minWidth: 90)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(StrandPalette.accent)
-                    .disabled(keyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    Spacer()
+                if let error = coach.errorText, !error.isEmpty {
+                    errorBanner(error)
                 }
 
                 Divider().overlay(StrandPalette.hairline)
                 privacyFootnote
             }
         }
+    }
+
+    /// API-key setup controls for direct OpenAI/Anthropic billing.
+    private var apiKeySetup: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("API key").strandOverline()
+                SecureField("Paste your \(coach.provider.displayName) API key", text: $keyDraft)
+                    .textFieldStyle(.plain)
+                    .font(StrandFont.body)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .background(StrandPalette.surfaceInset, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(StrandPalette.hairline, lineWidth: 1))
+                    .onSubmit(saveKey)
+                    .accessibilityLabel("API key")
+            }
+
+            HStack {
+                Button(action: saveKey) {
+                    Text("Save key").frame(minWidth: 90)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(StrandPalette.accent)
+                .disabled(keyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Spacer()
+            }
+        }
+    }
+
+    /// ChatGPT/Codex account setup controls.
+    private var codexSetup: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let account = coach.codexDetectedAccount {
+                Label("Found \(account.displayLabel)", systemImage: "checkmark.seal.fill")
+                    .font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.accent)
+            }
+
+            HStack {
+                Button {
+                    Task { await coach.signInWithCodex() }
+                } label: {
+                    if coach.sending || coach.checkingCodexAccount {
+                        ProgressView().controlSize(.small)
+                            .frame(width: 210)
+                    } else if let account = coach.codexDetectedAccount {
+                        Label("Continue with \(account.displayLabel)", systemImage: "person.crop.circle.badge.checkmark")
+                    } else {
+                        Label("Sign in with ChatGPT", systemImage: "person.crop.circle.badge.checkmark")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(StrandPalette.accent)
+                .disabled(coach.sending || coach.checkingCodexAccount)
+                .accessibilityLabel(codexPrimaryActionLabel)
+                Spacer()
+            }
+
+            if coach.codexDetectedAccount != nil {
+                Button {
+                    Task { await coach.signInWithDifferentCodexAccount() }
+                } label: {
+                    Label("Use different account", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(StrandPalette.textSecondary)
+                .disabled(coach.sending || coach.checkingCodexAccount)
+                .help("Sign out of the cached Codex profile and sign in with another ChatGPT account")
+                .accessibilityLabel("Use a different ChatGPT account")
+            }
+
+            if coach.codexDetectedAccount == nil {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Codex CLI required")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                    Text(codexInstallCommand)
+                        .font(.system(.footnote, design: .monospaced))
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.top, 2)
+                .help("Official Codex CLI install command from OpenAI's Codex CLI docs")
+            }
+        }
+    }
+
+    /// Accessibility label matching the current ChatGPT/Codex primary setup action.
+    private var codexPrimaryActionLabel: String {
+        if let account = coach.codexDetectedAccount {
+            return "Continue with \(account.displayLabel)"
+        }
+        return "Sign in with ChatGPT"
     }
 
     /// Model selector: a Picker over `coach.availableModels` with a free-text "Custom…" path and a
@@ -177,8 +258,8 @@ struct CoachView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(StrandPalette.accent)
-                .disabled(!coach.hasKey)
-                .help("Fetch the available models from \(coach.provider.displayName) using your saved key")
+                .disabled(!coach.hasKey || coach.sending)
+                .help("Fetch the available models from \(coach.provider.displayName)")
                 .accessibilityLabel("Refresh models from provider")
             }
 
@@ -247,6 +328,9 @@ struct CoachView: View {
     private var connectedHeader: some View {
         HStack(spacing: 10) {
             StatePill("\(coach.provider.displayName) · \(coach.model)", tone: .accent, showsDot: true)
+            if coach.provider == .chatGPTCodex, let account = coach.codexAccount {
+                StatePill("\(account.displayLabel)", tone: .neutral)
+            }
             Spacer()
             if coach.sending {
                 StatePill("Thinking", tone: .accent, pulsing: true)
@@ -429,7 +513,7 @@ struct CoachView: View {
 
     private var privacyFootnote: some View {
         Label {
-            Text("This is the only feature that leaves your Mac — it sends a summary of your metrics to \(coach.provider.displayName) using your own key. Nothing is sent until you ask.")
+            Text("This is the only feature that leaves your Mac — it sends a summary of your metrics to \(coach.provider.displayName). Nothing is sent until you ask.")
                 .font(StrandFont.footnote)
                 .foregroundStyle(StrandPalette.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)

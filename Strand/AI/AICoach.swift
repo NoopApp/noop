@@ -22,6 +22,7 @@ public let aiCoachPrivacyNote =
 /// The remote provider the user opts into. Anonymous: only the provider's own name is shown; no
 /// other vendor/author branding. Wire formats are pinned per provider in `AICoachEngine`.
 enum AIProvider: String, CaseIterable, Identifiable {
+    case chatGPTCodex
     case openAI
     case anthropic
 
@@ -30,16 +31,26 @@ enum AIProvider: String, CaseIterable, Identifiable {
     /// Plain provider name shown in the picker (no extra branding).
     var displayName: String {
         switch self {
-        case .openAI:    return "OpenAI"
-        case .anthropic: return "Anthropic"
+        case .chatGPTCodex: return "ChatGPT / Codex"
+        case .openAI:       return "OpenAI API"
+        case .anthropic:    return "Anthropic"
         }
     }
 
     /// Model selected by default when this provider is first chosen.
     var defaultModel: String {
         switch self {
-        case .openAI:    return "gpt-4o-mini"
-        case .anthropic: return "claude-sonnet-4-6"
+        case .chatGPTCodex: return "gpt-5.5"
+        case .openAI:       return "gpt-5.4-mini"
+        case .anthropic:    return "claude-sonnet-4-6"
+        }
+    }
+
+    /// Whether this provider uses a pasted API key instead of Codex account auth.
+    var usesAPIKey: Bool {
+        switch self {
+        case .chatGPTCodex: return false
+        case .openAI, .anthropic: return true
         }
     }
 
@@ -47,13 +58,20 @@ enum AIProvider: String, CaseIterable, Identifiable {
     /// lets the user pick any id beyond these, and `refreshModels()` can merge the provider's live list.
     var modelOptions: [String] {
         switch self {
+        case .chatGPTCodex:
+            return [
+                "gpt-5.5",
+                "gpt-5.4",
+                "gpt-5.4-mini",
+                "gpt-5.3-codex-spark"
+            ]
         case .openAI:
             return [
-                "gpt-4o",
-                "gpt-4o-mini",
-                "gpt-4.1",
-                "gpt-4.1-mini",
-                "gpt-4.1-nano"
+                "gpt-5.5",
+                "gpt-5.4",
+                "gpt-5.4-mini",
+                "gpt-5.4-nano",
+                "chat-latest"
             ]
         case .anthropic:
             return [
@@ -71,16 +89,28 @@ enum AIProvider: String, CaseIterable, Identifiable {
     /// The HTTPS endpoint this provider's chat request is POSTed to.
     var endpoint: URL {
         switch self {
-        case .openAI:    return URL(string: "https://api.openai.com/v1/chat/completions")!
-        case .anthropic: return URL(string: "https://api.anthropic.com/v1/messages")!
+        case .chatGPTCodex: return URL(string: "http://127.0.0.1")!
+        case .openAI:       return URL(string: "https://api.openai.com/v1/chat/completions")!
+        case .anthropic:    return URL(string: "https://api.anthropic.com/v1/messages")!
+        }
+    }
+
+    /// The modern OpenAI text-generation endpoint. Kept separate because Anthropic still uses
+    /// its provider-specific Messages API and OpenAI may fall back to Chat Completions for custom ids.
+    var responsesEndpoint: URL? {
+        switch self {
+        case .chatGPTCodex: return nil
+        case .openAI:       return URL(string: "https://api.openai.com/v1/responses")!
+        case .anthropic:    return nil
         }
     }
 
     /// The HTTPS endpoint that lists the provider's available models (GET, authenticated).
     var modelsEndpoint: URL {
         switch self {
-        case .openAI:    return URL(string: "https://api.openai.com/v1/models")!
-        case .anthropic: return URL(string: "https://api.anthropic.com/v1/models")!
+        case .chatGPTCodex: return URL(string: "http://127.0.0.1")!
+        case .openAI:       return URL(string: "https://api.openai.com/v1/models")!
+        case .anthropic:    return URL(string: "https://api.anthropic.com/v1/models")!
         }
     }
 }
@@ -89,7 +119,7 @@ enum AIProvider: String, CaseIterable, Identifiable {
 
 /// One turn in the coaching conversation.
 struct ChatMessage: Identifiable, Equatable {
-    enum Role: String { case user, assistant }
+    enum Role: String, Sendable { case user, assistant }
     let id: UUID
     let role: Role
     let text: String
@@ -164,6 +194,8 @@ enum AICoachError: LocalizedError {
     case server(Int, String)
     case network(String)
     case decode
+    case codexUnavailable(String)
+    case codexLoginRequired
 
     var errorDescription: String? {
         switch self {
@@ -182,6 +214,10 @@ enum AICoachError: LocalizedError {
             return "Network problem: \(detail). The coach is the only feature that needs the internet."
         case .decode:
             return "Couldn't read the provider's reply. Try again."
+        case .codexUnavailable(let detail):
+            return detail
+        case .codexLoginRequired:
+            return "Sign in with ChatGPT first to use the Codex-backed coach."
         }
     }
 }
@@ -208,6 +244,9 @@ final class AICoachEngine: ObservableObject {
             if !provider.modelOptions.contains(model) {
                 model = provider.defaultModel
             }
+            if provider == .chatGPTCodex {
+                Task { await refreshCodexAccount() }
+            }
         }
     }
     @Published var model: String {
@@ -216,6 +255,12 @@ final class AICoachEngine: ObservableObject {
     /// The model ids offered in the picker. Seeded from `provider.modelOptions`, reset when the
     /// provider changes, and optionally extended by `refreshModels()` with the provider's live list.
     @Published var availableModels: [String] = []
+    /// Signed-in ChatGPT/Codex account metadata, if this provider is connected.
+    @Published var codexAccount: CodexAccount?
+    /// ChatGPT/Codex account metadata detected from the user's existing Codex CLI login.
+    @Published var codexDetectedAccount: CodexAccount?
+    /// Whether NOOP is checking the local Codex CLI for an existing ChatGPT/Codex profile.
+    @Published var checkingCodexAccount = false
     /// Explicit permission for the coach to read & transmit the user's biometric data. OFF by
     /// default — until this is true, NO metrics are included in any request (only the question).
     @Published var dataConsent: Bool {
@@ -276,15 +321,22 @@ final class AICoachEngine: ObservableObject {
         self.availableModels = seeded
 
         self.dataConsent = UserDefaults.standard.bool(forKey: Self.consentKey)
+
+        if storedProvider == .chatGPTCodex {
+            Task { await refreshCodexAccount() }
+        }
     }
 
     // MARK: Key management
 
-    /// True when a key is present in the Keychain.
-    var hasKey: Bool { AIKeyStore.read() != nil }
+    /// True when the selected provider is connected.
+    var hasKey: Bool {
+        provider.usesAPIKey ? AIKeyStore.read() != nil : codexAccount != nil
+    }
 
     /// Store the user's pasted key securely. Clears any prior error.
     func setKey(_ key: String) {
+        guard provider.usesAPIKey else { return }
         AIKeyStore.save(key)
         errorText = nil
         objectWillChange.send() // `hasKey` is computed; nudge SwiftUI to re-read it.
@@ -294,8 +346,92 @@ final class AICoachEngine: ObservableObject {
 
     /// Forget the stored key.
     func clearKey() {
-        AIKeyStore.clear()
+        if provider.usesAPIKey {
+            AIKeyStore.clear()
+        } else {
+            codexAccount = nil
+        }
+        errorText = nil
         objectWillChange.send()
+    }
+
+    /// Detects an existing local ChatGPT/Codex profile without connecting Coach automatically.
+    func refreshCodexAccount() async {
+        guard provider == .chatGPTCodex else { return }
+        checkingCodexAccount = true
+        defer { checkingCodexAccount = false }
+        do {
+            let account = try await CodexAppServer.readAccount()
+            codexDetectedAccount = account
+            if codexAccount != nil {
+                codexAccount = account
+            }
+            errorText = nil
+            objectWillChange.send()
+            if codexAccount != nil {
+                await refreshModels()
+            }
+        } catch let error as CodexAppServerError {
+            codexDetectedAccount = nil
+            codexAccount = nil
+            errorText = error.errorDescription
+        } catch {
+            codexDetectedAccount = nil
+            codexAccount = nil
+            errorText = AICoachError.codexUnavailable(error.localizedDescription).errorDescription
+        }
+    }
+
+    /// Connects Coach to the detected Codex profile, or starts ChatGPT sign-in when none exists.
+    func signInWithCodex() async {
+        guard provider == .chatGPTCodex else { return }
+        errorText = nil
+        sending = true
+        defer { sending = false }
+        do {
+            var account = try await CodexAppServer.readAccount()
+            if account == nil {
+                account = try await CodexAppServer.signIn()
+            }
+            codexDetectedAccount = account
+            codexAccount = account
+            objectWillChange.send()
+            if codexAccount != nil {
+                await refreshModels()
+            } else {
+                errorText = AICoachError.codexLoginRequired.errorDescription
+            }
+        } catch let error as CodexAppServerError {
+            errorText = error.errorDescription
+        } catch {
+            errorText = AICoachError.codexUnavailable(error.localizedDescription).errorDescription
+        }
+    }
+
+    /// Logs out of the cached Codex profile and starts a fresh ChatGPT/Codex browser sign-in.
+    func signInWithDifferentCodexAccount() async {
+        guard provider == .chatGPTCodex else { return }
+        errorText = nil
+        sending = true
+        defer { sending = false }
+        do {
+            try await CodexAppServer.signOut()
+            codexDetectedAccount = nil
+            codexAccount = nil
+            let account = try await CodexAppServer.signIn()
+            codexDetectedAccount = account
+            codexAccount = account
+            objectWillChange.send()
+            if codexAccount != nil {
+                await refreshModels()
+            } else {
+                errorText = AICoachError.codexLoginRequired.errorDescription
+            }
+        } catch let error as CodexAppServerError {
+            errorText = error.errorDescription
+        } catch {
+            errorText = AICoachError.codexUnavailable(error.localizedDescription).errorDescription
+        }
     }
 
     // MARK: Live model list
@@ -314,6 +450,21 @@ final class AICoachEngine: ObservableObject {
     /// returned ids into `availableModels`. Never crashes; failures land in `errorText` and leave
     /// the existing list intact. Requires a saved key.
     func refreshModels() async {
+        if provider == .chatGPTCodex {
+            do {
+                let discovered = try await CodexAppServer.listModels()
+                let builtIn = provider.modelOptions
+                let merged = builtIn + Set(discovered).subtracting(builtIn).sorted()
+                availableModels = merged.contains(model) ? merged : [model] + merged
+                errorText = nil
+            } catch let error as CodexAppServerError {
+                errorText = error.errorDescription
+            } catch {
+                errorText = AICoachError.codexUnavailable(error.localizedDescription).errorDescription
+            }
+            return
+        }
+
         guard let key = AIKeyStore.read() else {
             errorText = AICoachError.noKey.errorDescription
             return
@@ -323,6 +474,8 @@ final class AICoachEngine: ObservableObject {
         var req = URLRequest(url: provider.modelsEndpoint)
         req.httpMethod = "GET"
         switch provider {
+        case .chatGPTCodex:
+            return
         case .openAI:
             req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         case .anthropic:
@@ -367,8 +520,10 @@ final class AICoachEngine: ObservableObject {
         let ids: [String] = list.compactMap { row in
             guard let id = row["id"] as? String, !id.isEmpty else { return nil }
             switch provider {
+            case .chatGPTCodex:
+                return id
             case .openAI:
-                return (id.hasPrefix("gpt") || id.hasPrefix("o")) ? id : nil
+                return (id.hasPrefix("gpt") || id.hasPrefix("o") || id.hasPrefix("chat")) ? id : nil
             case .anthropic:
                 return id
             }
@@ -397,7 +552,15 @@ final class AICoachEngine: ObservableObject {
     func send(_ userText: String) async {
         let trimmed = userText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { errorText = AICoachError.emptyQuestion.errorDescription; return }
-        guard let key = AIKeyStore.read() else { errorText = AICoachError.noKey.errorDescription; return }
+        let key = AIKeyStore.read()
+        if provider.usesAPIKey, key == nil {
+            errorText = AICoachError.noKey.errorDescription
+            return
+        }
+        if provider == .chatGPTCodex, codexAccount == nil {
+            errorText = AICoachError.codexLoginRequired.errorDescription
+            return
+        }
 
         errorText = nil
         messages.append(ChatMessage(role: .user, text: trimmed))
@@ -426,7 +589,8 @@ final class AICoachEngine: ObservableObject {
     /// prescription + one recovery tip — without the user typing. Requires a key + data consent.
     func startBriefIfNeeded() async {
         guard hasKey, dataConsent, messages.isEmpty, !sending else { return }
-        guard let key = AIKeyStore.read() else { return }
+        let key = AIKeyStore.read()
+        guard !provider.usesAPIKey || key != nil else { return }
         errorText = nil
         sending = true
         defer { sending = false }
@@ -460,11 +624,17 @@ final class AICoachEngine: ObservableObject {
     }
 
     /// Dispatch to the user's chosen provider.
-    private func callProvider(key: String,
+    private func callProvider(key: String?,
                               messages: [(role: ChatMessage.Role, content: String)]) async throws -> String {
         switch provider {
-        case .openAI:    return try await sendOpenAI(key: key, messages: messages)
-        case .anthropic: return try await sendAnthropic(key: key, messages: messages)
+        case .chatGPTCodex:
+            return try await CodexAppServer.complete(model: model, systemPrompt: systemPrompt, messages: messages)
+        case .openAI:
+            guard let key else { throw AICoachError.noKey }
+            return try await sendOpenAI(key: key, messages: messages)
+        case .anthropic:
+            guard let key else { throw AICoachError.noKey }
+            return try await sendAnthropic(key: key, messages: messages)
         }
     }
 
@@ -485,24 +655,57 @@ final class AICoachEngine: ObservableObject {
 
     // MARK: Provider calls
 
-    /// OpenAI Chat Completions. System prompt is a leading system message.
+    /// OpenAI Responses API. System prompt is sent as top-level instructions. If a custom/legacy
+    /// model rejects Responses, retry once with Chat Completions for compatibility.
     private func sendOpenAI(key: String,
                             messages: [(role: ChatMessage.Role, content: String)]) async throws -> String {
-        var wire: [[String: Any]] = [["role": "system", "content": systemPrompt]]
-        for m in messages { wire.append(["role": m.role.rawValue, "content": m.content]) }
-
-        // Standard params first (gpt-4 family). Newer/reasoning models reject `temperature` and want
-        // `max_completion_tokens`; if the provider 400s about either, retry with the modern shape.
+        let input = messages.map { ["role": $0.role.rawValue, "content": $0.content] }
         do {
-            return try await openAIChat(key: key, wire: wire, modernParams: false)
-        } catch let AICoachError.server(code, detail) where code == 400 {
+            return try await openAIResponses(key: key, input: input)
+        } catch let AICoachError.server(code, detail) where code == 400 || code == 404 {
             let d = detail.lowercased()
-            if d.contains("max_completion_tokens") || d.contains("max_tokens")
-                || d.contains("temperature") || d.contains("unsupported") {
+            if d.contains("responses") || d.contains("unsupported") || d.contains("model")
+                || d.contains("not found") {
+                var wire: [[String: Any]] = [["role": "system", "content": systemPrompt]]
+                wire.append(contentsOf: input.map { $0 as [String: Any] })
                 return try await openAIChat(key: key, wire: wire, modernParams: true)
             }
             throw AICoachError.server(code, detail)
         }
+    }
+
+    /// One OpenAI Responses request. This is the preferred API for current reasoning/frontier
+    /// models and returns every output_text chunk aggregated into one assistant reply.
+    private func openAIResponses(key: String, input: [[String: String]]) async throws -> String {
+        guard let endpoint = AIProvider.openAI.responsesEndpoint else { throw AICoachError.decode }
+        let body: [String: Any] = [
+            "model": model,
+            "instructions": systemPrompt,
+            "input": input,
+            "max_output_tokens": 900
+        ]
+
+        var req = URLRequest(url: endpoint)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let json = try await perform(req)
+        if let text = json["output_text"] as? String, !text.isEmpty {
+            return text
+        }
+
+        let chunks = (json["output"] as? [[String: Any]] ?? []).flatMap { item -> [String] in
+            guard item["type"] as? String == "message",
+                  let content = item["content"] as? [[String: Any]] else { return [] }
+            return content.compactMap { part in
+                guard part["type"] as? String == "output_text" else { return nil }
+                return part["text"] as? String
+            }
+        }
+        guard !chunks.isEmpty else { throw AICoachError.decode }
+        return chunks.joined(separator: "\n")
     }
 
     /// One OpenAI chat request. `modernParams` uses `max_completion_tokens` and drops the custom
