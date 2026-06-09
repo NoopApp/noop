@@ -37,17 +37,17 @@ jobs:
 
   # --- JOB 2: iOS App bauen (Unsignierte .ipa) ---
   # --- JOB 2: iOS App bauen (Unsignierte .ipa) ---
+  # --- JOB 2: iOS App bauen (Unsignierte .ipa) ---
   build-ios:
-    runs-on: macos-15 # <--- Geändert auf macos-15 für neuere Xcode-Unterstützung
+    runs-on: macos-15
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Erzwingt die Nutzung von Xcode 16 auf dem Server
       - name: Set up Xcode version
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: '16.0' # <--- Passend für das neuere Projektformat (77)
+          xcode-version: '16.0'
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -55,12 +55,12 @@ jobs:
       - name: Generate Xcode Project
         run: xcodegen generate
 
-      # Baut das iOS-Target und hebelt das Code-Signing komplett aus
+      # Geändert: -scheme wurde von "StrandiOS" auf "Strand" gesetzt
       - name: Build Unsigned iOS Archive
         run: |
           xcodebuild archive \
             -project Strand.xcodeproj \
-            -scheme StrandiOS \
+            -scheme Strand \
             -sdk iphoneos \
             -configuration Release \
             -archivePath build/StrandiOS.xcarchive \
@@ -69,11 +69,12 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGN_ENTITLEMENTS=""
 
-      # Kleiner Fix: Wir leeren hier auch den Entitlements-Pfad im App-Bundle, falls Xcode meckert
+      # Da der Name der App im Bundle "NOOP.app" oder "Strand.app" sein könnte,
+      # nutzen wir hier einen Platzhalter (*.app), damit das Kopieren immer klappt.
       - name: Package iOS App to .ipa
         run: |
           mkdir -p build/Payload
-          cp -R build/StrandiOS.xcarchive/Products/Applications/NOOP.app build/Payload/
+          cp -R build/StrandiOS.xcarchive/Products/Applications/*.app build/Payload/
           cd build
           zip -r ../NOOP-iOS-unsigned.ipa Payload/
 
