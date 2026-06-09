@@ -322,17 +322,20 @@ public final class BLEManager: NSObject, ObservableObject {
                 log("send(\(command.label)) skipped — no WHOOP 5/MG framing for this command yet")
                 return
             }
+            // WHOOP 5/MG haptics differ from WHOOP 4.0 on BOTH the opcode AND the payload (#48, decoded
+            // from the working "maverick" app's binary). Opcode: 0x13, not RUN_HAPTICS_PATTERN=79 (a real-MG
+            // capture showed the strap rejecting 79 with COMMAND_RESPONSE result=0x03). Payload: the maverick
+            // haptic body [0x01, effects(8), loopControl(u16 LE), overallLoop] — here the "notify" preset
+            // (effects 47,152), NOT the 4.0 [patternId, loops, …]. puffinCommandFrame pads the inner to a
+            // 4-byte boundary, which this 12-byte payload needs. WHOOP 4.0 is untouched (79 + its own frame).
+            let isHaptics = command == .runHapticsPattern
+            let puffinCmd: UInt8 = isHaptics ? 0x13 : command.rawValue
+            let puffinPayload: [UInt8] = isHaptics ? [0x01, 47, 152, 0, 0, 0, 0, 0, 0, 0, 0, 0] : payload
             seq = seq &+ 1
-            // EXPERIMENTAL (#48): WHOOP 5/MG haptics use opcode 0x13, NOT the WHOOP 4.0 RUN_HAPTICS_PATTERN
-            // (79). A real-MG capture shows the strap REJECTING 79 (COMMAND_RESPONSE result=0x03) while a
-            // working third-party app fires the buzz with 0x13 (PENDING→SUCCESS, VALID_PATTERN). Override
-            // just the opcode here; the payload is still the 4.0 preset [patternId, loops, …] pending the
-            // exact 5/MG payload (whootify APK). WHOOP 4.0 is untouched (uses 79 via its own frame below).
-            let puffinCmd: UInt8 = (command == .runHapticsPattern) ? 0x13 : command.rawValue
-            let frame = puffinCommandFrame(cmd: puffinCmd, seq: seq, payload: payload)
+            let frame = puffinCommandFrame(cmd: puffinCmd, seq: seq, payload: puffinPayload)
             p.writeValue(Data(frame), for: ch, type: writeType)
-            let cmdNote = command == .runHapticsPattern ? " cmd=0x13" : ""
-            log("→ \(command.label) payload=\(hex(payload)) (puffin\(cmdNote))")
+            let cmdNote = isHaptics ? " cmd=0x13" : ""
+            log("→ \(command.label) payload=\(hex(puffinPayload)) (puffin\(cmdNote))")
             return
         }
         seq = seq &+ 1

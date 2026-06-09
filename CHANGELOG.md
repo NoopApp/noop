@@ -17,6 +17,40 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 1.36 — Android: direct reconnect after a dropout (#61)
+
+- **Fixed (Android): a dropped WHOOP 4.0 could get stuck "disconnected" and never reconnect** (issue
+  #61). `handleDisconnect` only ever called `connect()` → a BLE **scan**, but a bonded strap that the
+  OS still holds (or that simply isn't advertising) doesn't show up in a scan — so it looped
+  `No WHOOP strap found` until the user forced the strap into pairing mode. Now the client **remembers
+  the connected `BluetoothDevice`** and, on an unintentional drop, reconnects to it **directly** via
+  `connectGatt(autoConnect = true)` — the OS reconnects as soon as the strap is reachable, with no
+  scan and no advertisement needed. `connectToDevice` gained an `autoConnect` param (default `false`
+  for the scan-discovered first connect) and now closes any stale GATT first; `prepareForModelSwitch`
+  clears the remembered device so a model switch scans fresh.
+- macOS already did this — `connect()` reconnects via `retrieveConnectedPeripherals` + `central.connect`
+  (and state-restoration) before falling back to a scan — so this is an **Android-only** fix +
+  lockstep version bump.
+
+## 1.35 — WHOOP 5/MG buzz matched byte-for-byte (#48)
+
+- **WHOOP 5.0/MG haptics now byte-identical to a working app.** v1.34 fixed the opcode (`0x13`) but
+  kept the WHOOP-4.0 payload. The contributor's working 5.0 app ("whootify") was decompiled, giving
+  the real command:
+  - **Payload**: `[0x01, effects(8), loopControl(u16 LE), overallLoop]` — 12 bytes. We send the
+    "notify" preset (effects `47,152`): `01 2f 98 00 00 00 00 00 00 00 00 00`.
+  - **Framing fix — `pad4`**: the strap's maverick framing pads the inner record to a 4-byte boundary
+    before length+CRC. `puffinCommandFrame` *wasn't* doing this — it didn't matter for the 4-aligned
+    commands shipped so far (toggle-HR, historical), but the 12-byte haptic inner is 15 bytes and must
+    pad to 16, or the declared length + CRC32 are wrong and the strap rejects the frame. Added pad4 to
+    `puffinCommandFrame` on both platforms (no-op for the aligned commands — existing frames unchanged).
+  - **Verified byte-for-byte**: a golden-vector test on each platform asserts `puffinCommandFrame(0x13,
+    seq=1, notify-payload)` equals the frame the working app's `buildMaverickFrame` produces
+    (`aa0114000001e1e1230113012f98…98cb83a5`), and that pad4 leaves HR-toggle's frame at 16 bytes.
+- So a bonded 5.0/MG should now actually vibrate on Test buzz / wrist alerts / smart-alarm buzz.
+  **WHOOP 4.0 buzz is byte-for-byte unchanged** (still opcode 79 + its own frame). Awaiting hardware
+  confirmation on #48.
+
 ## 1.34 — WHOOP 5/MG haptics opcode (experimental, #48)
 
 - **Experimental (WHOOP 5.0/MG): buzz now sends opcode `0x13`, not the 4.0 `RUN_HAPTICS_PATTERN`

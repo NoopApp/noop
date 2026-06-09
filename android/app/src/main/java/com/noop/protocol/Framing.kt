@@ -406,11 +406,17 @@ object Framing {
         type: Int = PacketType.COMMAND.rawValue,   // 35
         header: ByteArray = byteArrayOf(0x00, 0x01),
     ): ByteArray {
-        val inner = ByteArray(3 + payload.size)
-        inner[0] = (type and 0xFF).toByte()
-        inner[1] = (seq and 0xFF).toByte()
-        inner[2] = (cmd and 0xFF).toByte()
-        System.arraycopy(payload, 0, inner, 3, payload.size)
+        val inner0 = ByteArray(3 + payload.size)
+        inner0[0] = (type and 0xFF).toByte()
+        inner0[1] = (seq and 0xFF).toByte()
+        inner0[2] = (cmd and 0xFF).toByte()
+        System.arraycopy(payload, 0, inner0, 3, payload.size)
+        // Pad the inner record to a 4-byte boundary before length/CRC, exactly as the strap's maverick
+        // framing does (pad4). No-op for the 4-aligned commands shipped so far (toggle HR, historical),
+        // but REQUIRED for the 12-byte haptics payload (inner 15 -> 16) — otherwise the declared length
+        // and CRC32 cover the wrong byte count and the strap rejects the frame (#48).
+        val pad = (4 - inner0.size % 4) % 4
+        val inner = if (pad == 0) inner0 else inner0 + ByteArray(pad)
 
         val declLen = inner.size + 4
 

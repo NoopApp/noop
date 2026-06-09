@@ -7,7 +7,7 @@ enum AppChangelog {
 
     /// Bump this when you add a release below. The "What's New" sheet shows automatically when the
     /// stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
-    static let currentVersion = "1.34"
+    static let currentVersion = "1.36"
 
     struct Release: Identifiable {
         let version: String
@@ -19,6 +19,20 @@ enum AppChangelog {
 
     /// Newest first.
     static let releases: [Release] = [
+        Release(
+            version: "1.36",
+            title: "Android: reliable reconnect after a dropout",
+            date: "June 2026",
+            items: [
+                "Fixed (Android): if your strap dropped — out of range, or after a while in the background — NOOP could get stuck \"disconnected\" and never reconnect, no matter how many times it rescanned; the only fix was forcing the strap into pairing mode. The cause: a bonded strap that isn't advertising can't be found by a Bluetooth scan, and reconnect was scan-only. It now reconnects DIRECTLY to your known strap (the OS reconnects as soon as it's back in range, no scan needed), so it recovers on its own. (The Mac already reconnected this way.)",
+            ]),
+        Release(
+            version: "1.35",
+            title: "WHOOP 5.0/MG buzz — the real command (matched byte-for-byte)",
+            date: "June 2026",
+            items: [
+                "WHOOP 5.0/MG: the buzz now sends the exact haptics command a working 5.0 app uses — the right command number (0x13), the right 12-byte payload (the \"notify\" vibration pattern), and a framing fix (4-byte padding) that the longer payload needs. NOOP's command is now byte-for-byte identical to the working app's, verified by a test. So Test buzz, wrist alerts and the smart-alarm buzz should now actually vibrate a bonded 5.0/MG. (This supersedes the v1.34 attempt, which had the command number but not the payload.) WHOOP 4.0 buzz is unchanged. If you have a 5.0/MG, please confirm on issue #48.",
+            ]),
         Release(
             version: "1.34",
             title: "WHOOP 5.0/MG buzz — trying the right command (experimental)",

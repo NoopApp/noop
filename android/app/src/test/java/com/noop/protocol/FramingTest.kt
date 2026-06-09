@@ -116,6 +116,22 @@ class FramingTest {
         assertEquals(wantCrc32, gotCrc32)
     }
 
+    @Test
+    fun puffinCommandFrame_hapticsMatchesMaverickGolden() {
+        // WHOOP 5/MG buzz (#48): haptic inner is 15 bytes ([35, seq, 0x13] + 12-byte payload), which
+        // pad4 must extend to 16 before length/CRC — like the strap's maverick framing. Golden frame
+        // from the working app's buildMaverickFrame (notify preset, effects 47,152) at seq=1; exact
+        // equality proves the opcode (0x13), payload, AND pad4 are all correct, byte-for-byte.
+        val payload = byteArrayOf(0x01, 47, 152.toByte(), 0, 0, 0, 0, 0, 0, 0, 0, 0) // 0x01+effects(8)+loopCtl(2)+overall
+        assertEquals(12, payload.size)
+        val frame = Framing.puffinCommandFrame(cmd = 0x13, seq = 1, payload = payload)
+        assertEquals("aa0114000001e1e1230113012f980000000000000000000098cb83a5", hex(frame))
+        assertEquals(28, frame.size) // 8 header + 16 padded inner + 4 crc32
+        assertTrue(Framing.parseFrame(frame, DeviceFamily.WHOOP5).ok)
+        // pad4 is a NO-OP for already-4-aligned commands: HR toggle inner ([35,seq,3,1]) stays 16 bytes.
+        assertEquals(16, Framing.puffinCommandFrame(cmd = CommandNumber.TOGGLE_REALTIME_HR.rawValue, seq = 7, payload = byteArrayOf(1)).size)
+    }
+
     // MARK: - parseFrame decode vectors
 
     @Test
