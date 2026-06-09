@@ -2,6 +2,7 @@ package com.noop.ui
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Build
 import android.os.Bundle
@@ -11,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,6 +38,9 @@ import kotlinx.coroutines.launch
  */
 class MainActivity : ComponentActivity() {
 
+    private val agentLaunch = mutableStateOf(AgentLaunchRequest.Empty)
+    private var agentLaunchSequence = 0L
+
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
             // Permission results flow back into the BLE client's own runtime checks;
@@ -45,6 +50,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        updateAgentLaunch(intent)
 
         // Demo build only: preload a full synthetic dataset so every screen is populated
         // out of the box (no strap, no import). No-op once seeded; never runs on the full app.
@@ -57,16 +63,31 @@ class MainActivity : ComponentActivity() {
         // Only pre-warm permissions at launch for already-onboarded users. First-run onboarding
         // requests each permission at the step that explains it — Bluetooth when the Connect step
         // appears, notifications when it enables the background keep-alive — so the OS prompt never
-        // lands before the screen that justifies it.
-        if (NoopPrefs.of(this).getBoolean(NoopPrefs.KEY_ONBOARDED, false)) {
+        // lands before the screen that justifies it. Agent deep links also skip this pre-warm so
+        // emulator navigation can jump between screens without an OS dialog blocking automation.
+        if (
+            NoopPrefs.of(this).getBoolean(NoopPrefs.KEY_ONBOARDED, false) &&
+            !agentLaunch.value.completeOnboarding
+        ) {
             requestBlePermissions()
         }
 
         setContent {
             NoopTheme {
-                NoopRoot()
+                NoopRoot(agentLaunch = agentLaunch.value)
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        updateAgentLaunch(intent)
+    }
+
+    private fun updateAgentLaunch(intent: Intent?) {
+        agentLaunchSequence += 1
+        agentLaunch.value = intent.toAgentLaunchRequest(agentLaunchSequence)
     }
 
     /** Request the BLE permissions appropriate to the running OS version. */
@@ -87,6 +108,31 @@ class MainActivity : ComponentActivity() {
 
         if (needed.isNotEmpty()) permissionLauncher.launch(needed)
     }
+}
+
+private fun Intent?.toAgentLaunchRequest(sequence: Long): AgentLaunchRequest {
+    if (this?.action != Intent.ACTION_VIEW) return AgentLaunchRequest(sequence = sequence)
+
+    val uri = data ?: return AgentLaunchRequest.Empty
+    if (uri.scheme != AgentNavigation.SCHEME || uri.host != AgentNavigation.HOST) {
+        return AgentLaunchRequest.Empty
+    }
+
+    val firstSegment = uri.pathSegments.firstOrNull()
+    val routeCandidate = when (firstSegment) {
+        "screen" -> uri.pathSegments.getOrNull(1)
+        null -> uri.getQueryParameter("route")
+        else -> firstSegment
+    }
+
+    return AgentLaunchRequest(
+        route = AgentNavigation.routeOrNull(routeCandidate),
+        completeOnboarding = BuildConfig.DEBUG && (
+            uri.getBooleanQueryParameter("onboarded", false) ||
+                uri.getBooleanQueryParameter("skipOnboarding", false)
+            ),
+        sequence = sequence,
+    )
 }
 
 // MARK: - First-run / changelog gating (mirrors macOS ContentView.swift)
@@ -191,7 +237,7 @@ object NoopPrefs {
  * state on each transition.
  */
 @Composable
-fun NoopRoot() {
+fun NoopRoot(agentLaunch: AgentLaunchRequest = AgentLaunchRequest.Empty) {
     val context = LocalContext.current
     val prefs = remember { NoopPrefs.of(context) }
     val appViewModel: AppViewModel = viewModel()
@@ -203,7 +249,20 @@ fun NoopRoot() {
         mutableStateOf(prefs.getString(NoopPrefs.KEY_LAST_SEEN_CHANGELOG, "") ?: "")
     }
 
-    if (!onboarded) {
+    if (agentLaunch.completeOnboarding && !onboarded) {
+        LaunchedEffect(agentLaunch.completeOnboarding) {
+            prefs.edit()
+                .putBoolean(NoopPrefs.KEY_ONBOARDED, true)
+                .putString(NoopPrefs.KEY_LAST_SEEN_CHANGELOG, AppChangelog.CURRENT_VERSION)
+                .apply()
+            lastSeenChangelog = AppChangelog.CURRENT_VERSION
+            onboarded = true
+        }
+    }
+
+    val canShowApp = onboarded || agentLaunch.completeOnboarding
+
+    if (!canShowApp) {
         OnboardingScreen(
             viewModel = appViewModel,
             onFinished = {
@@ -222,9 +281,9 @@ fun NoopRoot() {
 
     // Existing, onboarded user: render the app, and if they've updated since last launch
     // (stored version behind current), show "What's New" once over the top.
-    AppRoot(viewModel = appViewModel)
+    AppRoot(viewModel = appViewModel, agentLaunch = agentLaunch)
 
-    if (lastSeenChangelog != AppChangelog.CURRENT_VERSION) {
+    if (!agentLaunch.completeOnboarding && lastSeenChangelog != AppChangelog.CURRENT_VERSION) {
         Dialog(
             onDismissRequest = {
                 prefs.edit()

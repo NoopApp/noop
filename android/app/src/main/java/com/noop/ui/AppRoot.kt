@@ -54,8 +54,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.noop.BuildConfig
@@ -68,6 +73,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 // MARK: - Navigation model
 //
@@ -123,6 +129,31 @@ private enum class Destination(
     }
 }
 
+/** Parsed agent deep-link request. Onboarding completion is honored only in debug builds. */
+data class AgentLaunchRequest(
+    val route: String? = null,
+    val completeOnboarding: Boolean = false,
+    val sequence: Long = 0,
+) {
+    companion object {
+        val Empty = AgentLaunchRequest()
+    }
+}
+
+/** Stable routes and URL constants shared by the app and repo-local agent scripts. */
+internal object AgentNavigation {
+    const val SCHEME = "noop"
+    const val HOST = "agent"
+
+    val routes: Set<String>
+        get() = Destination.entries.mapTo(linkedSetOf()) { it.route }
+
+    fun routeOrNull(value: String?): String? {
+        val normalized = value?.trim()?.lowercase(Locale.US).orEmpty()
+        return normalized.takeIf { it in routes }
+    }
+}
+
 /** Sidebar groups, mirroring the macOS section ordering. */
 private data class DrawerGroup(val header: String, val items: List<Destination>)
 
@@ -147,9 +178,12 @@ private val drawerGroups: List<DrawerGroup> = listOf(
  * shared with every screen, so the BLE connection and cached metrics stay app-wide
  * singletons.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
-fun AppRoot(viewModel: AppViewModel = viewModel()) {
+fun AppRoot(
+    viewModel: AppViewModel = viewModel(),
+    agentLaunch: AgentLaunchRequest = AgentLaunchRequest.Empty,
+) {
     val nav = rememberNavController()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -158,7 +192,17 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
     val currentRoute = backStack?.destination?.route
     val current = Destination.forRoute(currentRoute)
 
+    androidx.compose.runtime.LaunchedEffect(agentLaunch.sequence, agentLaunch.route) {
+        val route = AgentNavigation.routeOrNull(agentLaunch.route)
+        if (route != null && route != currentRoute) {
+            nav.navigateTopLevel(route)
+        }
+    }
+
     ModalNavigationDrawer(
+        modifier = Modifier
+            .semantics { testTagsAsResourceId = true }
+            .testTag("noop-root"),
         drawerState = drawerState,
         drawerContent = {
             ModalDrawerSheet(
@@ -216,7 +260,12 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                                     selectedTextColor = Palette.textPrimary,
                                     unselectedTextColor = Palette.textSecondary,
                                 ),
-                                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+                                modifier = Modifier
+                                    .padding(NavigationDrawerItemDefaults.ItemPadding)
+                                    .testTag("nav-${dest.route}")
+                                    .semantics {
+                                        contentDescription = "Navigate to ${dest.title}"
+                                    },
                             )
                         }
                     }
@@ -245,7 +294,10 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                         }
                     },
                     navigationIcon = {
-                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                        IconButton(
+                            modifier = Modifier.testTag("nav-open"),
+                            onClick = { scope.launch { drawerState.open() } },
+                        ) {
                             Icon(
                                 Icons.Filled.Menu,
                                 contentDescription = "Open navigation",
@@ -264,7 +316,10 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
             NavHost(
                 navController = nav,
                 startDestination = Destination.Today.route,
-                modifier = Modifier.padding(inner),
+                modifier = Modifier
+                    .padding(inner)
+                    .testTag("screen-${current.route}")
+                    .semantics { contentDescription = "Screen: ${current.title}" },
             ) {
                 // --- Live, working screens (existing waves) ---
                 composable(Destination.Today.route) {

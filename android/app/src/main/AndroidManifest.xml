@@ -98,6 +98,18 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Agent automation route:
+                 noop://agent/<route>?onboarded=1 opens a top-level screen in debug builds. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data
+                    android:host="agent"
+                    android:scheme="noop" />
+            </intent-filter>
             <!-- Health Connect permissions-rationale route (Android 13 and below). -->
             <intent-filter>
                 <action android:name="androidx.health.connect.action.SHOW_PERMISSIONS_RATIONALE" />

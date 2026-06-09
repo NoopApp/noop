@@ -80,6 +80,20 @@ gradle wrapper --gradle-version 8.5        # or just open the project in Android
 
 The debug APK lands at `app/build/outputs/apk/debug/app-debug.apk`.
 
+### Agent automation
+
+For emulator-first agent navigation, use the repo wrapper from the repository root:
+
+```bash
+Tools/agent-device-android.sh install
+Tools/agent-device-android.sh open live
+Tools/agent-device-android.sh snapshot
+```
+
+The wrapper builds the demo debug app, opens debug-only `noop://agent/<route>` deep
+links, and targets stable Compose ids such as `nav-open`, `nav-live`, and
+`screen-live`. See [`docs/AGENT_AUTOMATION.md`](../docs/AGENT_AUTOMATION.md).
+
 > **About `gradle-wrapper.jar`:** the wrapper scripts (`gradlew`, `gradlew.bat`) and
 > `gradle/wrapper/gradle-wrapper.properties` are present, but the binary
 > `gradle/wrapper/gradle-wrapper.jar` is **not** checked in here (it cannot be hand-authored
