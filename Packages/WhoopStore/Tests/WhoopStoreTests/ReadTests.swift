@@ -32,6 +32,18 @@ final class ReadTests: XCTestCase {
         XCTAssertEqual(limited.first?.ts, 100)
     }
 
+    func testHrBucketsAveragePerBucketOrderedAndDeviceScoped() async throws {
+        let store = try await seeded()
+        // 200s buckets over dev1's ts 100/200/300 (bpm 60/61/62):
+        //   ts100 → bucket 0   → mean 60
+        //   ts200, ts300 → bucket 200 → mean (61+62)/2 = 61.5
+        let buckets = try await store.hrBuckets(deviceId: "dev1", from: 0, to: 1000, bucketSeconds: 200)
+        XCTAssertEqual(buckets, [HRBucket(ts: 0, bpm: 60), HRBucket(ts: 200, bpm: 61.5)])
+        // The decoy on "other" (ts200, bpm99) must never bleed into dev1's bucket.
+        let other = try await store.hrBuckets(deviceId: "other", from: 0, to: 1000, bucketSeconds: 200)
+        XCTAssertEqual(other, [HRBucket(ts: 200, bpm: 99)])
+    }
+
     func testRrIntervalsReturnsBothTiedRows() async throws {
         let store = try await seeded()
         let rr = try await store.rrIntervals(deviceId: "dev1", from: 0, to: 1000, limit: 100)

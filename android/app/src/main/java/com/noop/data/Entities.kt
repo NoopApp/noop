@@ -49,6 +49,13 @@ data class HrSample(
     val synced: Int = 0,
 )
 
+/** One downsampled HR point — the bucket's start (unix seconds) + the mean bpm over it. Query
+ *  result of [WhoopDao.hrBuckets], not a table. Mirrors the macOS `HRBucket`. */
+data class HrBucket(
+    val bucket: Long,
+    val avgBpm: Double,
+)
+
 /** R-R interval. Swift `rrInterval` (v1). PK (deviceId, ts, rrMs) — multiple R-R per ts. */
 @Entity(tableName = "rrInterval", primaryKeys = ["deviceId", "ts", "rrMs"])
 data class RrInterval(

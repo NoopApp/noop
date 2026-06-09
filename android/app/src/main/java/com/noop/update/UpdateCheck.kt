@@ -19,7 +19,7 @@ object UpdateCheck {
 
     sealed interface Result {
         data class UpToDate(val version: String) : Result
-        data class Available(val version: String, val url: String) : Result
+        data class Available(val version: String, val url: String, val notes: String) : Result
         object Failed : Result
     }
 
@@ -38,7 +38,8 @@ object UpdateCheck {
                 val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
                 val latest = json.getString("tag_name").removePrefix("v")
                 val url = json.getString("html_url")
-                if (isNewer(latest, currentVersion)) Result.Available(latest, url)
+                val notes = cleanNotes(json.optString("body", ""))
+                if (isNewer(latest, currentVersion)) Result.Available(latest, url, notes)
                 else Result.UpToDate(latest)
             } finally {
                 conn.disconnect()
@@ -68,4 +69,13 @@ object UpdateCheck {
             .takeWhile { it.isDigit() || it == '.' }   // stop at "-demo" / build metadata
             .split(".")
             .mapNotNull { it.toIntOrNull() }
+
+    /** Turn a GitHub release body into a short, readable "what's new" for an inline preview: drop the
+     *  "Downloads"/footer boilerplate, strip the heaviest markdown markers, and cap the length. */
+    fun cleanNotes(body: String): String {
+        var s = body.substringBefore("Downloads")
+        for (marker in listOf("**", "## ", "# ")) s = s.replace(marker, "")
+        s = s.trim()
+        return if (s.length > 700) s.take(700).trim() + "…" else s
+    }
 }

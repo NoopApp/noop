@@ -66,8 +66,11 @@ fun LiveScreen(viewModel: AppViewModel) {
 
         // Connection pill row.
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            // encryptedBond → green "Bonded"; the 5/MG live-HR shortcut (bonded but no genuine encrypted
+            // bond) → amber "Live HR (not fully paired)" so users know the encrypted channel isn't up (#69).
             val (label, tone) = when {
-                live.bonded -> "Bonded" to StrandTone.Positive
+                live.encryptedBond -> "Bonded" to StrandTone.Positive
+                live.bonded -> "Live HR (not fully paired)" to StrandTone.Warning
                 live.connected -> "Connected" to StrandTone.Warning
                 live.scanning -> "Searching…" to StrandTone.Warning
                 else -> "Disconnected" to StrandTone.Critical

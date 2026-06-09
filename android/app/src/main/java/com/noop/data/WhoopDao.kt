@@ -86,6 +86,16 @@ interface WhoopDao {
     )
     suspend fun hrSamples(deviceId: String, from: Long, to: Long, limit: Int): List<HrSample>
 
+    /** Downsampled HR for charting: mean bpm per [bucketSeconds]-wide bucket over [from, to],
+     *  keyed by the bucket start (floor(ts/bucket)*bucket). Aggregated in SQL so a 24h window
+     *  returns ~(to-from)/bucketSeconds rows, not every ~1 Hz sample. Mirrors macOS hrBuckets. */
+    @Query(
+        "SELECT (ts / :bucketSeconds) * :bucketSeconds AS bucket, AVG(bpm) AS avgBpm FROM hrSample " +
+            "WHERE deviceId = :deviceId AND ts >= :from AND ts <= :to " +
+            "GROUP BY ts / :bucketSeconds ORDER BY bucket ASC"
+    )
+    suspend fun hrBuckets(deviceId: String, from: Long, to: Long, bucketSeconds: Long): List<HrBucket>
+
     @Query(
         "SELECT * FROM rrInterval WHERE deviceId = :deviceId AND ts >= :from AND ts <= :to " +
             "ORDER BY ts ASC, rrMs ASC LIMIT :limit"

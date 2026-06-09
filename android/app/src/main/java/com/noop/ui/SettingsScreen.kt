@@ -11,6 +11,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -560,7 +562,7 @@ fun SettingsScreen(vm: AppViewModel) {
                 // is sent. Android already holds INTERNET (for the opt-in Coach), so this adds nothing.
                 var updChecking by remember { mutableStateOf(false) }
                 var updResult by remember { mutableStateOf<UpdateCheck.Result?>(null) }
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -596,25 +598,53 @@ fun SettingsScreen(vm: AppViewModel) {
                                     "You're on the latest (${r.version}).",
                                     style = NoopType.footnote, color = Palette.textSecondary,
                                 )
-                            is UpdateCheck.Result.Available ->
-                                Button(
-                                    onClick = {
-                                        context.startActivity(
-                                            Intent(Intent.ACTION_VIEW, Uri.parse(r.url)),
-                                        )
-                                    },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = Palette.accent, contentColor = Palette.surfaceBase,
-                                    ),
-                                ) { Text("Download ${r.version}", style = NoopType.captionNumber) }
                             UpdateCheck.Result.Failed ->
                                 Text(
                                     "Couldn't check. Try again.",
                                     style = NoopType.footnote, color = Palette.statusWarning,
                                 )
-                            null -> {}
+                            else -> {}
                         }
                     }
+
+                    // Update available: show what's new, with a download straight to the release.
+                    (updResult as? UpdateCheck.Result.Available)?.let { avail ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Palette.surfaceInset)
+                                .border(1.dp, Palette.accent.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    "Version ${avail.version} is available",
+                                    style = NoopType.subhead, color = Palette.textPrimary,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Button(
+                                    onClick = {
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(avail.url)))
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Palette.accent, contentColor = Palette.surfaceBase,
+                                    ),
+                                ) { Text("Download", style = NoopType.captionNumber) }
+                            }
+                            if (avail.notes.isNotEmpty()) {
+                                Text(
+                                    avail.notes,
+                                    style = NoopType.footnote, color = Palette.textSecondary,
+                                    modifier = Modifier
+                                        .heightIn(max = 160.dp)
+                                        .verticalScroll(rememberScrollState()),
+                                )
+                            }
+                        }
+                    }
+
                     Text(
                         "Checks GitHub for the latest version when you tap — nothing else is sent.",
                         style = NoopType.footnote, color = Palette.textTertiary,

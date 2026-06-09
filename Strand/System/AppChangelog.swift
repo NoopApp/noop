@@ -7,7 +7,7 @@ enum AppChangelog {
 
     /// Bump this when you add a release below. The "What's New" sheet shows automatically when the
     /// stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
-    static let currentVersion = "1.40"
+    static let currentVersion = "1.46"
 
     struct Release: Identifiable {
         let version: String
@@ -19,6 +19,50 @@ enum AppChangelog {
 
     /// Newest first.
     static let releases: [Release] = [
+        Release(
+            version: "1.46",
+            title: "History dates fixed for revived straps, gestures during sync, clearer pairing",
+            date: "June 2026",
+            items: [
+                "Fixed: if your strap sat unused for a while its clock drifts, and your offloaded history was landing months in the past — live HR worked but nothing else showed up as \"today.\" NOOP now corrects the timestamps when the strap's clock is clearly stale, so your history lands on the right days. Mac and Android. Thanks to a detailed bug report (#72).",
+                "Fixed: double-tap (and wrist on/off) now keep working during a history sync. They were being swallowed while the strap offloaded its backlog — very noticeable on a WHOOP 5.0/MG, where that sync runs for minutes. Mac and Android (#69).",
+                "New: the Live screen now tells you whether you have a real encrypted pairing (\"Bonded\") or just live heart rate over the open profile (\"Live HR — not fully paired\"). The encrypted bond is what unlocks buzz, alarms, double-tap and history sync, so it's now obvious when those are available. Plus a tip on entering 5.0/MG pairing mode (tap the band). Mac and Android (#69).",
+            ]),
+        Release(
+            version: "1.45",
+            title: "Clearer pairing guidance for WHOOP 5.0/MG",
+            date: "June 2026",
+            items: [
+                "Improved (Mac): live heart rate on a WHOOP 5.0/MG streams even before the strap is fully paired — but buzz, alarms, double-tap and full history sync all need that real pairing. NOOP now keeps the \"free the strap from the WHOOP app\" guidance visible (in clearer wording) whenever the strap isn't fully paired, so it's obvious what to do to unlock the rest. Thanks to a 5.0/MG report (#69).",
+            ]),
+        Release(
+            version: "1.44",
+            title: "Fixes a false \"pairing refused\" warning (Mac)",
+            date: "June 2026",
+            items: [
+                "Fixed (Mac): the \"Pairing refused\" banner could stay up on the Live screen even after your strap had bonded and live heart rate was streaming — a stale warning on a connection that was actually fine. It now clears the moment the link bonds. Thanks to a 5.0/MG report (#69).",
+            ]),
+        Release(
+            version: "1.43",
+            title: "Your whole day's heart rate, on the dashboard",
+            date: "June 2026",
+            items: [
+                "New: Control Center now shows a 24-hour heart-rate trend — your continuous heart rate across today, read straight from the strap's own history (so it's there even for the hours the app was closed, not just while it's open). It plots 5-minute averages with the day's low, average and high underneath. Mac and Android. Thanks to the requests on Reddit.",
+            ]),
+        Release(
+            version: "1.42",
+            title: "Reconnects automatically after an update (Android)",
+            date: "June 2026",
+            items: [
+                "New (Android): NOOP now reconnects to your strap automatically when the app starts — so after an app update (or any restart) you don't have to tap Connect again. It reconnects straight to the strap you last paired, as soon as it's in range, with no re-scan. Respects \"Keep connected in the background\" (turn that off if you'd rather connect by hand). Thanks to a community report (#67).",
+            ]),
+        Release(
+            version: "1.41",
+            title: "Update check shows what's new",
+            date: "June 2026",
+            items: [
+                "Small follow-up: when Check for updates finds a newer version, it now shows what's new in it right there in Settings → About — so you can see what you're getting before you tap Download.",
+            ]),
         Release(
             version: "1.40",
             title: "Check for updates",

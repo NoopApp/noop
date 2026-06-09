@@ -416,7 +416,7 @@ struct SettingsView: View {
 
                 // Check for updates — a single, user-initiated read of GitHub's public releases API.
                 // No background polling, no auto-update; sends nothing about you, just reads the version.
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 10) {
                         Button {
                             updateChecker.check(currentVersion: AppChangelog.currentVersion)
@@ -434,29 +434,55 @@ struct SettingsView: View {
                         .buttonStyle(.bordered)
                         .disabled(updateChecker.state == .checking)
 
-                        switch updateChecker.state {
-                        case .upToDate(let v):
+                        if case .upToDate(let v) = updateChecker.state {
                             Text("You're on the latest (\(v)).")
                                 .font(StrandFont.footnote)
                                 .foregroundStyle(StrandPalette.textSecondary)
-                        case .available(let v, let url):
-                            Button {
-                                openURL(url)
-                            } label: {
-                                Label("Download \(v)", systemImage: "arrow.down.circle.fill")
-                                    .padding(.horizontal, 4)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(StrandPalette.accent)
-                        case .failed:
+                        } else if case .failed = updateChecker.state {
                             Text("Couldn't check. Try again.")
                                 .font(StrandFont.footnote)
                                 .foregroundStyle(StrandPalette.statusWarning)
-                        default:
-                            EmptyView()
                         }
                         Spacer()
                     }
+
+                    // Update available: show what's new, with a download straight to the release.
+                    if case .available(let v, let url, let notes) = updateChecker.state {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Version \(v) is available")
+                                    .font(StrandFont.subhead)
+                                    .foregroundStyle(StrandPalette.textPrimary)
+                                Spacer()
+                                Button {
+                                    openURL(url)
+                                } label: {
+                                    Label("Download", systemImage: "arrow.down.circle.fill")
+                                        .padding(.horizontal, 4)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(StrandPalette.accent)
+                            }
+                            if !notes.isEmpty {
+                                ScrollView {
+                                    Text(notes)
+                                        .font(StrandFont.footnote)
+                                        .foregroundStyle(StrandPalette.textSecondary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .frame(maxHeight: 150)
+                            }
+                        }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(StrandPalette.surfaceInset,
+                                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(StrandPalette.accent.opacity(0.3), lineWidth: 1)
+                        )
+                    }
+
                     Text("Checks GitHub for the latest version when you tap — nothing else is sent.")
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textTertiary)

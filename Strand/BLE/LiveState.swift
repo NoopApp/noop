@@ -7,7 +7,20 @@ import Combine
 @MainActor
 public final class LiveState: ObservableObject {
     @Published public var connected: Bool = false
+    // NOTE: do NOT auto-clear `pairingHint` when `bonded` flips true. On a 5/MG, `bonded` is also set by
+    // the live-HR shortcut (BLEManager — HR over the unbonded standard profile), so clearing the hint
+    // there hides the still-accurate "free the strap" guidance from users who are streaming HR but never
+    // got the real encrypted bond (issue #69). The genuine bond path clears the hint itself (the
+    // CLIENT_HELLO ack), and a fresh connect attempt resets it.
     @Published public var bonded: Bool = false
+    /// True ONLY when the link reached a GENUINE encrypted bond — the WHOOP 5/MG CLIENT_HELLO ack, the
+    /// WHOOP 4 confirmed-write bond, or a restored already-bonded link. Deliberately NOT set by the
+    /// live-HR shortcut that flips `bonded` true when HR streams over the *unbonded* standard profile on
+    /// a 5/MG (issue #69) — so `bonded` can be true while `encryptedBond` is false ("Live HR, not fully
+    /// paired"). WHOOP 4 always reaches a genuine bond, so the two track together there. Reset on
+    /// connect/disconnect. Drives the Live pill's two-state distinction; the encrypted channel (buzz,
+    /// alarm, double-tap, history offload) only works when this is true.
+    @Published public var encryptedBond: Bool = false
     @Published public var heartRate: Int? = nil
     @Published public var rr: [Int] = []
     @Published public var batteryPct: Double? = nil

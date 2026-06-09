@@ -229,14 +229,21 @@ NOOP is an independent, **experimental** project — capable, but a work in prog
 > **To pair properly:**
 > 1. **Close the official WHOOP app** on your phone (fully quit it, or turn that phone's Bluetooth off) so
 >    it isn't holding the bond.
-> 2. **Put the strap in pairing mode** — the LEDs flash blue.
+> 2. **Put the strap in pairing mode** — on a 5.0/MG, **tap the band repeatedly** (firm taps on the
+>    sensor) until the **LEDs flash blue**.
 > 3. In NOOP: **Live → choose "WHOOP 5.0 / MG" → Scan & Connect.** Success looks like
 >    *"CLIENT_HELLO acked — link established"* in the strap log (not *"bond refused"*). It can take a
 >    couple of attempts.
 >
+> **Only one device at a time.** Because the strap holds a single bond, don't leave it connected to your
+> phone *and* your Mac (or the WHOOP app) at once — live heart rate will still show on all of them
+> (that rides the bond-free standard profile), but **none** of them will have the real encrypted bond.
+> If HR streams fine yet **buzz, alarm, double-tap and history don't work**, that's the tell: the strap
+> isn't truly bonded to this device. Free it from everything else, then pair here.
+>
 > Bonding to NOOP may take the strap's bond away from the WHOOP app, so the official app might need to
 > re-pair afterwards. This is the **hardest part of 5/MG support** — if it refuses, you're almost
-> certainly still bonded to the WHOOP app; free the strap and retry.
+> certainly still bonded to the WHOOP app (or another device); free the strap and retry.
 
 The app always tells you what's live now versus still building, both in onboarding and on each screen.
 

@@ -11,12 +11,14 @@ import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
+import android.Manifest
 import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import androidx.core.content.ContextCompat
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelUuid
@@ -64,6 +66,12 @@ import java.util.concurrent.ConcurrentLinkedQueue
 data class LiveState(
     val connected: Boolean = false,
     val bonded: Boolean = false,
+    /** True ONLY when the link reached a GENUINE encrypted bond — the 5/MG CLIENT_HELLO ack, the WHOOP4
+     *  confirmed-write bond, or a strap-reported BLE_BONDED event. NOT set by the live-HR shortcut that
+     *  flips [bonded] true when HR streams over the unbonded standard profile on a 5/MG (#69) — so
+     *  [bonded] can be true while this is false ("Live HR, not fully paired"). WHOOP 4 always reaches a
+     *  genuine bond, so the two track together there. Port of macOS LiveState.encryptedBond. */
+    val encryptedBond: Boolean = false,
     val heartRate: Int? = null,
     val rr: List<Int> = emptyList(),
     val batteryPct: Double? = null,
@@ -198,6 +206,11 @@ class WhoopBleClient(
         /** Deferral before the first connect-time offload, so SET_CLOCK/GET_DATA_RANGE round-trip first. */
         private const val INITIAL_BACKFILL_DELAY_MS = 1_500L
 
+        /** Live-gesture freshness window (seconds). A DOUBLE_TAP / WRIST_* event only updates live state
+         *  if its event_timestamp is within this of wall-now, so a *replayed historical* gesture during a
+         *  backfill offload is ignored. Port of Swift FrameRouter.liveGestureWindowSeconds (#69). */
+        private const val LIVE_GESTURE_WINDOW_SECONDS = 45L
+
         // MARK: Live-stream keep-alive (port of BLEManager.keepAlive*). The WHOOP firmware lets the
         // realtime HR stream lapse if it isn't re-armed, so a stuck-on-stale HR that only a manual
         // disconnect/reconnect fixes is really a missing keep-alive. We re-arm + poll battery every
@@ -289,6 +302,9 @@ class WhoopBleClient(
     /// "No WHOOP strap found" until the user forced pairing mode (#61). Mirrors macOS, which already
     /// reconnects via retrieveConnectedPeripherals + central.connect before scanning.
     private var lastDevice: BluetoothDevice? = null
+
+    /** Address of the strap we last connected to — for persisting it + auto-reconnecting on launch (#67). */
+    val lastDeviceAddress: String? get() = lastDevice?.address
     /// The family actually discovered on the connected peripheral. Drives family-aware frame
     /// parsing and gates the WHOOP4-only bond/handshake. Set in onServicesDiscovered.
     private var connectedFamily = DeviceFamily.WHOOP4
@@ -516,7 +532,30 @@ class WhoopBleClient(
     fun prepareForModelSwitch() {
         disconnect()
         lastDevice = null   // don't auto-reconnect to the old strap; the next connect scans for the new model
-        _state.value = _state.value.copy(connected = false, bonded = false)
+        _state.value = _state.value.copy(connected = false, bonded = false, encryptedBond = false)
+    }
+
+    /**
+     * Reconnect DIRECTLY to a previously-bonded strap by its address — no scan — for auto-reconnect on
+     * app launch (#67). No-op if already connecting/connected, the address can't be resolved, or the
+     * runtime Bluetooth permission isn't granted yet (the user will connect manually / next launch).
+     * Uses connectGatt(autoConnect=true) so the OS connects as soon as the strap is reachable.
+     */
+    @SuppressLint("MissingPermission")
+    fun reconnectToAddress(address: String, model: WhoopModel) {
+        if (gatt != null || _state.value.connected) return
+        val adp = adapter ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+        val device = runCatching { adp.getRemoteDevice(address) }.getOrNull() ?: return
+        selectedModel = model
+        intentionalDisconnect = false
+        log("Auto-reconnecting to your saved ${model.displayName}…")
+        connectToDevice(device, autoConnect = true)
     }
 
     /**
@@ -716,7 +755,7 @@ class WhoopBleClient(
                 BluetoothProfile.STATE_CONNECTED -> {
                     // Port of didConnect: mark connected, then discover services.
                     handler.removeCallbacks(scanTimeoutRunnable)
-                    _state.value = _state.value.copy(connected = true, scanning = false, statusNote = null)
+                    _state.value = _state.value.copy(connected = true, scanning = false, statusNote = null, encryptedBond = false)
                     log("Connected — discovering services")
                     g.discoverServices()
                 }
@@ -795,7 +834,7 @@ class WhoopBleClient(
                 // these as REALTIME_DATA — the strap rejected them on the unauthenticated link), then arm
                 // realtime HR with puffin framing. Mirrors the macOS post-bond flow.
                 didBond = true
-                _state.value = _state.value.copy(bonded = true)
+                _state.value = _state.value.copy(bonded = true, encryptedBond = true)   // genuine bond (#69)
                 log("WHOOP 5/MG: CLIENT_HELLO acked — link established; subscribing notify chars (experimental).")
                 g.getService(WHOOP5_SERVICE)?.let { svc ->
                     for (u in WHOOP5_NOTIFY_CHARS) svc.getCharacteristic(u)?.let { cccdQueue.add(it) }
@@ -804,7 +843,7 @@ class WhoopBleClient(
                 if (wantsRealtime) send(CommandNumber.TOGGLE_REALTIME_HR, byteArrayOf(1))
             } else if (!didBond && connectedFamily == DeviceFamily.WHOOP4) {
                 didBond = true
-                _state.value = _state.value.copy(bonded = true)
+                _state.value = _state.value.copy(bonded = true, encryptedBond = true)   // WHOOP4 bond is genuine (#69)
                 log("BONDED (confirmed write acknowledged) — custom channels should now flow")
             }
 
@@ -957,25 +996,44 @@ class WhoopBleClient(
             "EVENT" -> {
                 (parsed.parsed["event"] as? String)?.let { ev ->
                     // Event strings are "NAME(rawValue)", e.g. "WRIST_ON(9)" (see Schema.enumName).
-                    _state.value = _state.value.copy(lastEvent = ev)
+                    val isGesture = ev.startsWith("DOUBLE_TAP") ||
+                        ev.startsWith("WRIST_ON") || ev.startsWith("WRIST_OFF")
 
-                    // A BLE_BONDED event confirms the link is bonded (belt-and-suspenders; the
+                    // A BLE_BONDED event confirms a GENUINE encrypted bond (belt-and-suspenders; the
                     // confirmed-write ACK also sets this).
                     if (ev.startsWith("BLE_BONDED")) {
-                        _state.value = _state.value.copy(bonded = true)
+                        _state.value = _state.value.copy(bonded = true, encryptedBond = true)
                     }
 
-                    // Physical inputs the strap exposes — LIVE ONLY (this path never sees historical
-                    // replay; that goes through the backfill path in the full app).
-                    when {
-                        ev.startsWith("DOUBLE_TAP") -> {
-                            // Surfaced via lastEvent; the ViewModel maps it to the user's chosen action.
-                        }
-                        ev.startsWith("WRIST_ON") -> {
-                            if (!_state.value.worn) _state.value = _state.value.copy(worn = true)
-                        }
-                        ev.startsWith("WRIST_OFF") -> {
-                            if (_state.value.worn) _state.value = _state.value.copy(worn = false)
+                    if (!isGesture) {
+                        // Non-gesture events (BLE_BONDED, BATTERY_LEVEL, …) surface unconditionally.
+                        _state.value = _state.value.copy(lastEvent = ev)
+                    } else {
+                        // Physical inputs — LIVE ONLY. handleFrame runs for EVERY frame (live AND during a
+                        // backfill offload), so gate ONLY while backfilling: a replayed *historical* gesture
+                        // (old ts) is ignored during a sync, but a real-time gesture on the live path fires
+                        // ungated (#69). The live path MUST stay ungated — a grossly-stale strap RTC (fix
+                        // #72) makes a real gesture's event_timestamp look "old", and gating the live path
+                        // would silently drop every double-tap / wrist event. (macOS gates only on its
+                        // backfill-skip path; Android has no GET_CLOCK correlation to gate in the strap's
+                        // clock domain, so backfill uses wall-now — a historical replay is still old.)
+                        val ts = (parsed.parsed["event_timestamp"] as? Int)?.toLong()
+                        val nowSec = System.currentTimeMillis() / 1000L
+                        val fresh = !backfilling || (ts != null && ts > 0 &&
+                            kotlin.math.abs(nowSec - ts) <= LIVE_GESTURE_WINDOW_SECONDS)
+                        if (fresh) {
+                            _state.value = _state.value.copy(lastEvent = ev)
+                            when {
+                                ev.startsWith("DOUBLE_TAP") -> {
+                                    // Surfaced via lastEvent; the ViewModel maps it to the user's chosen action.
+                                }
+                                ev.startsWith("WRIST_ON") -> {
+                                    if (!_state.value.worn) _state.value = _state.value.copy(worn = true)
+                                }
+                                ev.startsWith("WRIST_OFF") -> {
+                                    if (_state.value.worn) _state.value = _state.value.copy(worn = false)
+                                }
+                            }
                         }
                     }
                 }
@@ -1601,7 +1659,7 @@ class WhoopBleClient(
         ioScope.launch { flushLive(); flushStandardHr() }
 
         // Reset all per-connection state and clear UI flags.
-        _state.value = _state.value.copy(connected = false, bonded = false)
+        _state.value = _state.value.copy(connected = false, bonded = false, encryptedBond = false)
         reset()
 
         gatt?.close()

@@ -30,6 +30,9 @@ struct TodayView: View {
     @State private var workouts: [WorkoutRow] = []
     @State private var appleDays: [AppleDaily] = []
 
+    // Today's heart rate as 5-minute bucket means (midnight → now), for the 24h trend chart.
+    @State private var hrPoints: [TrendPoint] = []
+
     // Support sheet (donate + contact) — always reachable from the home toolbar.
     @State private var showingSupport = false
 
@@ -47,13 +50,14 @@ struct TodayView: View {
                     )
                 }
                 heroSection
+                heartRateTrendSection
                 readinessSection
                 metricsSection
                 workoutsSection
                 sourcesSection
             }
         }
-        .task(id: repo.today?.day) { await loadAll() }
+        .task(id: repo.refreshSeq) { await loadAll() }
         .toolbar {
             ToolbarItem {
                 Button { showingSupport = true } label: {
@@ -171,6 +175,51 @@ struct TodayView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+    }
+
+    // MARK: HEART RATE — today's continuous HR, off the strap's own ~1Hz history.
+
+    /// A full-width 24-hour heart-rate trend, plotted from 5-minute bucket means of the strap's
+    /// `hrSample` history (offloaded even while the app was closed, so the day reads continuously).
+    /// Hidden until there are at least two buckets — a strap-only user with no wear today sees nothing
+    /// rather than an empty axis. Mirrored on Android (TodayScreen.kt HeartRateTrendCard).
+    @ViewBuilder
+    private var heartRateTrendSection: some View {
+        if hrPoints.count > 1 {
+            let v = hrPoints.map(\.value)
+            VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+                SectionHeader("Heart Rate", overline: "Today")
+                ChartCard(
+                    title: "Beats per minute",
+                    subtitle: "5-minute average · since midnight",
+                    trailing: v.last.map { "\(Int($0.rounded())) bpm" }
+                ) {
+                    TrendChart(
+                        points: hrPoints,
+                        gradient: Gradient(colors: [StrandPalette.metricRose.opacity(0.55), StrandPalette.metricRose]),
+                        valueRange: hrRange(v),
+                        showsArea: true,
+                        height: NoopMetrics.chartHeight,
+                        valueFormat: { "\(Int($0.rounded())) bpm" },
+                        dateFormat: { Self.hrTimeFmt.string(from: $0) }
+                    )
+                } footer: {
+                    ChartFooter([
+                        ("Min", "\(Int((v.min() ?? 0).rounded()))"),
+                        ("Avg", "\(Int((v.reduce(0, +) / Double(v.count)).rounded()))"),
+                        ("Max", "\(Int((v.max() ?? 0).rounded()))"),
+                    ])
+                }
+            }
+        }
+    }
+
+    /// Padded HR axis range so the line never sits flush against an edge (mirrors MetricExplorer.valueRange).
+    private func hrRange(_ v: [Double]) -> ClosedRange<Double> {
+        guard let lo = v.min(), let hi = v.max() else { return 40...120 }
+        if hi <= lo { return (lo - 5)...(hi + 5) }
+        let span = hi - lo
+        return (lo - span * 0.12)...(hi + span * 0.12)
     }
 
     // MARK: (b) METRICS — one uniform grid of 104pt StatTiles, every cell filled.
@@ -346,6 +395,12 @@ struct TodayView: View {
 
         workouts = await repo.workoutRows()
         appleDays = await repo.appleDailyRows()
+
+        // Today's HR trend — 5-minute bucket means from local midnight → now.
+        let startOfToday = Int(Calendar.current.startOfDay(for: Date()).timeIntervalSince1970)
+        let nowTs = Int(Date().timeIntervalSince1970)
+        hrPoints = await repo.hrBuckets(from: startOfToday, to: nowTs, bucketSeconds: 300)
+            .map { TrendPoint(date: Date(timeIntervalSince1970: TimeInterval($0.ts)), value: $0.bpm) }
     }
 
     /// Trailing-window values for a metric — NO fall back to all history. The section is labelled a
@@ -481,6 +536,15 @@ struct TodayView: View {
         f.locale = Locale(identifier: "en_US_POSIX")
         f.timeZone = TimeZone(identifier: "UTC")
         f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    /// Local wall-clock time ("HH:mm") for the HR trend's x-axis / tooltip — the chart spans one day,
+    /// so it must show times, not the day-granularity default ("EEE d MMM").
+    static let hrTimeFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "HH:mm"
         return f
     }()
 }

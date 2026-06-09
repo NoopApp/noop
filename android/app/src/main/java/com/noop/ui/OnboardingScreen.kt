@@ -511,7 +511,8 @@ private fun ConnectStep(viewModel: AppViewModel) {
             )
 
             val (label, tone, pulsing) = when {
-                live.bonded -> Triple("Bonded · streaming", StrandTone.Positive, true)
+                live.encryptedBond -> Triple("Bonded · streaming", StrandTone.Positive, true)
+                live.bonded -> Triple("Live HR · not fully paired", StrandTone.Warning, true)
                 live.connected -> Triple("Connected · pairing", StrandTone.Warning, true)
                 live.scanning -> Triple("Searching", StrandTone.Accent, true)
                 else -> Triple("Ready to scan", StrandTone.Neutral, false)

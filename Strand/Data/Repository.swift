@@ -19,6 +19,10 @@ final class Repository: ObservableObject {
     /// Cached sleep sessions over the recent window, oldest→newest.
     @Published var sleeps: [CachedSleepSession] = []
     @Published var loaded = false
+    /// Monotonic counter bumped on every successful `refresh()`. Intraday-updating views key their
+    /// data load on this so they reload when fresh strap data lands — `today?.day` alone is a stable
+    /// date string within a day and would freeze e.g. the Today HR trend until the date rolls over.
+    @Published private(set) var refreshSeq = 0
 
     init(deviceId: String) { self.deviceId = deviceId }
 
@@ -80,6 +84,7 @@ final class Repository: ObservableObject {
         self.days = Self.mergeDaily(imported: imported, computed: computed)
         self.sleeps = Self.mergeSleep(imported: impSleep, computed: compSleep)
         self.loaded = true
+        self.refreshSeq += 1
     }
 
     /// Imported daily rows win per day; computed rows fill the days the import doesn't cover.
@@ -111,6 +116,13 @@ final class Repository: ObservableObject {
     func hrSamples(from: Int, to: Int, limit: Int = 8000) async -> [HRSample] {
         guard let store = await ensureStore() else { return [] }
         return (try? await store.hrSamples(deviceId: deviceId, from: from, to: to, limit: limit)) ?? []
+    }
+
+    /// Downsampled HR (mean bpm per `bucketSeconds`) for the strap, for a Today/24h trend chart.
+    /// Aggregated in SQL so a full day never loads the raw ~1 Hz rows.
+    func hrBuckets(from: Int, to: Int, bucketSeconds: Int = 300) async -> [HRBucket] {
+        guard let store = await ensureStore() else { return [] }
+        return (try? await store.hrBuckets(deviceId: deviceId, from: from, to: to, bucketSeconds: bucketSeconds)) ?? []
     }
 
     func sleepSessions(from: Int, to: Int, limit: Int = 100) async -> [CachedSleepSession] {

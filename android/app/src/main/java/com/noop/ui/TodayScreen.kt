@@ -149,6 +149,7 @@ fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
         Spacer(Modifier.padding(top = (Metrics.sectionGap - 20.dp) / 2))
         SectionHeader("Key Metrics", overline = "Today", trailing = "14-day trend")
         MetricGrid(today, window)
+        HeartRateTrendCard(viewModel, days)
         TodayWorkoutsSection(footer.recentWorkouts)
         TodaySourcesSection(footer)
     }
@@ -317,6 +318,70 @@ private fun MetricGrid(d: DailyMetric?, w: Window) {
             Row(horizontalArrangement = Arrangement.spacedBy(Metrics.gap)) {
                 rowTiles.forEach { tile -> tile(Modifier.weight(1f)) }
                 if (rowTiles.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+// MARK: - Heart-rate trend (today's continuous HR off the strap's own ~1Hz history)
+//
+// A full-width 24h HR trend, plotted from 5-minute bucket means of the strap's hrSample history
+// (offloaded even while the app was closed, so the day reads continuously). Hidden until there are at
+// least two buckets, so a strap-only user with no wear today sees nothing rather than an empty chart.
+// Mirrors the macOS TodayView.heartRateTrendSection. LineChart spaces points by index (no time axis),
+// so the buckets — being uniform 5-min means in time order — read as an even left-to-right day curve.
+
+@Composable
+private fun HeartRateTrendCard(viewModel: AppViewModel, days: List<DailyMetric>) {
+    var buckets by remember { mutableStateOf<List<Double>>(emptyList()) }
+    // Re-load when the day list changes (a sync/import updates it), and on first composition.
+    LaunchedEffect(days) {
+        val zone = ZoneId.systemDefault()
+        val startOfToday = LocalDate.now(zone).atStartOfDay(zone).toEpochSecond()
+        val now = System.currentTimeMillis() / 1000
+        buckets = viewModel.repo.hrBuckets("my-whoop", startOfToday, now, 300L).map { it.avgBpm }
+    }
+    if (buckets.size < 2) return
+
+    val latest = buckets.last().roundToInt()
+    val min = buckets.min().roundToInt()
+    val max = buckets.max().roundToInt()
+    val avg = buckets.average().roundToInt()
+
+    SectionHeader("Heart Rate", overline = "Today")
+    NoopCard {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // Header — mirrors the macOS ChartCard (title + subtitle, trailing read-out).
+            Row(verticalAlignment = Alignment.Top) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Overline("Beats per minute")
+                    Text(
+                        "5-minute average · since midnight",
+                        style = NoopType.footnote,
+                        color = Palette.textTertiary,
+                    )
+                }
+                Text("$latest bpm", style = NoopType.number(22f), color = Palette.metricRose)
+            }
+            LineChart(
+                values = buckets,
+                modifier = Modifier.height(Metrics.chartHeight),
+                color = Palette.metricRose,
+                fill = true,
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(Palette.hairline),
+            )
+            Row(modifier = Modifier.fillMaxWidth()) {
+                listOf("Min" to min, "Avg" to avg, "Max" to max).forEach { (label, value) ->
+                    Column(modifier = Modifier.weight(1f)) {
+                        Overline(label, color = Palette.textTertiary)
+                        Text("$value", style = NoopType.bodyNumber, color = Palette.textPrimary)
+                    }
+                }
             }
         }
     }

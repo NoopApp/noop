@@ -23,6 +23,7 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.noop.BuildConfig
+import com.noop.ble.WhoopModel
 import com.noop.data.DemoSeeder
 import com.noop.data.WhoopRepository
 import kotlinx.coroutines.Dispatchers
@@ -156,6 +157,31 @@ object NoopPrefs {
 
     fun setSmartAlarmMinutes(context: Context, minutes: Int) {
         of(context).edit().putInt(KEY_SMART_ALARM_MINUTES, minutes).apply()
+    }
+
+    /** The last strap we bonded to (address + model), persisted so NOOP can reconnect to it directly on
+     *  the next launch — e.g. after an APK update restarts the process (#67). On-device only; never sent. */
+    const val KEY_LAST_DEVICE_ADDR = "noop.lastDeviceAddress"
+    const val KEY_LAST_DEVICE_MODEL = "noop.lastDeviceModel"
+
+    fun setLastDevice(context: Context, address: String, model: WhoopModel) {
+        of(context).edit()
+            .putString(KEY_LAST_DEVICE_ADDR, address)
+            .putString(KEY_LAST_DEVICE_MODEL, model.name)
+            .apply()
+    }
+
+    /** The saved strap as (address, model), or null if none has bonded yet. */
+    fun lastDevice(context: Context): Pair<String, WhoopModel>? {
+        val addr = of(context).getString(KEY_LAST_DEVICE_ADDR, null) ?: return null
+        val model = of(context).getString(KEY_LAST_DEVICE_MODEL, null)
+            ?.let { name -> runCatching { WhoopModel.valueOf(name) }.getOrNull() }
+            ?: WhoopModel.WHOOP4
+        return addr to model
+    }
+
+    fun clearLastDevice(context: Context) {
+        of(context).edit().remove(KEY_LAST_DEVICE_ADDR).remove(KEY_LAST_DEVICE_MODEL).apply()
     }
 }
 

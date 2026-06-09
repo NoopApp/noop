@@ -339,10 +339,18 @@ private func decodeWhoop5Historical(_ frame: [UInt8], fb: FieldBuilder, payloadE
         fb.add(63, 1, "motion_wear_quality", "quality", value: .int(wear), note: "0=still/good, 1, 2=poor contact")
     }
     if let raw = readDType(frame, 73, "u16") {
-        let celsius = Double(raw) / 100.0
-        if (20...45).contains(celsius) {
-            fb.add(73, 2, "skin_temperature", "temp", value: .double(celsius),
-                   note: "°C, raw thermistor (AS6221); off-wrist reads ambient, not the cloud's calibrated summary")
+        // Skin temperature from the AS6221 digital sensor (named in the strap's firmware console logs).
+        // Emitted as the RAW u16 register (`skin_temp_raw`, consumed by the decode-features store) to
+        // stay scale-agnostic; °C = raw / 128 — the AS6221's native 7.8125 m°C/LSB. Verified on real
+        // v18 frames by that exact hardware scale AND a textbook on-wrist warming curve 17.5 → 28 °C as
+        // the sensor equilibrates after donning — a thermal signature nothing else in the record has.
+        // (See docs/BLE_REVERSE_ENGINEERING.md §5.) Gate on a plausible thermal range so a wrong offset
+        // on an unmapped firmware stores nothing rather than garbage; the gate holds under either the
+        // /128 or the alternative /100 reading, so it does not bake in the absolute scale.
+        let celsius = Double(raw) / 128.0
+        if (5...45).contains(celsius) {
+            fb.add(73, 2, "skin_temp_raw", "temp", value: .int(raw),
+                   note: "AS6221 raw register; °C = raw/128 (≈28 worn; on-wrist warming curve)")
         }
     }
     // The remaining bytes (perfusion, cardiac block, AFE mode register, sleep FSM) are not yet

@@ -53,10 +53,14 @@ struct LiveView: View {
     }
 
     private var connectionPill: some View {
+        // Distinguish a GENUINE encrypted bond from the 5/MG live-HR shortcut that flips `bonded` true
+        // over the unbonded standard profile (#69): green "Bonded · streaming" only when encryptedBond,
+        // amber "Live HR (not fully paired)" otherwise. The pairingHintBanner below gives the how-to.
         let (label, color): (String, Color) =
-            activeConnection ? ("Streaming", StrandPalette.accent)
+            (activeConnection && live.encryptedBond) ? ("Bonded · streaming", StrandPalette.accent)
+            : activeConnection ? ("Live HR (not fully paired)", StrandPalette.statusWarning)
             : live.connected ? ("Connected", StrandPalette.statusWarning)
-            : live.bonded ? ("Paired · idle", StrandPalette.statusWarning)
+            : live.encryptedBond ? ("Paired · idle", StrandPalette.statusWarning)
             : ("Disconnected", StrandPalette.metricRose)
         return HStack(spacing: 8) {
             Circle().fill(color).frame(width: 9, height: 9)
@@ -117,7 +121,7 @@ struct LiveView: View {
                 .foregroundStyle(StrandPalette.statusWarning)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
-                Text("Pairing refused — free the strap from the WHOOP app")
+                Text("Live HR works — free the strap to unlock buzz, alarms & sync")
                     .font(StrandFont.subhead).foregroundStyle(StrandPalette.textPrimary)
                 Text(hint)
                     .font(StrandFont.footnote).foregroundStyle(StrandPalette.textSecondary)

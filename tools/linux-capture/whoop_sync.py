@@ -60,6 +60,7 @@ import subprocess
 import time
 
 import whoop_frame as wf
+import decode_features
 
 # `bleak` is imported lazily inside the BLE functions (run/_acquire) so this module's frame helpers,
 # Family, and WhoopDB can be imported and unit-tested with no third-party deps (like test_whoop_frame).
@@ -195,6 +196,7 @@ class WhoopDB:
         os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
         self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.executescript(SCHEMA)
+        decode_features.apply_schema(self.db)
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=FULL")
         self.db.commit()
@@ -275,6 +277,18 @@ class WhoopDB:
             json.dump(recs, f, indent=1)
         os.replace(tmp, out_path)
         return len(recs)
+
+    def frames_after(self, did, after_id):
+        """Raw frames with id greater than `after_id`, in id order — the decode cursor read."""
+        return self.db.execute(
+            "SELECT id,hex,char,recv_ms,unix,hr,inner_type FROM frames "
+            "WHERE device_id=? AND id>? ORDER BY id", (did, after_id)).fetchall()
+
+    def set_state(self, did, k, v):
+        """Upsert a per-device sync_state key (used to persist the decode cursor)."""
+        self.db.execute("INSERT INTO sync_state(device_id,k,v) VALUES(?,?,?) "
+                        "ON CONFLICT(device_id,k) DO UPDATE SET v=excluded.v", (did, k, str(v)))
+        self.db.commit()
 
     def add_label(self, did, start_unix, end_unix, activity, note):
         self.db.execute("INSERT INTO labels(device_id,start_unix,end_unix,activity,note,created_ms) "
@@ -520,6 +534,13 @@ async def run(args):
     print(f"  drained to completion: {'yes' if s.history_complete else 'no (resume to continue)'}", flush=True)
     if args.out:
         print(f"  exported {db.export_json(did, args.out)} frames → {args.out}", flush=True)
+    try:
+        res = decode_features.decode_new(db, did)
+        print(f"  decoded features: {res['frames']} new frames "
+              f"({res['decoded']} into feat_*, {res['skipped']} skipped)", flush=True)
+    except Exception as e:
+        print(f"  decode stage skipped ({e}); raw frames are safe — "
+              f"re-run `whoop_sync.py decode --db {args.db}`.", flush=True)
 
 
 def _fmt(u):
@@ -585,6 +606,12 @@ def main():
     lp.add_argument("--end", required=True)
     lp.add_argument("--note", default=None)
 
+    dp = sub.add_parser("decode")
+    dp.add_argument("--db", default="captures/whoop.db")
+    dp.add_argument("--address", default=None)
+    dp.add_argument("--full", action="store_true",
+                    help="re-decode ALL frames (reset the cursor) instead of only new ones")
+
     args = p.parse_args()
     cmd = args.cmd or "sync"
 
@@ -620,6 +647,12 @@ def main():
         s_, e_ = _parse_time(args.start), _parse_time(args.end)
         db.add_label(did, s_, e_, args.activity, args.note)
         print(f"labeled {args.activity}: {_fmt(s_)} → {_fmt(e_)} for device {db.device_info(did)[0]}")
+    elif cmd == "decode":
+        db = WhoopDB(args.db); did = _need_device(db, args.address)
+        res = decode_features.decode_new(db, did, full=args.full)
+        print(f"decode: {res['frames']} frames → feat_second updated "
+              f"({res['decoded']} decoded, {res['skipped']} skipped); "
+              f"cursor last_decoded_frame_id={res['cursor']}")
 
 
 if __name__ == "__main__":

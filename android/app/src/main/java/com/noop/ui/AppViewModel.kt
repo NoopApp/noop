@@ -63,6 +63,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun setSelectedModel(model: WhoopModel) {
         if (model == _selectedModel.value) return
         _selectedModel.value = model
+        // Switching straps: forget the saved one so launch auto-reconnect (#67) doesn't target the old strap.
+        NoopPrefs.clearLastDevice(appContext)
         // Drop the previous strap's sticky bond/connection so the next scan targets the new family's
         // service and bonds it fresh (lets a user move between a WHOOP 4 and a 5/MG).
         ble.prepareForModelSwitch()
@@ -106,7 +108,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             var lastBonded = false
             ble.state.collect { state ->
                 state.heartRate?.let { ingestHr(it) }
-                if (state.bonded && !lastBonded && _smartAlarmEnabled.value) applySmartAlarm()
+                if (state.bonded && !lastBonded) {
+                    if (_smartAlarmEnabled.value) applySmartAlarm()
+                    // Remember this strap so we can reconnect to it directly on the next launch (#67),
+                    // e.g. after an APK update restarts the process.
+                    ble.lastDeviceAddress?.let { NoopPrefs.setLastDevice(appContext, it, _selectedModel.value) }
+                }
                 lastBonded = state.bonded
             }
         }
@@ -142,6 +149,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 delay(ANALYZE_INTERVAL_MS) // 15 min, matches the offload cadence
             }
         }
+
+        // Reconnect to the strap we last bonded to, so the user doesn't have to tap Connect after an
+        // app update / restart (#67). Self-gates on the keep-connected pref + a saved strap + permission.
+        autoReconnectOnLaunch()
+    }
+
+    /**
+     * On launch, reconnect DIRECTLY to the strap we last bonded to (no scan), so the connection
+     * survives an app update / restart without the user tapping Connect (#67). Gated on "Keep
+     * connected in the background" (the user's keep-it-on intent) and a previously-bonded strap; the
+     * BLE client itself no-ops if already connected or the runtime permission isn't granted yet.
+     */
+    private fun autoReconnectOnLaunch() {
+        if (!NoopPrefs.backgroundConnection(appContext)) return
+        val saved = NoopPrefs.lastDevice(appContext) ?: return
+        _selectedModel.value = saved.second
+        ble.reconnectToAddress(saved.first, saved.second)
     }
 
     /** Snapshot the user's body profile from SharedPreferences as an analytics [UserProfile]. */

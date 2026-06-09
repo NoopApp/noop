@@ -2,6 +2,15 @@ import Foundation
 import GRDB
 import WhoopProtocol
 
+/// One downsampled heart-rate point: the bucket's start (unix seconds) and the mean bpm over it.
+/// Returned by the `GROUP BY ts/bucket` aggregate so a day chart plots ~N-minute means instead of
+/// loading the raw ~1 Hz rows (a fully-worn 24h is ~86k samples).
+public struct HRBucket: Sendable, Equatable {
+    public let ts: Int
+    public let bpm: Double
+    public init(ts: Int, bpm: Double) { self.ts = ts; self.bpm = bpm }
+}
+
 extension WhoopStore {
     /// Shared decoder — JSONDecoder is stateless across decodes and was previously allocated once
     /// per event row. Battery events are dense (~every 8 min), so a multi-year read decodes
@@ -16,6 +25,22 @@ extension WhoopStore {
                 ORDER BY ts ASC LIMIT ?
                 """, arguments: [deviceId, from, to, limit])
                 .map { HRSample(ts: $0["ts"], bpm: $0["bpm"]) }
+        }
+    }
+
+    /// Downsampled HR for charting: mean bpm per `bucketSeconds`-wide bucket over `[from, to]`,
+    /// keyed by the bucket's start (floor(ts/bucket)*bucket). Aggregates in SQL so a 24h window
+    /// returns ~`(to-from)/bucketSeconds` rows instead of every ~1 Hz sample. Ascending by time.
+    public func hrBuckets(deviceId: String, from: Int, to: Int, bucketSeconds: Int) async throws -> [HRBucket] {
+        let bucket = max(1, bucketSeconds)
+        return try syncRead { db in
+            try Row.fetchAll(db, sql: """
+                SELECT (ts / ?) * ? AS bucket, AVG(bpm) AS avgBpm FROM hrSample
+                WHERE deviceId = ? AND ts >= ? AND ts <= ?
+                GROUP BY ts / ?
+                ORDER BY bucket ASC
+                """, arguments: [bucket, bucket, deviceId, from, to, bucket])
+                .map { HRBucket(ts: $0["bucket"], bpm: $0["avgBpm"]) }
         }
     }
 

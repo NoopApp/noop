@@ -13,14 +13,34 @@ public func extractHistoricalStreams(_ parsed: [ParsedFrame],
         guard let d = deviceTs else { return nil }
         return wallClockRef + (d - deviceClockRef)
     }
+    // FIX #72: type-47 `unix` and EVENT `event_timestamp` are the strap RTC's own real-unix seconds.
+    // When the strap RTC is grossly stale (it sat unused for months, so its clock is months behind),
+    // those land far in the past — live HR works but all offloaded history is misdated. Correct them by
+    // the (wall - device) clock offset, but ONLY when the strap is grossly stale, and SNAPPED to a 5-min
+    // grid so the same record re-syncs to the SAME corrected ts (offloaded rows dedupe by (deviceId, ts);
+    // an un-snapped, slightly-different offset on re-sync would duplicate every row). For a normal or
+    // identity clockRef the offset is ~0 (< threshold) → rawTs is returned unchanged (current behavior).
+    let staleThreshold = 86_400          // 1 day
+    let snapGranularity = 300            // 5 min
+    let clockOffset = wallClockRef - deviceClockRef
+    func correctedWall(_ rawTs: Int) -> Int {
+        guard abs(clockOffset) > staleThreshold else { return rawTs }
+        // sign-aware round-half-up snap to the nearest `snapGranularity`
+        let snapped = (clockOffset >= 0
+            ? (clockOffset + snapGranularity / 2)
+            : (clockOffset - snapGranularity / 2)) / snapGranularity * snapGranularity
+        return rawTs + snapped
+    }
     var out = Streams()
     for r in parsed {
         if !r.ok || r.crcOK == false { continue }
         let p = r.parsed
         switch r.typeName {
         case "HISTORICAL_DATA":
-            // type-47 carries a REAL unix timestamp + the full DSP record. No wall-clock offset.
-            guard let ts = p["unix"]?.intValue else { continue }
+            // type-47 carries the strap RTC's real-unix seconds. Correct for a grossly-stale RTC
+            // (FIX #72); a normal strap is unchanged (offset < threshold).
+            guard let rawTs = p["unix"]?.intValue else { continue }
+            let ts = correctedWall(rawTs)
             if let bpm = p["heart_rate"]?.intValue, bpm != 0 {  // skip startup hr=0
                 out.hr.append(HRSample(ts: ts, bpm: bpm))
             }
@@ -49,8 +69,10 @@ public func extractHistoricalStreams(_ parsed: [ParsedFrame],
                 for rr in rrs { out.rr.append(RRInterval(ts: ts, rrMs: rr)) }
             }
         case "EVENT":
-            // EVENT timestamps are real RTC unix seconds — already wall-clock, NOT offset.
-            guard let ts = p["event_timestamp"]?.intValue else { continue }
+            // EVENT carries the strap RTC's real-unix seconds. Correct for a grossly-stale RTC
+            // (FIX #72); a normal strap is unchanged (offset < threshold).
+            guard let rawTs = p["event_timestamp"]?.intValue else { continue }
+            let ts = correctedWall(rawTs)
             let kind = p["event"]?.stringValue ?? ""
             if kind.hasPrefix("BATTERY_LEVEL") { appendBattery(&out, ts: ts, p: p) }  // "BATTERY_LEVEL(3)"
             var payload = p

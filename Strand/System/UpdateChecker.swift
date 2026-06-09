@@ -12,7 +12,7 @@ final class UpdateChecker: ObservableObject {
         case idle
         case checking
         case upToDate(version: String)
-        case available(version: String, url: URL)
+        case available(version: String, url: URL, notes: String)
         case failed
     }
 
@@ -37,12 +37,23 @@ final class UpdateChecker: ObservableObject {
                     return
                 }
                 let latest = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
+                let notes = Self.cleanNotes(json["body"] as? String ?? "")
                 state = VersionCheck.isNewer(latest, than: currentVersion)
-                    ? .available(version: latest, url: url)
+                    ? .available(version: latest, url: url, notes: notes)
                     : .upToDate(version: latest)
             } catch {
                 state = .failed
             }
         }
+    }
+
+    /// Turn a GitHub release body into a short, readable "what's new" for an inline preview: drop the
+    /// "Downloads"/footer boilerplate, strip the heaviest markdown markers, and cap the length.
+    static func cleanNotes(_ body: String) -> String {
+        var s = body.components(separatedBy: "Downloads").first ?? body
+        for marker in ["**", "## ", "# "] { s = s.replacingOccurrences(of: marker, with: "") }
+        s = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.count > 700 { s = String(s.prefix(700)).trimmingCharacters(in: .whitespacesAndNewlines) + "…" }
+        return s
     }
 }

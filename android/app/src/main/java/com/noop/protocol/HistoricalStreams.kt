@@ -280,6 +280,23 @@ fun extractHistoricalStreams(
 ): StreamBatch {
     fun wall(deviceTs: Int?): Int? = if (deviceTs == null) null else wallClockRef + (deviceTs - deviceClockRef)
 
+    // FIX #72: type-47 `unix` and EVENT `event_timestamp` are the strap RTC's own real-unix seconds.
+    // When the strap RTC is grossly stale (it sat unused for months, so its clock is months behind) those
+    // land far in the past — live HR works but all offloaded history is misdated. Correct them by the
+    // (wall - device) clock offset, but ONLY when grossly stale, and SNAPPED to a 5-min grid so the SAME
+    // record re-syncs to the SAME corrected ts (offloaded rows dedupe by (deviceId, ts); an un-snapped,
+    // slightly-different offset on re-sync would duplicate every row). A normal/identity clockRef has
+    // offset ~0 (< threshold) → rawTs unchanged (current behavior).
+    val staleThreshold = 86_400          // 1 day
+    val snapGranularity = 300            // 5 min
+    val clockOffset = wallClockRef - deviceClockRef
+    fun correctedWall(rawTs: Long): Long {
+        if (kotlin.math.abs(clockOffset) <= staleThreshold) return rawTs
+        val snapped = (if (clockOffset >= 0) clockOffset + snapGranularity / 2
+                       else clockOffset - snapGranularity / 2) / snapGranularity * snapGranularity
+        return rawTs + snapped.toLong()
+    }
+
     val hr = ArrayList<HrRow>()
     val rr = ArrayList<RrRow>()
     val spo2 = ArrayList<Spo2Row>()
@@ -295,9 +312,10 @@ fun extractHistoricalStreams(
                 else if (frame.size > 4) frame[4].toInt() and 0xFF else -1
         when (t) {
             PacketType.HISTORICAL_DATA.rawValue -> {
-                // type-47 carries a REAL unix timestamp + the full DSP record. No wall-clock offset.
+                // type-47 carries the strap RTC's real-unix seconds. Correct for a grossly-stale RTC
+                // (FIX #72); a normal strap is unchanged (offset < threshold).
                 val p = decodeHistorical(frame, family) ?: continue
-                val ts = p.intOrNull("unix")?.toLong() ?: continue
+                val ts = (p.intOrNull("unix")?.toLong())?.let { correctedWall(it) } ?: continue
 
                 // skip startup hr=0 (matches Swift `bpm != 0`).
                 p.intOrNull("heart_rate")?.let { bpm -> if (bpm != 0) hr.add(HrRow(ts, bpm)) }
@@ -338,13 +356,14 @@ fun extractHistoricalStreams(
             }
 
             PacketType.EVENT.rawValue -> {
-                // EVENT timestamps are real RTC unix seconds — already wall-clock, NOT offset.
-                // Port of the Swift `case "EVENT"` branch: persist the event (with battery extracted
-                // for BATTERY_LEVEL) so offloaded wrist/charge/battery events aren't lost. During a
-                // backfill the live path is suppressed, so the offload extractor MUST handle these.
+                // EVENT carries the strap RTC's real-unix seconds. Correct for a grossly-stale RTC
+                // (FIX #72); a normal strap is unchanged. Port of the Swift `case "EVENT"` branch:
+                // persist the event (with battery extracted for BATTERY_LEVEL) so offloaded
+                // wrist/charge/battery events aren't lost. During a backfill the live path is
+                // suppressed, so the offload extractor MUST handle these.
                 val parsed = Framing.parseFrame(frame, family)
                 if (!parsed.ok || parsed.crcOk == false) continue
-                val ts = parsed.parsed.intOrNull("event_timestamp")?.toLong() ?: continue
+                val ts = (parsed.parsed.intOrNull("event_timestamp")?.toLong())?.let { correctedWall(it) } ?: continue
                 val kind = (parsed.parsed["event"] as? String) ?: ""
                 if (kind.startsWith("BATTERY_LEVEL")) appendHistBattery(battery, ts, parsed.parsed)
                 val payload = LinkedHashMap(parsed.parsed)
