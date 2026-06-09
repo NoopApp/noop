@@ -33,7 +33,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: android-unsigned-apk
-          path: android/app/build/outputs/apk/release/*-unsigned.apk
+          path: android/app/build/outputs/apk/**/*.apk
 
   # --- JOB 2: iOS App bauen (Unsignierte .ipa) ---
   build-ios:
