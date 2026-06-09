@@ -36,8 +36,6 @@ jobs:
           path: android/app/build/outputs/apk/release/*-unsigned.apk
 
   # --- JOB 2: iOS App bauen (Unsignierte .ipa) ---
-  # --- JOB 2: iOS App bauen (Unsignierte .ipa) ---
-  # --- JOB 2: iOS App bauen (Unsignierte .ipa) ---
   build-ios:
     runs-on: macos-15
     steps:
@@ -55,12 +53,12 @@ jobs:
       - name: Generate Xcode Project
         run: xcodegen generate
 
-      # Geändert: -scheme wurde von "StrandiOS" auf "Strand" gesetzt
+      # Wir wechseln auf das dedizierte iOS-Target, das alle korrekten Ressourcen (Icons/Pfade) besitzt
       - name: Build Unsigned iOS Archive
         run: |
           xcodebuild archive \
             -project Strand.xcodeproj \
-            -scheme Strand \
+            -target StrandiOS \
             -sdk iphoneos \
             -configuration Release \
             -archivePath build/StrandiOS.xcarchive \
@@ -69,8 +67,7 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGN_ENTITLEMENTS=""
 
-      # Da der Name der App im Bundle "NOOP.app" oder "Strand.app" sein könnte,
-      # nutzen wir hier einen Platzhalter (*.app), damit das Kopieren immer klappt.
+      # Packt die App aus dem Archiv in die finale .ipa
       - name: Package iOS App to .ipa
         run: |
           mkdir -p build/Payload
