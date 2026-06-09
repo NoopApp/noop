@@ -25,7 +25,7 @@ object AppChangelog {
      * Bump this when you add a release below. The "What's New" sheet shows automatically when the
      * stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
      */
-    const val CURRENT_VERSION = "1.35"
+    const val CURRENT_VERSION = "1.36"
 
     data class Release(
         val version: String,
@@ -36,6 +36,14 @@ object AppChangelog {
 
     /** Newest first. */
     val releases: List<Release> = listOf(
+        Release(
+            version = "1.36",
+            title = "Android: reliable reconnect after a dropout",
+            date = "June 2026",
+            items = listOf(
+                "Fixed (Android): if your strap dropped — out of range, or after a while in the background — NOOP could get stuck \"disconnected\" and never reconnect, no matter how many times it rescanned; the only fix was forcing the strap into pairing mode. The cause: a bonded strap that isn't advertising can't be found by a Bluetooth scan, and reconnect was scan-only. It now reconnects DIRECTLY to your known strap (the OS reconnects as soon as it's back in range, no scan needed), so it recovers on its own. (The Mac already reconnected this way.)",
+            ),
+        ),
         Release(
             version = "1.35",
             title = "WHOOP 5.0/MG buzz — the real command (matched byte-for-byte)",

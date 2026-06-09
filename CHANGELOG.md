@@ -17,6 +17,21 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 1.36 — Android: direct reconnect after a dropout (#61)
+
+- **Fixed (Android): a dropped WHOOP 4.0 could get stuck "disconnected" and never reconnect** (issue
+  #61). `handleDisconnect` only ever called `connect()` → a BLE **scan**, but a bonded strap that the
+  OS still holds (or that simply isn't advertising) doesn't show up in a scan — so it looped
+  `No WHOOP strap found` until the user forced the strap into pairing mode. Now the client **remembers
+  the connected `BluetoothDevice`** and, on an unintentional drop, reconnects to it **directly** via
+  `connectGatt(autoConnect = true)` — the OS reconnects as soon as the strap is reachable, with no
+  scan and no advertisement needed. `connectToDevice` gained an `autoConnect` param (default `false`
+  for the scan-discovered first connect) and now closes any stale GATT first; `prepareForModelSwitch`
+  clears the remembered device so a model switch scans fresh.
+- macOS already did this — `connect()` reconnects via `retrieveConnectedPeripherals` + `central.connect`
+  (and state-restoration) before falling back to a scan — so this is an **Android-only** fix +
+  lockstep version bump.
+
 ## 1.35 — WHOOP 5/MG buzz matched byte-for-byte (#48)
 
 - **WHOOP 5.0/MG haptics now byte-identical to a working app.** v1.34 fixed the opcode (`0x13`) but

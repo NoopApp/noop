@@ -283,6 +283,12 @@ class WhoopBleClient(
     /// The strap family the user chose to pair, remembered so an auto-reconnect after a
     /// dropout re-scans for the same model instead of falling back to WHOOP 4.0.
     private var selectedModel = WhoopModel.WHOOP4
+    /// The last device we connected to, kept so an auto-reconnect after a dropout can connect
+    /// DIRECTLY to it (autoConnect=true) instead of scanning. A bonded strap the OS still holds (or
+    /// that simply isn't advertising) won't appear in a scan — so the old scan-only reconnect looped
+    /// "No WHOOP strap found" until the user forced pairing mode (#61). Mirrors macOS, which already
+    /// reconnects via retrieveConnectedPeripherals + central.connect before scanning.
+    private var lastDevice: BluetoothDevice? = null
     /// The family actually discovered on the connected peripheral. Drives family-aware frame
     /// parsing and gates the WHOOP4-only bond/handshake. Set in onServicesDiscovered.
     private var connectedFamily = DeviceFamily.WHOOP4
@@ -509,6 +515,7 @@ class WhoopBleClient(
      */
     fun prepareForModelSwitch() {
         disconnect()
+        lastDevice = null   // don't auto-reconnect to the old strap; the next connect scans for the new model
         _state.value = _state.value.copy(connected = false, bonded = false)
     }
 
@@ -660,10 +667,16 @@ class WhoopBleClient(
     }
 
     @SuppressLint("MissingPermission")
-    private fun connectToDevice(device: BluetoothDevice) {
+    private fun connectToDevice(device: BluetoothDevice, autoConnect: Boolean = false) {
         // Reset per-connection state (mirrors the Swift flags cleared on connect/disconnect).
         reset()
-        // autoConnect = false for a fast, direct connect (CoreBluetooth central.connect default).
+        // Remember the device so a later dropout can reconnect straight to it (#61).
+        lastDevice = device
+        // Close any prior/pending GATT so a direct-reconnect attempt doesn't leak the old client.
+        gatt?.close()
+        // autoConnect=false → a fast, direct connect (CoreBluetooth central.connect default), used for
+        // the scan-discovered first connect. autoConnect=true → the OS reconnects whenever the bonded
+        // strap is reachable WITHOUT needing an advertisement (used by the dropout auto-reconnect, #61).
         // TRANSPORT_LE pins the connection to BLE on dual-mode devices.
         gatt = when {
             // Pin EVERY GATT callback to the main looper. Without a handler, Android delivers
@@ -681,13 +694,13 @@ class WhoopBleClient(
             // unchanged behaviour, so no regression and no main-thread decode on those older devices.
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.P ->
                 device.connectGatt(
-                    context, false, gattCallback, BluetoothDevice.TRANSPORT_LE,
+                    context, autoConnect, gattCallback, BluetoothDevice.TRANSPORT_LE,
                     BluetoothDevice.PHY_LE_1M_MASK, handler,
                 )
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ->
-                device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+                device.connectGatt(context, autoConnect, gattCallback, BluetoothDevice.TRANSPORT_LE)
             else ->
-                device.connectGatt(context, false, gattCallback)
+                device.connectGatt(context, autoConnect, gattCallback)
         }
     }
 
@@ -1596,10 +1609,22 @@ class WhoopBleClient(
         cmdCharacteristic = null
 
         if (!intentionalDisconnect) {
-            log("Disconnected (status=$status); rescanning in 3s")
-            handler.postDelayed({
-                if (!intentionalDisconnect) connect(selectedModel)
-            }, RECONNECT_DELAY_MS)
+            val dev = lastDevice
+            if (dev != null) {
+                // Reconnect DIRECTLY to the strap we already know (autoConnect=true): the OS reconnects
+                // as soon as it's reachable, with no scan and no advertisement required — fixing the
+                // dropout loop where a bonded strap that wasn't advertising could never be re-found by
+                // scanning, leaving the user stuck until they forced pairing mode (#61).
+                log("Disconnected (status=$status); reconnecting directly in ${RECONNECT_DELAY_MS / 1000}s")
+                handler.postDelayed({
+                    if (!intentionalDisconnect) connectToDevice(dev, autoConnect = true)
+                }, RECONNECT_DELAY_MS)
+            } else {
+                log("Disconnected (status=$status); rescanning in ${RECONNECT_DELAY_MS / 1000}s")
+                handler.postDelayed({
+                    if (!intentionalDisconnect) connect(selectedModel)
+                }, RECONNECT_DELAY_MS)
+            }
         } else {
             log("Disconnected (intentional)")
         }
