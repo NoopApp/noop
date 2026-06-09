@@ -426,33 +426,35 @@ object HealthConnectImporter {
     }
 
     /**
-     * Minimal, stable map of common ExerciseSessionRecord.EXERCISE_TYPE_* constants to labels.
-     * The constants are stable public ints; unknown/other types fall back to "Workout".
-     * (We hardcode the int values to avoid a brittle dependency on every constant existing
-     * across connect-client patch versions; values are from the published EXERCISE_TYPE_* set.)
+     * Map of common ExerciseSessionRecord.EXERCISE_TYPE_* constants to readable labels. We reference the
+     * library constants directly rather than hardcoding ints — the old hardcoded values were WRONG (e.g.
+     * 79 was mapped to "Swimming" but 79 is actually WALKING, so a walking session showed as swimming —
+     * issue #53; 80 was "Swimming" but is WATER_POLO; 82 was "Walking" but is WHEELCHAIR; etc.). Using
+     * the constants makes the int↔label mapping impossible to get wrong, and a renamed/removed constant
+     * becomes a compile error instead of a silent mismatch. Unknown types fall back to "Workout".
      */
     private val EXERCISE_TYPE_NAMES: Map<Int, String> = mapOf(
-        56 to "Running",
-        57 to "Running",          // RUNNING_TREADMILL
-        8 to "Cycling",           // BIKING
-        9 to "Cycling",           // BIKING_STATIONARY
-        79 to "Swimming",         // SWIMMING_OPEN_WATER
-        80 to "Swimming",         // SWIMMING_POOL
-        70 to "Strength",         // STRENGTH_TRAINING
-        82 to "Walking",          // WALKING
-        90 to "Yoga",             // YOGA
-        53 to "Rowing",           // ROWING
-        54 to "Rowing",           // ROWING_MACHINE
-        37 to "HIIT",             // HIGH_INTENSITY_INTERVAL_TRAINING
-        25 to "Elliptical",       // ELLIPTICAL
-        48 to "Pilates",          // PILATES
-        13 to "Boxing",           // BOXING
-        33 to "Hiking",           // HIKING
-        2 to "Badminton",         // BADMINTON
-        4 to "Baseball",          // BASEBALL
-        5 to "Basketball",        // BASKETBALL
-        64 to "Soccer",           // SOCCER
-        87 to "Weightlifting",    // WEIGHTLIFTING
+        ExerciseSessionRecord.EXERCISE_TYPE_RUNNING to "Running",
+        ExerciseSessionRecord.EXERCISE_TYPE_RUNNING_TREADMILL to "Running",
+        ExerciseSessionRecord.EXERCISE_TYPE_BIKING to "Cycling",
+        ExerciseSessionRecord.EXERCISE_TYPE_BIKING_STATIONARY to "Cycling",
+        ExerciseSessionRecord.EXERCISE_TYPE_SWIMMING_OPEN_WATER to "Swimming",
+        ExerciseSessionRecord.EXERCISE_TYPE_SWIMMING_POOL to "Swimming",
+        ExerciseSessionRecord.EXERCISE_TYPE_STRENGTH_TRAINING to "Strength",
+        ExerciseSessionRecord.EXERCISE_TYPE_WALKING to "Walking",
+        ExerciseSessionRecord.EXERCISE_TYPE_HIKING to "Hiking",
+        ExerciseSessionRecord.EXERCISE_TYPE_YOGA to "Yoga",
+        ExerciseSessionRecord.EXERCISE_TYPE_ROWING to "Rowing",
+        ExerciseSessionRecord.EXERCISE_TYPE_ROWING_MACHINE to "Rowing",
+        ExerciseSessionRecord.EXERCISE_TYPE_HIGH_INTENSITY_INTERVAL_TRAINING to "HIIT",
+        ExerciseSessionRecord.EXERCISE_TYPE_ELLIPTICAL to "Elliptical",
+        ExerciseSessionRecord.EXERCISE_TYPE_PILATES to "Pilates",
+        ExerciseSessionRecord.EXERCISE_TYPE_BOXING to "Boxing",
+        ExerciseSessionRecord.EXERCISE_TYPE_BADMINTON to "Badminton",
+        ExerciseSessionRecord.EXERCISE_TYPE_BASEBALL to "Baseball",
+        ExerciseSessionRecord.EXERCISE_TYPE_BASKETBALL to "Basketball",
+        ExerciseSessionRecord.EXERCISE_TYPE_SOCCER to "Soccer",
+        ExerciseSessionRecord.EXERCISE_TYPE_WEIGHTLIFTING to "Weightlifting",
     )
 
     private fun round1(x: Double) = round(x * 10.0) / 10.0

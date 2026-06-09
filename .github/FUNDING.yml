@@ -1,0 +1,4 @@
+# NOOP is an anonymous, free, source-available project — GitHub Sponsors / Patreon / Ko-fi all
+# require a real identity, so support is crypto-only (see docs/DONATIONS.md). This `custom` link
+# puts a "Sponsor ♥" button at the top of the repo pointing at the donation guide + addresses.
+custom: ["https://github.com/NoopApp/noop/blob/main/docs/DONATIONS.md"]

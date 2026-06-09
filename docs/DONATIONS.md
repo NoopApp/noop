@@ -51,6 +51,29 @@ or your access depends on them.
 
 ---
 
+## New to crypto? Here's the 2-minute version
+
+You don't need to "be into crypto" to send a few dollars:
+
+1. **Install a mainstream exchange app** — Coinbase, Binance, Kraken, or **Cash App**
+   (Cash App buys/sends Bitcoin directly, no extra app).
+2. **Buy a small amount of Bitcoin (BTC) or Ethereum (ETH)** — even $5–10 helps.
+   You can usually pay with a debit card or bank transfer.
+3. **Tap Send / Withdraw**, paste the matching address below, and confirm.
+
+That's the whole thing. A few notes so nothing goes wrong:
+
+- **Only ever send a coin to its own network** (BTC to the BTC address, ETH to the ETH
+  address, etc.). Sending across networks can lose the funds.
+- **Copy the address in full** and double-check the **first and last few characters** —
+  transactions are irreversible.
+- Exchanges charge a small network/withdrawal fee; that's normal and goes to the network,
+  not us. Sending a slightly larger amount once beats many tiny transfers.
+- In the app's **Support** screen, each address has a **QR code** — point your exchange
+  app's "scan" at it instead of copy-pasting.
+
+---
+
 ## Addresses
 
 All four are standard receiving addresses on their respective networks. Pick

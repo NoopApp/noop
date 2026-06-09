@@ -16,8 +16,9 @@ works only with **your own data**.
 ## Repository layout
 
 The codebase is split into reusable, cross-platform Swift packages plus a thin platform-specific
-app layer. The **macOS app is the reference implementation**; iOS and Android targets are planned
-and reuse the same packages where they can.
+app layer. The **macOS app is the reference implementation**; **Android ships as a full app** under
+`android/`, and **iOS is an experimental, build-from-source community port** (see
+[PR #42](../../../pull/42)). All reuse the same packages where they can.
 
 ```
 Strand/
@@ -211,10 +212,16 @@ swift run backfill
 
 ---
 
-## iOS (planned — packages are ready)
+## iOS (experimental community port — see [PR #42](../../../pull/42))
 
-All five packages already target `.iOS(.v16)`, so the **non-UI core compiles for iOS today**.
-There is currently no iOS app target; adding one is mostly app-layer wiring, not package work.
+iOS is an **experimental, build-from-source community port** ([PR #42](../../../pull/42)) — an app
+target plus widgets, a Live Activity, and HealthKit that builds for the iOS simulator. It is **not
+officially maintained or distributed**: iOS has no anonymous distribution path (the App Store and
+TestFlight both require a real Apple Developer identity), which is fundamentally at odds with NOOP
+staying anonymous. There is no download — you build it yourself in Xcode.
+
+The port is feasible because all five packages already target `.iOS(.v16)`, so the **non-UI core
+compiles for iOS today**; the rest is the app-layer wiring captured in that PR and documented below.
 
 ### Adding an iOS app target
 
@@ -269,12 +276,13 @@ There is currently no iOS app target; adding one is mostly app-layer wiring, not
 
 ---
 
-## Android (planned)
+## Android (shipped)
 
-A native Android client is planned as a separate, Kotlin/Gradle module rather than a port of the
-Swift app. When present, it lives under **`android/`** with its own `README`.
+Android ships as a **full, native client** — a separate Kotlin/Gradle module rather than a port of
+the Swift app. It lives under **`android/`** with its own `README`, and pre-built APKs
+(`NOOP-full.apk` plus a sample-data `NOOP-demo.apk`) are published in [Releases](../../../releases).
 
-Expected toolchain:
+Toolchain:
 
 | Tool            | Version |
 |-----------------|---------|
@@ -287,9 +295,8 @@ facts in `WhoopProtocol/Resources/whoop_protocol.json` are language-agnostic). B
 instructions live in **`android/README.md`** — open the `android/` directory in Android Studio, let
 Gradle sync, and run on a device with Bluetooth (an emulator cannot reach a physical strap).
 
-> The `android/` directory may not yet exist in your checkout. Until it lands, the macOS app above is
-> the reference implementation and the shared packages define the protocol, storage, analytics, and
-> import behavior any future client must match.
+> The macOS app remains the reference implementation; the shared packages define the protocol,
+> storage, analytics, and import behavior every client matches.
 
 ---
 

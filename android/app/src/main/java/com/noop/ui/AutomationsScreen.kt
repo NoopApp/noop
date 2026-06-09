@@ -42,7 +42,10 @@ fun AutomationsScreen(viewModel: AppViewModel) {
     var zoneCoaching by remember { mutableStateOf(false) }
     var stressNudge by remember { mutableStateOf(false) }
     var autoLockOnWristOff by remember { mutableStateOf(false) }
-    var smartAlarm by remember { mutableStateOf(false) }
+    // Smart alarm is real + persisted (issue #51): backed by the ViewModel, which arms the strap's
+    // firmware alarm. (The toggles above are still preview-only — separate follow-up.)
+    val smartAlarm by viewModel.smartAlarmEnabled.collectAsStateWithLifecycle()
+    val alarmMinutes by viewModel.smartAlarmMinutes.collectAsStateWithLifecycle()
 
     ScreenScaffold(
         title = "Automations",
@@ -114,18 +117,25 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                 label = "Enable smart alarm",
                 help = "Arms the strap to buzz at your wake time.",
                 checked = smartAlarm,
-                onChange = { smartAlarm = it },
+                onChange = { viewModel.setSmartAlarmEnabled(it) },
             )
             if (smartAlarm) {
                 RowDivider()
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text("Wake at", style = NoopType.body, color = Palette.textPrimary)
                     Spacer(Modifier.weight(1f))
-                    Text("07:00", style = NoopType.number(15f), color = Palette.accent)
+                    TimeChip(
+                        minutes = alarmMinutes,
+                        accessibilityLabel = "Smart alarm wake time",
+                        onPicked = { viewModel.setSmartAlarmMinutes(it) },
+                    )
                 }
                 RowDivider()
                 Text(
-                    "Light-sleep window — wake up to 30 minutes early if a light phase is detected while connected.",
+                    if (live.bonded)
+                        "Armed on the strap itself, so it buzzes at your wake time even if your phone is asleep or NOOP is closed."
+                    else
+                        "Connect your strap to arm this — it's set on the strap's own firmware alarm, so it fires even when your phone or NOOP isn't running.",
                     style = NoopType.footnote, color = Palette.textTertiary,
                 )
             }
