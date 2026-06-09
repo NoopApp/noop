@@ -7,7 +7,7 @@ enum AppChangelog {
 
     /// Bump this when you add a release below. The "What's New" sheet shows automatically when the
     /// stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
-    static let currentVersion = "1.33"
+    static let currentVersion = "1.35"
 
     struct Release: Identifiable {
         let version: String
@@ -19,6 +19,20 @@ enum AppChangelog {
 
     /// Newest first.
     static let releases: [Release] = [
+        Release(
+            version: "1.35",
+            title: "WHOOP 5.0/MG buzz — the real command (matched byte-for-byte)",
+            date: "June 2026",
+            items: [
+                "WHOOP 5.0/MG: the buzz now sends the exact haptics command a working 5.0 app uses — the right command number (0x13), the right 12-byte payload (the \"notify\" vibration pattern), and a framing fix (4-byte padding) that the longer payload needs. NOOP's command is now byte-for-byte identical to the working app's, verified by a test. So Test buzz, wrist alerts and the smart-alarm buzz should now actually vibrate a bonded 5.0/MG. (This supersedes the v1.34 attempt, which had the command number but not the payload.) WHOOP 4.0 buzz is unchanged. If you have a 5.0/MG, please confirm on issue #48.",
+            ]),
+        Release(
+            version: "1.34",
+            title: "WHOOP 5.0/MG buzz — trying the right command (experimental)",
+            date: "June 2026",
+            items: [
+                "Experimental (WHOOP 5.0/MG only): the buzz now uses the 5/MG-specific haptics command (opcode 0x13) instead of the WHOOP 4.0 one — a capture from a real MG showed the strap rejecting the old command, and a working third-party app uses 0x13. The exact vibration pattern is still being finalised, so if your 5/MG doesn't buzz yet, that's expected — please share a strap log on issue #48 so we can confirm the strap now accepts the command. WHOOP 4.0 buzz is completely unchanged.",
+            ]),
         Release(
             version: "1.33",
             title: "Smart alarm: the time you set is the time that fires",

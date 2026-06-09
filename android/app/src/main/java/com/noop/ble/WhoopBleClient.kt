@@ -537,10 +537,21 @@ class WhoopBleClient(
                 log("send(${cmd.name}) skipped — no WHOOP 5/MG framing for this command yet")
                 return
             }
+            // WHOOP 5/MG haptics differ from WHOOP 4.0 on BOTH the opcode AND the payload (#48, decoded
+            // from the working "maverick" app's binary). Opcode: 0x13, not RUN_HAPTICS_PATTERN=79 (a real-MG
+            // capture showed the strap rejecting 79 with COMMAND_RESPONSE result=0x03). Payload: the maverick
+            // haptic body [0x01, effects(8), loopControl(u16 LE), overallLoop] — here the "notify" preset
+            // (effects 47,152), NOT the 4.0 [patternId, loops, …]. puffinCommandFrame pads the inner to a
+            // 4-byte boundary, which this 12-byte payload needs. WHOOP 4.0 is untouched (79 + its own frame).
+            val isHaptics = cmd == CommandNumber.RUN_HAPTICS_PATTERN
+            val puffinCmd = if (isHaptics) 0x13 else cmd.rawValue
+            val puffinPayload = if (isHaptics)
+                byteArrayOf(0x01, 47, 152.toByte(), 0, 0, 0, 0, 0, 0, 0, 0, 0) else payload
             seq = (seq + 1) and 0xFF
-            val frame = Framing.puffinCommandFrame(cmd = cmd.rawValue, seq = seq, payload = payload)
+            val frame = Framing.puffinCommandFrame(cmd = puffinCmd, seq = seq, payload = puffinPayload)
             enqueueWrite(PendingWrite(frame, withResponse))
-            log("→ ${cmd.name} payload=${payload.toHex()} (puffin)")
+            val cmdNote = if (isHaptics) " cmd=0x13" else ""
+            log("→ ${cmd.name} payload=${puffinPayload.toHex()} (puffin$cmdNote)")
             return
         }
         seq = (seq + 1) and 0xFF

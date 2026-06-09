@@ -190,7 +190,13 @@ public func frameFromPayload(_ data: [UInt8], type: UInt8, seq: UInt8 = 0, cmd: 
 /// app gates any sending behind an opt-in switch and only writes to the puffin command characteristic.
 public func puffinCommandFrame(cmd: UInt8, seq: UInt8, payload: [UInt8] = [0x00],
                                type: UInt8 = 35, header: [UInt8] = [0x00, 0x01]) -> [UInt8] {
-    let inner: [UInt8] = [type, seq, cmd] + payload
+    // Pad the inner record to a 4-byte boundary before length/CRC, exactly as the strap's maverick
+    // framing does (pad4). No-op for the 4-aligned commands shipped so far (toggle HR, historical),
+    // but REQUIRED for the 12-byte haptics payload (inner 15 → 16) — otherwise the declared length and
+    // CRC32 cover the wrong byte count and the strap rejects the frame (#48).
+    var inner: [UInt8] = [type, seq, cmd] + payload
+    let pad = (4 - inner.count % 4) % 4
+    if pad > 0 { inner += [UInt8](repeating: 0, count: pad) }
     let declLen = inner.count + 4
     var frame: [UInt8] = [0xAA, 0x01,
                           UInt8(declLen & 0xFF), UInt8((declLen >> 8) & 0xFF),

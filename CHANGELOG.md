@@ -17,6 +17,40 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 1.35 — WHOOP 5/MG buzz matched byte-for-byte (#48)
+
+- **WHOOP 5.0/MG haptics now byte-identical to a working app.** v1.34 fixed the opcode (`0x13`) but
+  kept the WHOOP-4.0 payload. The contributor's working 5.0 app ("whootify") was decompiled, giving
+  the real command:
+  - **Payload**: `[0x01, effects(8), loopControl(u16 LE), overallLoop]` — 12 bytes. We send the
+    "notify" preset (effects `47,152`): `01 2f 98 00 00 00 00 00 00 00 00 00`.
+  - **Framing fix — `pad4`**: the strap's maverick framing pads the inner record to a 4-byte boundary
+    before length+CRC. `puffinCommandFrame` *wasn't* doing this — it didn't matter for the 4-aligned
+    commands shipped so far (toggle-HR, historical), but the 12-byte haptic inner is 15 bytes and must
+    pad to 16, or the declared length + CRC32 are wrong and the strap rejects the frame. Added pad4 to
+    `puffinCommandFrame` on both platforms (no-op for the aligned commands — existing frames unchanged).
+  - **Verified byte-for-byte**: a golden-vector test on each platform asserts `puffinCommandFrame(0x13,
+    seq=1, notify-payload)` equals the frame the working app's `buildMaverickFrame` produces
+    (`aa0114000001e1e1230113012f98…98cb83a5`), and that pad4 leaves HR-toggle's frame at 16 bytes.
+- So a bonded 5.0/MG should now actually vibrate on Test buzz / wrist alerts / smart-alarm buzz.
+  **WHOOP 4.0 buzz is byte-for-byte unchanged** (still opcode 79 + its own frame). Awaiting hardware
+  confirmation on #48.
+
+## 1.34 — WHOOP 5/MG haptics opcode (experimental, #48)
+
+- **Experimental (WHOOP 5.0/MG): buzz now sends opcode `0x13`, not the 4.0 `RUN_HAPTICS_PATTERN`
+  (79).** Decoding @james-e-morris's real-MG puffin capture showed the strap **rejecting** our
+  opcode 79 (`COMMAND_RESPONSE result=0x03`, while every accepted command — toggle-HR `0x03`,
+  historical `0x16`/`0x17` — returns `0x01`), and a working third-party 5.0 app fires the buzz with
+  opcode **`0x13` (19)** (`PENDING → HAPTICS_FIRED → SUCCESS`, `VALID_PATTERN`). The `send()` puffin
+  branch now overrides **only the opcode** for `runHapticsPattern` on `.whoop5` (`0x13`); the payload
+  is still the 4.0 preset `[patternId, loops, …]` pending the exact 5/MG payload (incoming via the
+  working app's binary). Scoped strictly to the 5/MG path — **WHOOP 4.0 buzz is byte-for-byte
+  unchanged** (still 79 via its own frame). The strap log now annotates the write `(puffin cmd=0x13)`.
+- This may or may not buzz yet (payload unconfirmed); the immediate goal is to confirm the strap now
+  **accepts** the command (result `0x01` / a haptics-fired event) instead of rejecting it. 5/MG owners:
+  please share a strap log on #48.
+
 ## 1.33 — Smart alarm time actually reaches the strap
 
 - **Fixed: the Smart-alarm wake time you set didn't always transmit to the strap** (issue #59). The

@@ -236,4 +236,20 @@ final class DeviceFamilyFramingTests: XCTestCase {
         XCTAssertEqual(Reassembler().feed(frame), [frame])
         XCTAssertEqual(Reassembler(family: .whoop4).feed(frame), [frame])
     }
+
+    func testPuffinHapticsFrameMatchesMaverickGolden() {
+        // WHOOP 5/MG buzz (#48): the haptic inner is 15 bytes ([35, seq, 0x13] + 12-byte payload), which
+        // pad4 must extend to 16 before length/CRC — exactly as the strap's maverick framing does. The
+        // golden frame is computed from the working app's buildMaverickFrame (notify preset, effects
+        // 47,152) at seq=1; byte-for-byte equality proves our opcode (0x13), payload, AND pad4 are correct.
+        let payload: [UInt8] = [0x01, 47, 152, 0, 0, 0, 0, 0, 0, 0, 0, 0]   // 0x01 + effects(8) + loopCtl(2) + overallLoop
+        XCTAssertEqual(payload.count, 12)
+        let frame = puffinCommandFrame(cmd: 0x13, seq: 1, payload: payload)
+        XCTAssertEqual(frame, Self.hex("aa0114000001e1e1230113012f980000000000000000000098cb83a5"))
+        XCTAssertEqual(frame.count, 28)            // 8 header + 16 padded inner + 4 crc32
+        XCTAssertTrue(verifyFrame(frame, family: .whoop5).ok)
+        XCTAssertEqual(Reassembler(family: .whoop5).feed(frame), [frame])
+        // pad4 is a NO-OP for already-4-aligned commands: HR toggle inner ([35, seq, 3, 1]) stays 16 bytes.
+        XCTAssertEqual(puffinCommandFrame(cmd: 3, seq: 7, payload: [0x01]).count, 16)
+    }
 }
