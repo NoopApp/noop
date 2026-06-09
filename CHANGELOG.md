@@ -17,6 +17,29 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 1.60 — Android: notification recovery fix + widget armour (#82)
+
+- **Fixed: the v1.56 notification Recovery %** — `buildNotification` accepted the value but the
+  display line was never added, so it computed and silently dropped it. Now rendered ("Recovery NN%"
+  between status and battery).
+- **#82 ("app keeps stopping" after first widget add, v1.57) — investigated to the metal, NOT
+  reproducible:** 10-agent adversarial workflow decompiled Glance 1.1.0's full exception flow
+  (receiver `goAsync` catches Throwable→log; SessionWorker exceptions → WorkManager FAILED;
+  composition errors → built-in error layout, default `errorUiLayout` is non-zero so the rumored
+  rethrow path is unreachable) — **the Glance pipeline cannot kill the process**. Stood up a headless
+  Pixel-6/Android-14 emulator and ran 12 scenarios on v1.59 **plus the exact repro on a fresh v1.57
+  install** (real launcher drag-and-drop first-ever widget add → repeated app returns): zero crashes,
+  stable PID. Verdict: environment-specific to the reporter's device, self-resolved after update;
+  no behavioral change justified (objectivity rule).
+- **Defence-in-depth shipped anyway** (belt-and-braces, honestly labelled): `.catch{}` on the
+  service's notification combine (a Room error in `daysMergedFlow` WOULD have propagated uncaught out
+  of `scope.launch` — real latent risk, just not #82), `onCompositionError` override rendering our own
+  fallback layout (friendlier than Glance's generic one), `runCatching` around the widget's pref load.
+- **Dependency currency:** `glance-appwidget` 1.1.0→**1.1.1**; explicit
+  `androidx.work:work-runtime-ktx:2.9.0` pin (Glance's POM drags in 2.7.1 from Oct 2021 — pre-Android-14;
+  2.9.x is the compileSdk-34 ceiling).
+- macOS: **version bump only.**
+
 ## 1.59 — Android: share back to Health Connect (opt-in)
 
 - **New (Android): Health Connect writeback** — new `HealthConnectWriter` pushes NOOP's **computed**

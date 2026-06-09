@@ -2,4 +2,5 @@
 <resources>
     <string name="app_name">NOOP</string>
     <string name="widget_description">Today\'s recovery, live heart rate and strap battery at a glance.</string>
+    <string name="widget_error">NOOP widget couldn\'t draw — it will recover on the next update.</string>
 </resources>

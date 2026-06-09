@@ -25,7 +25,7 @@ object AppChangelog {
      * Bump this when you add a release below. The "What's New" sheet shows automatically when the
      * stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
      */
-    const val CURRENT_VERSION = "1.59"
+    const val CURRENT_VERSION = "1.60"
 
     data class Release(
         val version: String,
@@ -36,6 +36,14 @@ object AppChangelog {
 
     /** Newest first. */
     val releases: List<Release> = listOf(
+        Release(
+            version = "1.60",
+            title = "Android: notification recovery fix + widget armour",
+            date = "June 2026",
+            items = listOf(
+                "Fixed (Android): the background notification now actually shows today's Recovery % — v1.56 announced it, but the value was computed and never drawn. Also: armour for the home-screen widget — if it ever fails to draw it shows a small fallback message and heals on its next update, the background notification now survives database hiccups instead of taking the connection down, and the widget's internal scheduler library was brought up to the current Android-14-era version. We investigated a reported \"app keeps stopping\" crash (#82) with a fresh-install reproduction on a clean Android 14 device and could not trigger it — if you ever see it, please report your device model and Android version. Mac: version bump only.",
+            ),
+        ),
         Release(
             version = "1.59",
             title = "Android: share back to Health Connect",

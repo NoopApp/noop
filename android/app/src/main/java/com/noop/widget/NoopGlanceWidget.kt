@@ -25,6 +25,7 @@ import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
+import com.noop.R
 import com.noop.ui.MainActivity
 import java.text.DateFormat
 import java.util.Date
@@ -41,8 +42,25 @@ import java.util.Date
 class NoopGlanceWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
-        val snap = WidgetSnapshotStore.load(context)
+        // A corrupt pref must degrade to the empty-state widget, not throw mid-provide.
+        val snap = runCatching { WidgetSnapshotStore.load(context) }.getOrDefault(WidgetSnapshot())
         provideContent { WidgetContent(snap) }
+    }
+
+    /** Defence-in-depth, NOT a crash fix: Glance 1.1.0's default already contains composition errors
+     *  (it renders its built-in error layout; verified in bytecode while investigating #82 — which we
+     *  could not reproduce). This override only swaps that generic layout for our own friendlier one.
+     *  The widget heals on the next successful push. */
+    override fun onCompositionError(
+        context: Context,
+        glanceId: GlanceId,
+        appWidgetId: Int,
+        throwable: Throwable,
+    ) {
+        runCatching {
+            val rv = android.widget.RemoteViews(context.packageName, R.layout.noop_widget_error)
+            android.appwidget.AppWidgetManager.getInstance(context).updateAppWidget(appWidgetId, rv)
+        }
     }
 }
 

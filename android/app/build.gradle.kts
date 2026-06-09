@@ -22,8 +22,8 @@ android {
         applicationId = "com.noop.whoop"
         minSdk = 26
         targetSdk = 34
-        versionCode = 68
-        versionName = "1.59"
+        versionCode = 69
+        versionName = "1.60"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -128,8 +128,12 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
 
-    // --- Home-screen widget (1.1.0: last line compatible with compileSdk 34) ---
-    implementation("androidx.glance:glance-appwidget:1.1.0")
+    // --- Home-screen widget (1.1.x: last line compatible with compileSdk 34) ---
+    implementation("androidx.glance:glance-appwidget:1.1.1")
+    // Glance's own POM pins work-runtime 2.7.1 (Oct 2021) — pre-Android-14. Pin a current one
+    // explicitly so the widget scheduler runs on a WorkManager that's maintained for targetSdk 34.
+    // (2.10+ needs compileSdk 35; 2.9.x is the ceiling for this module.)
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
 
     // --- Activity / lifecycle / navigation ---
     implementation("androidx.core:core-ktx:1.13.1")

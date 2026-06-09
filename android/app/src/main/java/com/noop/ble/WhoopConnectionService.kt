@@ -23,6 +23,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
@@ -83,10 +84,19 @@ class WhoopConnectionService : Service() {
         // poor-man's Live Activity (#42). daysMergedFlow is the same merged store the dashboard reads.
         notifyJob?.cancel()
         notifyJob = scope.launch {
-            combine(ble.state, repo.daysMergedFlow("my-whoop")) { state, days ->
+            combine(
+                ble.state,
+                // Defence-in-depth: a Room/disk error in this flow would otherwise propagate uncaught
+                // out of scope.launch and kill the process — the FGS exists to protect the connection,
+                // not to take it down. (Audited during #82, which proved unrelated/unreproducible —
+                // this guard is belt-and-braces, not a diagnosed fix.) After catch{emit} the inner
+                // flow completes; combine keeps running on ble.state with days frozen.
+                repo.daysMergedFlow("my-whoop").catch { emit(emptyList()) },
+            ) { state, days ->
                 val todayKey = java.time.LocalDate.now().toString()
                 state to days.lastOrNull { it.day == todayKey }?.recovery
-            }.collectLatest { (state, recovery) ->
+            }.catch { /* belt-and-braces: a frozen notification beats a dead process */ }
+                .collectLatest { (state, recovery) ->
                 postNotification(state, recovery)
                 // Feed the home-screen widget from the same stream — this service is its heartbeat
                 // while the app UI is closed. Throttled + no-op without a placed widget (the store
@@ -142,6 +152,7 @@ class WhoopConnectionService : Service() {
         }
         val detail = buildList {
             add(if (state.connected) "Streaming in the background" else "Keeping the link open")
+            recoveryPct?.let { add("Recovery ${it.roundToInt()}%") }
             state.batteryPct?.let { add("Strap ${it.roundToInt()}%") }
         }.joinToString("  ·  ")
 
