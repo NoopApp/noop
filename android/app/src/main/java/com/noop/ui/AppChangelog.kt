@@ -25,7 +25,7 @@ object AppChangelog {
      * Bump this when you add a release below. The "What's New" sheet shows automatically when the
      * stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
      */
-    const val CURRENT_VERSION = "1.36"
+    const val CURRENT_VERSION = "1.39"
 
     data class Release(
         val version: String,
@@ -36,6 +36,31 @@ object AppChangelog {
 
     /** Newest first. */
     val releases: List<Release> = listOf(
+        Release(
+            version = "1.39",
+            title = "Wrist alerts for incoming calls (Android)",
+            date = "June 2026",
+            items = listOf(
+                "New (Android): buzz your strap when a call comes in — regular phone calls and supported VoIP apps — with its own Calls section in Notifications settings, separate from app alerts. The call buzz repeats a few times then stops, so you won't miss it. Privacy-first as always: NOOP never reads the number, the caller, or any notification content — only that a call is ringing; the Phone-calls permission is requested only when you turn that toggle on. Thanks to a community contributor (#66).",
+            ),
+        ),
+        Release(
+            version = "1.38",
+            title = "Smoother during long history syncs (Mac)",
+            date = "June 2026",
+            items = listOf(
+                "Improved (Mac): NOOP stays responsive while your strap syncs a long stretch of history and while the dashboard recomputes. Sync data is now handled as bulk traffic — drained in small batches and kept out of the live UI parser — the strap log no longer floods with a line for every sync acknowledgement, and the heavy recovery/strain/sleep analysis runs off the main thread. So the app no longer hitches during a big offload. Thanks to a community contributor (#64, #65). (Mac-only; Android gets the version bump.)",
+            ),
+        ),
+        Release(
+            version = "1.37",
+            title = "New first-run onboarding (Mac + Android)",
+            date = "June 2026",
+            items = listOf(
+                "A proper guided setup the first time you open NOOP — the same flow on Mac and Android: what NOOP is and what to expect, then Bluetooth, putting your strap on, connecting, a little celebration when it bonds, your profile, optional history import, and wrist alerts. Permissions are now asked only on the step that explains them (nothing fires at launch), and the background-connection service is only promoted once you finish. Cleaner, calmer, and consistent across platforms. Thanks to a community contributor (#36/#63).",
+                "Live heart-rate zones and %-of-max now use the real max heart rate from your profile (your manual override, or the age-based estimate) instead of a fixed default.",
+            ),
+        ),
         Release(
             version = "1.36",
             title = "Android: reliable reconnect after a dropout",

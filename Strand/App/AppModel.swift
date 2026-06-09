@@ -50,6 +50,11 @@ final class AppModel: ObservableObject {
     @Published var whoopImportSummary: String?
     /// Last Apple Health import result surfaced in the Apple Health card.
     @Published var appleHealthImportSummary: String?
+    /// Typed failure flags per source — the summary's warning styling reads these instead of
+    /// substring-matching the human-readable message (which misses errors like "Couldn't open
+    /// the local store."). Surfaced on both the Data Sources cards and the onboarding import step.
+    @Published var whoopImportFailed = false
+    @Published var appleHealthImportFailed = false
 
     /// True while any data-source import is writing to the local store.
     var hasActiveImport: Bool { activeImportSource != nil }
@@ -57,6 +62,14 @@ final class AppModel: ObservableObject {
     /// Returns true only for the source currently importing.
     func isImporting(_ source: DataSourceImportKind) -> Bool {
         activeImportSource == source
+    }
+
+    /// Whether the last import for a source ended in failure (for warning styling).
+    func importFailed(_ source: DataSourceImportKind) -> Bool {
+        switch source {
+        case .whoop: return whoopImportFailed
+        case .appleHealth: return appleHealthImportFailed
+        }
     }
 
     /// Smoothed, display-ready live heart rate — median over a short window, spike-filtered.
@@ -91,6 +104,16 @@ final class AppModel: ObservableObject {
             guard let self, bonded, self.behavior.smartAlarmEnabled else { return }
             self.applySmartAlarm()
         }.store(in: &hrCancellables)
+        // A completed backfill has just written strap history. Refresh the dashboard cache,
+        // but leave heavyweight analysis to its own guarded/background-friendly path.
+        live.$lastSyncedAt
+            .dropFirst()
+            .compactMap { $0 }
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                Task { [weak self] in await self?.refreshAfterCompletedBackfill() }
+            }
+            .store(in: &hrCancellables)
 
         moments = (UserDefaults.standard.array(forKey: "moments") as? [Double] ?? [])
             .map { Date(timeIntervalSince1970: $0) }
@@ -107,6 +130,11 @@ final class AppModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: 900_000_000_000)  // 15 min, matches the offload cadence
             }
         }
+    }
+
+    private func refreshAfterCompletedBackfill() async {
+        live.append(log: "Backfill: refreshing dashboard cache from completed sync")
+        await repo.refresh(days: 120)
     }
 
     /// Fold a fresh reading into the smoothing window and republish a stable bpm.
@@ -312,7 +340,7 @@ final class AppModel: ObservableObject {
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             do {
                 guard let store = await repo.storeHandle() else {
-                    finishImport(.whoop, summary: "Couldn't open the local store.")
+                    finishImport(.whoop, summary: "Couldn't open the local store.", failed: true)
                     return
                 }
                 let summary = try await WhoopImporter.importExport(url: url, into: store, deviceId: deviceId)
@@ -324,7 +352,7 @@ final class AppModel: ObservableObject {
                 } else { span = "" }
                 finishImport(.whoop, summary: "Imported \(summary.recordCount) records\(span)")
             } catch {
-                finishImport(.whoop, summary: "Import failed: \(error)")
+                finishImport(.whoop, summary: "Import failed: \(error)", failed: true)
             }
         }
     }
@@ -338,36 +366,40 @@ final class AppModel: ObservableObject {
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             do {
                 guard let store = await repo.storeHandle() else {
-                    finishImport(.appleHealth, summary: "Couldn't open the local store.")
+                    finishImport(.appleHealth, summary: "Couldn't open the local store.", failed: true)
                     return
                 }
                 let summary = try await AppleHealthImport.importExport(url: url, into: store, deviceId: appleDeviceId)
                 await repo.refresh()
                 finishImport(.appleHealth, summary: "Imported \(summary.recordCount) records")
             } catch {
-                finishImport(.appleHealth, summary: "Import failed: \(error)")
+                finishImport(.appleHealth, summary: "Import failed: \(error)", failed: true)
             }
         }
     }
 
-    /// Marks a source as importing and clears only that source's old status text.
+    /// Marks a source as importing and clears only that source's old status text + failure flag.
     private func beginImport(_ source: DataSourceImportKind) {
         activeImportSource = source
         switch source {
         case .whoop:
             whoopImportSummary = nil
+            whoopImportFailed = false
         case .appleHealth:
             appleHealthImportSummary = nil
+            appleHealthImportFailed = false
         }
     }
 
-    /// Stores the completed import summary on the matching source card.
-    private func finishImport(_ source: DataSourceImportKind, summary: String) {
+    /// Stores the completed import summary (and typed failure flag) on the matching source card.
+    private func finishImport(_ source: DataSourceImportKind, summary: String, failed: Bool = false) {
         switch source {
         case .whoop:
             whoopImportSummary = summary
+            whoopImportFailed = failed
         case .appleHealth:
             appleHealthImportSummary = summary
+            appleHealthImportFailed = failed
         }
         activeImportSource = nil
     }

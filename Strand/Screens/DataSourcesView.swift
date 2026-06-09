@@ -42,7 +42,8 @@ struct DataSourcesView: View {
                 if importingWhoop { ProgressView().controlSize(.small) }
             }
             if let s = model.whoopImportSummary {
-                Text(s).font(StrandFont.subhead).foregroundStyle(StrandPalette.statusPositive)
+                Text(s).font(StrandFont.subhead)
+                    .foregroundStyle(model.whoopImportFailed ? StrandPalette.statusWarning : StrandPalette.statusPositive)
             }
             Text("\(repo.days.count) days · \(repo.sleeps.count) sleeps stored")
                 .font(StrandFont.footnote).foregroundStyle(StrandPalette.textTertiary)
@@ -63,7 +64,8 @@ struct DataSourcesView: View {
                 if importingAppleHealth { ProgressView().controlSize(.small) }
             }
             if let s = model.appleHealthImportSummary {
-                Text(s).font(StrandFont.subhead).foregroundStyle(StrandPalette.statusPositive)
+                Text(s).font(StrandFont.subhead)
+                    .foregroundStyle(model.appleHealthImportFailed ? StrandPalette.statusWarning : StrandPalette.statusPositive)
             }
         }
     }

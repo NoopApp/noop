@@ -21,6 +21,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.noop.BuildConfig
 import com.noop.data.DemoSeeder
 import com.noop.data.WhoopRepository
@@ -52,7 +53,13 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        requestBlePermissions()
+        // Only pre-warm permissions at launch for already-onboarded users. First-run onboarding
+        // requests each permission at the step that explains it — Bluetooth when the Connect step
+        // appears, notifications when it enables the background keep-alive — so the OS prompt never
+        // lands before the screen that justifies it.
+        if (NoopPrefs.of(this).getBoolean(NoopPrefs.KEY_ONBOARDED, false)) {
+            requestBlePermissions()
+        }
 
         setContent {
             NoopTheme {
@@ -161,6 +168,7 @@ object NoopPrefs {
 fun NoopRoot() {
     val context = LocalContext.current
     val prefs = remember { NoopPrefs.of(context) }
+    val appViewModel: AppViewModel = viewModel()
 
     var onboarded by remember {
         mutableStateOf(prefs.getBoolean(NoopPrefs.KEY_ONBOARDED, false))
@@ -171,6 +179,7 @@ fun NoopRoot() {
 
     if (!onboarded) {
         OnboardingScreen(
+            viewModel = appViewModel,
             onFinished = {
                 // A brand-new user just saw the expectations in onboarding — don't also pop the
                 // changelog at them; mark them current (mirrors macOS ContentView onFinished).
@@ -187,7 +196,7 @@ fun NoopRoot() {
 
     // Existing, onboarded user: render the app, and if they've updated since last launch
     // (stored version behind current), show "What's New" once over the top.
-    AppRoot()
+    AppRoot(viewModel = appViewModel)
 
     if (lastSeenChangelog != AppChangelog.CURRENT_VERSION) {
         Dialog(

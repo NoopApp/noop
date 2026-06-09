@@ -176,11 +176,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // MARK: - Strap controls (thin pass-throughs to the BLE client)
 
-    fun connect() {
+    fun connect(promoteService: Boolean = true) {
         ble.connect(_selectedModel.value)
         // Keep the link alive when the app is closed, unless the user has opted out. Started from the
         // foreground (this is a user tap), so Android 12+'s background-start rule is satisfied.
-        if (NoopPrefs.backgroundConnection(appContext)) {
+        // Onboarding auto-connects before the user has finished setup and passes promoteService=false
+        // so the persistent notification doesn't appear mid-flow; it promotes once on completion.
+        if (promoteService && NoopPrefs.backgroundConnection(appContext)) {
+            WhoopConnectionService.start(appContext)
+        }
+    }
+
+    /** Promote the background service now if a strap is live and the user hasn't opted out — used by
+     *  onboarding to defer the foreground notification until the flow completes. */
+    fun promoteBackgroundConnectionIfActive() {
+        if (!NoopPrefs.backgroundConnection(appContext)) return
+        if (ble.state.value.connected || ble.state.value.bonded) {
             WhoopConnectionService.start(appContext)
         }
     }

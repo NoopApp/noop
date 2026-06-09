@@ -778,52 +778,6 @@ private fun FormRow(label: String, control: @Composable () -> Unit) {
     }
 }
 
-// MARK: - Stepper field (Compose has no Stepper — tabular value + round −/+ buttons)
-
-@Composable
-private fun StepperField(
-    value: String,
-    accessibility: String,
-    unit: String? = null,
-    valueColor: Color = Palette.textPrimary,
-    onMinus: () -> Unit,
-    onPlus: () -> Unit,
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.semantics { contentDescription = accessibility },
-    ) {
-        Text(
-            value,
-            style = NoopType.bodyNumber,
-            color = valueColor,
-            modifier = Modifier.widthIn(min = 44.dp),
-        )
-        if (unit != null) {
-            Text(unit, style = NoopType.caption, color = Palette.textTertiary)
-        }
-        StepperButton(symbol = "−", onClick = onMinus, label = "Decrease $accessibility")
-        StepperButton(symbol = "+", onClick = onPlus, label = "Increase $accessibility")
-    }
-}
-
-@Composable
-private fun StepperButton(symbol: String, onClick: () -> Unit, label: String) {
-    Box(
-        modifier = Modifier
-            .size(30.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(Palette.surfaceInset)
-            .border(1.dp, Palette.hairline, RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
-            .semantics { contentDescription = label },
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(symbol, style = NoopType.body.copy(fontWeight = FontWeight.SemiBold), color = Palette.textPrimary)
-    }
-}
-
 // MARK: - Shared bits
 
 @Composable

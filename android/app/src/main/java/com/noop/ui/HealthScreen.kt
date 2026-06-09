@@ -18,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -35,17 +36,17 @@ import kotlin.math.roundToInt
 // locked NOOP component system: every surface is a NoopCard/StatTile, every chart
 // is a Canvas chart — no ad-hoc card heights or paddings.
 //
-// macOS parity note: macOS read HR-max from a ProfileStore. There is no profile
-// store on Android yet, so we use a fixed age-agnostic default (220 - 30 = 190 bpm).
-// SpO2 / respiratory / skin-temp are sleep-window aggregates, so the "Vital Signs"
-// grid is sourced from the most recent imported DailyMetric, exactly as on macOS.
-
-private const val HR_MAX_DEFAULT = 190
+// macOS parity note: live HR zone/%max reads the user's ProfileStore max heart rate,
+// matching Settings/onboarding. SpO2 / respiratory / skin-temp are sleep-window
+// aggregates, so the "Vital Signs" grid is sourced from today's DailyMetric.
 
 @Composable
 fun HealthScreen(vm: AppViewModel) {
+    val context = LocalContext.current
+    val profile = remember { ProfileStore.from(context.applicationContext) }
     val live by vm.live.collectAsStateWithLifecycle()
     val today by vm.today.collectAsStateWithLifecycle()
+    val hrMax = profile.hrMax
 
     // Health Monitor shows live HR too, so it must keep the realtime stream on while it's visible —
     // otherwise leaving the Live page stopped the stream and this page froze (issue #18). Ref-counted
@@ -67,7 +68,7 @@ fun HealthScreen(vm: AppViewModel) {
         } else {
             // ScreenScaffold applies a 20dp arrangement gap between its direct children;
             // a small top-up reaches the section gap (28dp) used between macOS sections.
-            HeartRateSection(live = live)
+            HeartRateSection(live = live, hrMax = hrMax)
             Spacer(Modifier.height(Metrics.sectionGap - 20.dp))
             VitalsSection(today = today)
         }
@@ -90,9 +91,9 @@ private fun hrIsDerived(live: LiveState): Boolean =
     (live.heartRate ?: 0) <= 0 && live.rr.isNotEmpty()
 
 /** HR as a fraction of HR-max (0..1). */
-private fun hrFraction(hr: Int?): Double {
-    if (hr == null || HR_MAX_DEFAULT <= 0) return 0.0
-    return (hr.toDouble() / HR_MAX_DEFAULT).coerceIn(0.0, 1.0)
+private fun hrFraction(hr: Int?, hrMax: Int): Double {
+    if (hr == null || hrMax <= 0) return 0.0
+    return (hr.toDouble() / hrMax).coerceIn(0.0, 1.0)
 }
 
 /** Current zone 1..5 from %HR-max (WHOOP/Karvonen-style bands: 50/60/70/80/90). */
@@ -121,11 +122,11 @@ private fun hrSeries(history: List<Int>, live: LiveState, hr: Int?): List<Double
 // MARK: - Heart rate hero (live)
 
 @Composable
-private fun HeartRateSection(live: LiveState) {
+private fun HeartRateSection(live: LiveState, hrMax: Int) {
     val displayHr = displayHr(live)
     val hasLiveHr = displayHr != null
     val derived = hrIsDerived(live)
-    val fraction = hrFraction(displayHr)
+    val fraction = hrFraction(displayHr, hrMax)
     val zone = hrZone(fraction)
     // Accumulate the streamed HR over time so the hero chart actually moves (issue #18 — it used to
     // derive from sparse R-R and flat-line). Lives in UI state; resets when you leave the screen.
@@ -214,7 +215,7 @@ private fun HeartRateSection(live: LiveState) {
                 HeartRateFooter(
                     zone = if (hasLiveHr) "Z$zone" else "—",
                     percentMax = if (hasLiveHr) "${(fraction * 100).roundToInt()}%" else "—",
-                    maxHr = "$HR_MAX_DEFAULT",
+                    maxHr = "$hrMax",
                     state = if (hasLiveHr) "STREAMING" else "IDLE",
                 )
             }
