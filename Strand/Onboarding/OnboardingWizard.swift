@@ -758,7 +758,7 @@ private struct ImportStep: View {
                 if let summary = model.importSummary {
                     Text(summary)
                         .font(StrandFont.subhead)
-                        .foregroundStyle(summary.localizedCaseInsensitiveContains("failed") ? StrandPalette.statusWarning : StrandPalette.statusPositive)
+                        .foregroundStyle(model.importFailed ? StrandPalette.statusWarning : StrandPalette.statusPositive)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: 460)
                 }

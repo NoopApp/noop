@@ -22,10 +22,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -45,8 +46,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -56,6 +55,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,7 +65,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -78,7 +77,6 @@ import com.noop.ingest.WhoopCsvImporter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlin.math.roundToInt
 
 // MARK: - OnboardingScreen
 //
@@ -89,9 +87,58 @@ import kotlin.math.roundToInt
 
 @Composable
 fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
+    val context = LocalContext.current
     val pages = remember { OnboardingPage.entries }
-    var pageIndex by remember { mutableIntStateOf(0) }
+    // rememberSaveable so a config change (rotation, dark-mode, font-scale, locale,
+    // multi-window) doesn't recreate the Activity and throw the user back to page 1.
+    var pageIndex by rememberSaveable { mutableIntStateOf(0) }
     val page = pages[pageIndex]
+
+    fun complete() {
+        // Onboarding deferred the foreground promotion; do it now if a strap is live.
+        viewModel.promoteBackgroundConnectionIfActive()
+        onFinished()
+    }
+
+    // Notification permission is requested here at the end — it powers the background keep-alive
+    // notification — rather than at launch. We proceed regardless of the result (best-effort).
+    val notifPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { complete() }
+
+    fun finishOnboarding() {
+        val needsNotif = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        if (needsNotif) notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) else complete()
+    }
+
+    // BLE permission is requested as the user leaves the Bluetooth explainer step (its CTA), so the
+    // OS prompt lands right after the screen that justifies it — never on top of the Connect step,
+    // which by then just scans. We advance once the prompt is dismissed, whatever the result.
+    val blePerms = remember {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+        } else {
+            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+    }
+    val bleAdvanceLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { pageIndex++ }
+
+    fun advance() {
+        if (page == OnboardingPage.Bluetooth) {
+            val granted = blePerms.all {
+                ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+            }
+            if (!granted) {
+                bleAdvanceLauncher.launch(blePerms)
+                return
+            }
+        }
+        pageIndex++
+    }
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -100,8 +147,12 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 24.dp)
-                .padding(top = 42.dp, bottom = 30.dp),
+                // Edge-to-edge (setDecorFitsSystemWindows=false) draws under the system bars,
+                // so inset for them here — the onboarding has no Scaffold to do it for us.
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(horizontal = Metrics.screenPadding)
+                .padding(top = 16.dp, bottom = 16.dp),
         ) {
             OnboardingTopBar(
                 page = pageIndex + 1,
@@ -136,9 +187,9 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
                 onBack = { if (pageIndex > 0) pageIndex-- },
                 onNext = {
                     if (pageIndex == pages.lastIndex) {
-                        onFinished()
+                        finishOnboarding()
                     } else {
-                        pageIndex++
+                        advance()
                     }
                 },
             )
@@ -205,8 +256,8 @@ private fun OnboardingFooter(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(top = Metrics.gap),
+        horizontalArrangement = Arrangement.spacedBy(Metrics.gap),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         OutlinedButton(
@@ -317,10 +368,10 @@ private fun WhatItDoesStep() {
         title = "What NOOP does",
         subtitle = "Three quiet promises.",
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
             FeatureRow(
                 icon = Icons.Filled.AutoGraph,
-                tint = Palette.recovery100,
+                tint = Palette.accent,
                 title = "See recovery, clearly",
                 body = "A calm ring rolls HRV, resting heart rate and sleep into one read on whether to push or rest.",
             )
@@ -346,7 +397,7 @@ private fun ExpectationsStep() {
         title = "What to expect",
         subtitle = "A few honest words, so nothing is a surprise.",
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
             AppChangelog.expectations.forEach { e ->
                 ExpectationCard(e)
             }
@@ -358,7 +409,7 @@ private fun ExpectationsStep() {
 private fun BluetoothStep() {
     StepShell(
         title = "A quick word before you connect",
-        subtitle = "Android will ask for Bluetooth permission so NOOP can find your strap.",
+        subtitle = "NOOP uses Bluetooth to find your strap. When you continue, allow the permission so it can scan.",
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -389,7 +440,7 @@ private fun WearStep() {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            IconBadge(icon = Icons.Filled.Sensors, tint = Palette.recovery078, size = 86)
+            IconBadge(icon = Icons.Filled.Sensors, tint = Palette.accent, size = 86)
             NoopCard(padding = 18.dp) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Checkline("Wear it snug on your wrist or bicep, sensor against skin.")
@@ -412,28 +463,42 @@ private fun ConnectStep(viewModel: AppViewModel) {
     } else {
         arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
     }
+    // Onboarding connects without promoting the foreground service (persistent notification);
+    // OnboardingScreen promotes it on completion. See AppViewModel.connect(promoteService).
     val blePermLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
-    ) { viewModel.connect() }
-    var autoConnectStarted by remember { mutableStateOf(false) }
+    ) { grants -> if (grants.values.all { it }) viewModel.connect(promoteService = false) }
+    var autoConnectStarted by rememberSaveable { mutableStateOf(false) }
 
     fun requestConnect() {
         val granted = blePerms.all {
             ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
         }
-        if (granted) viewModel.connect() else blePermLauncher.launch(blePerms)
+        if (granted) viewModel.connect(promoteService = false) else blePermLauncher.launch(blePerms)
     }
 
     LaunchedEffect(Unit) {
         if (!autoConnectStarted && !live.bonded && !live.connected && !live.scanning) {
             autoConnectStarted = true
-            requestConnect()
+            // Only auto-scan if permission is already in hand (granted on the Bluetooth step). We
+            // never raise the OS prompt here — that would land on top of this step's own content.
+            val granted = blePerms.all {
+                ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+            }
+            if (granted) viewModel.connect(promoteService = false)
         }
     }
 
+    val bleGranted = blePerms.all {
+        ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+    }
     StepShell(
         title = "Find your strap",
-        subtitle = if (live.bonded) "Bonded. You can keep going." else "NOOP starts looking as soon as this step appears. You can keep going while it bonds.",
+        subtitle = when {
+            live.bonded -> "Bonded. You can keep going."
+            bleGranted -> "NOOP starts looking as soon as this step appears. You can keep going while it bonds."
+            else -> "Allow Bluetooth and tap Scan to find your strap — or keep going and connect later."
+        },
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -539,14 +604,15 @@ private fun ProfileStep() {
     ) {
         NoopCard(padding = 18.dp) {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                ProfileStepperRow(
-                    label = "Age",
-                    value = "${profile.age}",
-                    unit = "yrs",
-                    accessibility = "Age, ${profile.age} years",
-                    onMinus = { mutate { profile.age -= 1 } },
-                    onPlus = { mutate { profile.age += 1 } },
-                )
+                ProfileFieldRow(label = "Age") {
+                    StepperField(
+                        value = "${profile.age}",
+                        unit = "yrs",
+                        accessibility = "Age, ${profile.age} years",
+                        onMinus = { mutate { profile.age -= 1 } },
+                        onPlus = { mutate { profile.age += 1 } },
+                    )
+                }
                 ThinDivider()
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Overline("Sex", color = Palette.textTertiary)
@@ -560,25 +626,25 @@ private fun ProfileStep() {
                     )
                 }
                 ThinDivider()
-                ProfileSliderRow(
-                    label = "Weight",
-                    value = profile.weightKg,
-                    display = "%.1f kg".format(profile.weightKg),
-                    valueRange = 30f..250f,
-                    onValueChange = { v ->
-                        mutate { profile.weightKg = (v * 2f).roundToInt().toDouble() / 2.0 }
-                    },
-                )
+                ProfileFieldRow(label = "Weight") {
+                    StepperField(
+                        value = "%.1f".format(profile.weightKg),
+                        unit = "kg",
+                        accessibility = "Weight in kilograms",
+                        onMinus = { mutate { profile.weightKg = (profile.weightKg - 0.5).coerceIn(30.0, 250.0) } },
+                        onPlus = { mutate { profile.weightKg = (profile.weightKg + 0.5).coerceIn(30.0, 250.0) } },
+                    )
+                }
                 ThinDivider()
-                ProfileSliderRow(
-                    label = "Height",
-                    value = profile.heightCm,
-                    display = "${profile.heightCm.roundToInt()} cm",
-                    valueRange = 120f..230f,
-                    onValueChange = { v ->
-                        mutate { profile.heightCm = v.roundToInt().toDouble() }
-                    },
-                )
+                ProfileFieldRow(label = "Height") {
+                    StepperField(
+                        value = "%.0f".format(profile.heightCm),
+                        unit = "cm",
+                        accessibility = "Height in centimetres",
+                        onMinus = { mutate { profile.heightCm = (profile.heightCm - 1).coerceIn(120.0, 230.0) } },
+                        onPlus = { mutate { profile.heightCm = (profile.heightCm + 1).coerceIn(120.0, 230.0) } },
+                    )
+                }
             }
         }
 
@@ -601,8 +667,10 @@ private fun ProfileStep() {
 private fun ImportStep(viewModel: AppViewModel) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    // busy stays transient: a config change / process death cancels the import coroutine,
+    // so a persisted busy=true would strand the buttons disabled with nothing running.
     var busy by remember { mutableStateOf(false) }
-    var status by remember { mutableStateOf<String?>(null) }
+    var status by rememberSaveable { mutableStateOf<String?>(null) }
 
     fun runImport(block: suspend () -> ImportSummary) {
         busy = true
@@ -857,15 +925,9 @@ private fun IconSquare(icon: ImageVector, tint: Color) {
     }
 }
 
+/** Label-left, control-right form row — mirrors Settings' FormRow so profile editors match. */
 @Composable
-private fun ProfileStepperRow(
-    label: String,
-    value: String,
-    unit: String,
-    accessibility: String,
-    onMinus: () -> Unit,
-    onPlus: () -> Unit,
-) {
+private fun ProfileFieldRow(label: String, control: @Composable () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -873,68 +935,8 @@ private fun ProfileStepperRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Overline(label, color = Palette.textTertiary)
-            Text("$value $unit", style = NoopType.bodyNumber, color = Palette.textPrimary)
-        }
-        StepperButtons(accessibility = accessibility, onMinus = onMinus, onPlus = onPlus)
-    }
-}
-
-@Composable
-private fun StepperButtons(accessibility: String, onMinus: () -> Unit, onPlus: () -> Unit) {
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.semantics { contentDescription = accessibility },
-    ) {
-        StepperButton(symbol = "-", label = "Decrease $accessibility", onClick = onMinus)
-        StepperButton(symbol = "+", label = "Increase $accessibility", onClick = onPlus)
-    }
-}
-
-@Composable
-private fun StepperButton(symbol: String, label: String, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .size(34.dp)
-            .clip(RoundedCornerShape(9.dp))
-            .background(Palette.surfaceInset)
-            .border(1.dp, Palette.hairline, RoundedCornerShape(9.dp))
-            .clickable(onClick = onClick)
-            .semantics { contentDescription = label },
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(symbol, style = NoopType.body.copy(fontWeight = FontWeight.SemiBold), color = Palette.textPrimary)
-    }
-}
-
-@Composable
-private fun ProfileSliderRow(
-    label: String,
-    value: Double,
-    display: String,
-    valueRange: ClosedFloatingPointRange<Float>,
-    onValueChange: (Float) -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Overline(label, color = Palette.textTertiary)
-            Spacer(Modifier.weight(1f))
-            Text(display, style = NoopType.bodyNumber, color = Palette.textPrimary, modifier = Modifier.widthIn(min = 82.dp))
-        }
-        Slider(
-            value = value.toFloat().coerceIn(valueRange.start, valueRange.endInclusive),
-            onValueChange = onValueChange,
-            valueRange = valueRange,
-            colors = SliderDefaults.colors(
-                thumbColor = Palette.accent,
-                activeTrackColor = Palette.accent,
-                inactiveTrackColor = Palette.hairline,
-            ),
-        )
+        Text(label, style = NoopType.body, color = Palette.textPrimary, modifier = Modifier.weight(1f))
+        control()
     }
 }
 

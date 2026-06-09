@@ -41,6 +41,10 @@ final class AppModel: ObservableObject {
     /// Import status surfaced to the Data Sources screen.
     @Published var importing = false
     @Published var importSummary: String?
+    /// Typed failure flag for the last import — drives the summary's warning styling so we
+    /// don't have to substring-match the human-readable message (which misses errors like
+    /// "Couldn't open the local store.").
+    @Published var importFailed = false
 
     /// Smoothed, display-ready live heart rate — median over a short window, spike-filtered.
     /// Every screen should show THIS, not the raw per-beat value (which swings with HRV).
@@ -263,12 +267,13 @@ final class AppModel: ObservableObject {
     func importWhoop(url: URL) {
         importing = true
         importSummary = nil
+        importFailed = false
         Task {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             do {
                 guard let store = await repo.storeHandle() else {
-                    importSummary = "Couldn't open the local store."; importing = false; return
+                    importSummary = "Couldn't open the local store."; importFailed = true; importing = false; return
                 }
                 let summary = try await WhoopImporter.importExport(url: url, into: store, deviceId: deviceId)
                 await repo.refresh()
@@ -280,6 +285,7 @@ final class AppModel: ObservableObject {
                 importSummary = "Imported \(summary.recordCount) records\(span)"
             } catch {
                 importSummary = "Import failed: \(error)"
+                importFailed = true
             }
             importing = false
         }
@@ -290,18 +296,20 @@ final class AppModel: ObservableObject {
     func importAppleHealth(url: URL) {
         importing = true
         importSummary = nil
+        importFailed = false
         Task {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             do {
                 guard let store = await repo.storeHandle() else {
-                    importSummary = "Couldn't open the local store."; importing = false; return
+                    importSummary = "Couldn't open the local store."; importFailed = true; importing = false; return
                 }
                 let summary = try await AppleHealthImport.importExport(url: url, into: store, deviceId: appleDeviceId)
                 await repo.refresh()
                 importSummary = "Apple Health: imported \(summary.recordCount) records"
             } catch {
                 importSummary = "Apple Health import failed: \(error)"
+                importFailed = true
             }
             importing = false
         }

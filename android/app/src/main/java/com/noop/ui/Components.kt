@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -45,6 +46,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -527,6 +529,56 @@ fun ScreenScaffold(
             }
         }
         content()
+    }
+}
+
+// MARK: - Stepper field (Compose has no Stepper — tabular value + round −/+ buttons)
+//
+// The canonical profile editor used by both Settings and onboarding. Reuse this
+// rather than forking sliders or bespoke button sizes, so every numeric profile
+// field reads and behaves identically across the app.
+
+@Composable
+fun StepperField(
+    value: String,
+    accessibility: String,
+    unit: String? = null,
+    valueColor: Color = Palette.textPrimary,
+    onMinus: () -> Unit,
+    onPlus: () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.semantics { contentDescription = accessibility },
+    ) {
+        Text(
+            value,
+            style = NoopType.bodyNumber,
+            color = valueColor,
+            modifier = Modifier.widthIn(min = 44.dp),
+        )
+        if (unit != null) {
+            Text(unit, style = NoopType.caption, color = Palette.textTertiary)
+        }
+        StepperButton(symbol = "−", onClick = onMinus, label = "Decrease $accessibility")
+        StepperButton(symbol = "+", onClick = onPlus, label = "Increase $accessibility")
+    }
+}
+
+@Composable
+fun StepperButton(symbol: String, onClick: () -> Unit, label: String) {
+    Box(
+        modifier = Modifier
+            .size(30.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(Palette.surfaceInset)
+            .border(1.dp, Palette.hairline, RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(symbol, style = NoopType.body.copy(fontWeight = FontWeight.SemiBold), color = Palette.textPrimary)
     }
 }
 

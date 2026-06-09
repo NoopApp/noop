@@ -53,7 +53,13 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        requestBlePermissions()
+        // Only pre-warm permissions at launch for already-onboarded users. First-run onboarding
+        // requests each permission at the step that explains it — Bluetooth when the Connect step
+        // appears, notifications when it enables the background keep-alive — so the OS prompt never
+        // lands before the screen that justifies it.
+        if (NoopPrefs.of(this).getBoolean(NoopPrefs.KEY_ONBOARDED, false)) {
+            requestBlePermissions()
+        }
 
         setContent {
             NoopTheme {
