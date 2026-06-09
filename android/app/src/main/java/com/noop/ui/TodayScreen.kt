@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.noop.analytics.Baselines
 import com.noop.analytics.ReadinessEngine
 import com.noop.data.DailyMetric
 import com.noop.data.WorkoutRow
@@ -64,6 +65,11 @@ fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
     // 14-day trailing calendar window ending on the phone's actual local day.
     // Old imports stay in history, but they do not fill the Today trend tiles.
     val window = remember14(days)
+
+    // Recovery cold-start: recovery is null until the HRV baseline crosses the seed gate
+    // (Baselines.minNightsSeed valid nights). Show honest "calibrating — N of 4 nights" progress
+    // instead of a bare "No Data" so a new BLE-only user knows scores are coming, not broken.
+    val recoveryCalibration: Int? = recoveryCalibrationNights(days, today?.recovery != null)
 
     LaunchedEffect(days) {
         val now = System.currentTimeMillis() / 1000
@@ -135,14 +141,18 @@ fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
         Row(horizontalArrangement = Arrangement.spacedBy(Metrics.gap)) {
             NoopCard(modifier = Modifier.weight(1f)) {
                 Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    TodayRecoveryRing(today)
+                    TodayRecoveryRing(today, recoveryCalibration)
                 }
             }
             InsightCard(
                 modifier = Modifier.weight(1f),
                 category = "Recovery",
-                status = synthesisWord(today?.recovery),
-                detail = synthesisDetail(today),
+                status = if (recoveryCalibration != null) "Calibrating" else synthesisWord(today?.recovery),
+                detail = if (recoveryCalibration != null) {
+                    "Learning your baseline — $recoveryCalibration of ${Baselines.minNightsSeed} nights."
+                } else {
+                    synthesisDetail(today)
+                },
                 statusColor = today?.recovery?.let { Palette.recoveryColor(it) } ?: Palette.textTertiary,
             )
         }
@@ -154,7 +164,7 @@ fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
         // METRICS — uniform tile grid (two columns), each tile with a 14-day sparkline.
         Spacer(Modifier.padding(top = (Metrics.sectionGap - 20.dp) / 2))
         SectionHeader("Key Metrics", overline = "Today", trailing = "14-day trend")
-        MetricGrid(today, window)
+        MetricGrid(today, window, recoveryCalibration)
         HeartRateTrendCard(viewModel, days)
         TodayWorkoutsSection(footer.recentWorkouts)
         TodaySourcesSection(footer)
@@ -162,7 +172,7 @@ fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
 }
 
 @Composable
-private fun TodayRecoveryRing(day: DailyMetric?) {
+private fun TodayRecoveryRing(day: DailyMetric?, calibratingNights: Int? = null) {
     val hasRecovery = day?.recovery != null
     Box(contentAlignment = Alignment.Center) {
         RecoveryRing(
@@ -175,14 +185,15 @@ private fun TodayRecoveryRing(day: DailyMetric?) {
         if (!hasRecovery) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    text = NO_DATA,
+                    text = if (calibratingNights != null) "Calibrating" else NO_DATA,
                     style = NoopType.title2,
                     color = Palette.textTertiary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = ringSupporting(day),
+                    text = calibratingNights?.let { "$it of ${Baselines.minNightsSeed} nights" }
+                        ?: ringSupporting(day),
                     style = NoopType.footnote,
                     color = Palette.textSecondary,
                     maxLines = 1,
@@ -195,22 +206,43 @@ private fun TodayRecoveryRing(day: DailyMetric?) {
 }
 
 /**
+ * Recent nights carrying a usable nightly HRV — the signal that seeds the recovery baseline. While
+ * recovery is still null and this count is in [1, seed), it is the honest "calibrating N of <seed>"
+ * progress shown in place of "No Data"; null once recovery exists or no night has data yet. Pure +
+ * unit-tested (see RecoveryCalibrationTest). Mirrors Baselines.minNightsSeed as the seed gate.
+ */
+internal fun recoveryCalibrationNights(
+    days: List<DailyMetric>,
+    hasRecovery: Boolean,
+    seed: Int = Baselines.minNightsSeed,
+): Int? {
+    if (hasRecovery) return null
+    // Match the baseline's validity predicate, not just non-null: Baselines.update only advances the
+    // recovery seed (nValid) for nights whose avgHrv is within the HRV config bounds, so an implausible
+    // out-of-range night must NOT be counted here either — else the displayed N could over-state nValid.
+    val cfg = Baselines.hrvCfg
+    return days.count { val v = it.avgHrv; v != null && v in cfg.minVal..cfg.maxVal }
+        .takeIf { it in 1 until seed }
+}
+
+/**
  * The full 14-day metric grid, mirroring the macOS LazyVGrid order:
  * Recovery, Day Strain, Sleep, HRV, Resting HR, Blood Oxygen, Respiratory,
  * Steps, Weight, Calories. Each tile is a fixed-height [SparkStatTile] so the
  * grid tiles perfectly with no empty cells.
  */
 @Composable
-private fun MetricGrid(d: DailyMetric?, w: Window) {
+private fun MetricGrid(d: DailyMetric?, w: Window, recoveryCalibration: Int? = null) {
     val tiles = listOf<@Composable (Modifier) -> Unit>(
         { m ->
             SparkStatTile(
                 modifier = m,
                 label = "Recovery",
-                value = d?.recovery?.let { "${it.roundToInt()}%" } ?: NO_DATA,
+                value = d?.recovery?.let { "${it.roundToInt()}%" }
+                    ?: recoveryCalibration?.let { "$it/${Baselines.minNightsSeed}" } ?: NO_DATA,
                 caption = d?.recovery?.let {
                     Palette.recoveryState(it).lowercase().replaceFirstChar { c -> c.uppercase() }
-                },
+                } ?: recoveryCalibration?.let { "Calibrating" },
                 accent = d?.recovery?.let { Palette.recoveryColor(it) } ?: Palette.textTertiary,
                 spark = w.recovery,
                 sparkColor = Palette.accent,
