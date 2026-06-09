@@ -60,8 +60,9 @@ final class Whoop5HistoricalTests: XCTestCase {
         // verified against this real worn frame. (Fields that did NOT decode consistently on this
         // firmware — cardiac_flags@33, state@81, perfusion@69/71 — are deliberately not decoded.)
         let p = parseFrame(bytes(historicalHex), family: .whoop5).parsed
-        // skin temperature (AS6221 thermistor) u16/100 °C — ~30.6 °C on a worn wrist.
-        XCTAssertEqual(p["skin_temperature"]?.doubleValue ?? 0, 30.57, accuracy: 0.05)
+        // skin temperature: the raw AS6221 u16 register (scale-agnostic). °C = raw / 128 — the AS6221's
+        // native 7.8125 m°C/LSB. Raw kept in the record so the absolute scale (/128 vs /100) isn't baked in.
+        XCTAssertEqual(p["skin_temp_raw"]?.intValue, 3057)
         // dynamic (gravity-removed) acceleration — small for a still wrist, gated to [0, 8] g.
         let dyn = p["dynamic_acceleration"]?.doubleValue ?? -1
         XCTAssertTrue((0.0...8.0).contains(dyn))
@@ -72,13 +73,15 @@ final class Whoop5HistoricalTests: XCTestCase {
     }
 
     func testHistoricalV18SkinTempTracksWristContact() {
-        // Proof @73 is the real skin-temp sensor: worn it reads skin (~30.6 °C); off-wrist the same
-        // thermistor reads ambient (~22.5 °C) — both pass the [20, 45] guard, so a valid-but-cooler
-        // off-wrist reading is still captured rather than dropped.
+        // Proof @73 is the real skin-temp sensor: worn it reads skin; off-wrist the same thermistor
+        // reads a cooler ambient value — both pass the guard, so a valid-but-cooler off-wrist reading is
+        // still captured rather than dropped. Asserted on the raw register (worn 3057 > off-wrist 2247;
+        // °C = raw/128 → ~23.9 worn / ~17.6 ambient — the absolute scale awaits a contact-thermometer).
         let worn = parseFrame(bytes(historicalHex), family: .whoop5).parsed
         let off = parseFrame(bytes(historicalOffWristHex), family: .whoop5).parsed
-        XCTAssertEqual(worn["skin_temperature"]?.doubleValue ?? 0, 30.57, accuracy: 0.05)
-        XCTAssertEqual(off["skin_temperature"]?.doubleValue ?? 0, 22.47, accuracy: 0.05)
+        XCTAssertEqual(worn["skin_temp_raw"]?.intValue, 3057)
+        XCTAssertEqual(off["skin_temp_raw"]?.intValue, 2247)
+        XCTAssertLessThan(off["skin_temp_raw"]?.intValue ?? .max, worn["skin_temp_raw"]?.intValue ?? 0)
     }
 
     func testHeartRateOffsetIsNotTheNaivePlusFour() {

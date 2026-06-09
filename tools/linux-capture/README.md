@@ -153,7 +153,7 @@ accelerometer/gravity vector.
   record layout are kept raw (`unix`/`hr` = NULL) pending ground truth.
 
 ```
-  whoop_sync.py sync ─► whoop4.db (SQLite, device-scoped) ─► export ─► capture.json ─► whoop-decode
+  whoop_sync.py sync ─► whoop.db (SQLite, device-scoped) ─► export ─► capture.json ─► whoop-decode
    (bleak / BlueZ)        persist-before-ack + trim cursor     (per device)               (HR/RR/resp/accel)
 ```
 
@@ -195,6 +195,7 @@ python3 whoop_sync.py status  --db captures/whoop.db [--address ..]     # cursor
 python3 whoop_sync.py devices --db captures/whoop.db                    # every strap/subject in the store
 python3 whoop_sync.py export  --db captures/whoop.db --address .. --out all.json [--only-type 47]
 python3 whoop_sync.py label   --db .. --address .. --activity walking --start 19:58 --end 20:43
+python3 whoop_sync.py decode  --db .. --address .. [--full]             # raw frames → the decoded values
 ```
 
 `sync` auto-reconnects and resumes on a mid-session drop (up to `--max` seconds); it stops on
@@ -214,11 +215,96 @@ accept epoch seconds, ISO-8601, or `HH:MM` (today).
 | `devices` | `id, address, name, subject, model` | one row per strap / subject |
 | `frames` | `device_id, recv_ms, char, inner_type, unix, hr, hex` | every frame; deduped `UNIQUE(device_id, hex)` |
 | `sync_state` | `(device_id, k) → v` | per-device `last_trim` cursor, coverage range, `history_complete` |
-| `labels` | `device_id, start_unix, end_unix, activity, note` | activity labels for analysis / ML training |
+| `labels` | `device_id, start_unix, end_unix, activity, note` | activity labels for analysis |
 
-Feed `export`'s `capture.json` to `whoop-decode` (below); then the decoded HR series → the strain
-engine (`extracted/layer1-strain-engine/`), and the HR/RR/respiration + accelerometer fields →
-the sleep stager.
+Feed `export`'s `capture.json` to `whoop-decode` (below) to turn the synced frames into decoded
+HR / R-R / respiration / accelerometer fields for downstream analysis.
+
+### Decoded values (`decode_features.py`) — raw frames → the actual readings
+
+`sync` stores raw frames (hex) durably, but hex isn't usable directly. The decode stage turns those
+frames into **per-second value tables in the same DB**, so you have the actual readings — HR, R-R,
+gravity, skin-temperature, PPG, events — pulled straight out of the raw WHOOP data. It runs
+automatically as the **last stage of `sync`**, and standalone:
+
+```bash
+python3 whoop_sync.py decode --db captures/whoop.db --address AA:BB:..          # decode new frames since last run
+python3 whoop_sync.py decode --db captures/whoop.db --address AA:BB:.. --full   # re-decode everything
+```
+
+**It reuses the Swift `whoop-decode` as the one decoder of record — it does _not_ re-implement
+decoding in Python.** The bridge shells out to `whoop-decode --json`, maps the decoded fields into the
+tables below, and stores nothing the decoder didn't produce. So the iOS/macOS/Android apps, the CLI,
+and this decode step can never drift on frame offsets: there is exactly one decoder, verified against
+real hardware. The decode cursor lives in `sync_state` (`last_decoded_frame_id`), so a run only decodes
+**new** frames; re-runs are **idempotent**.
+
+**Why this development matters for the synced data.** The raw offload is the *irreplaceable* part —
+once the strap acks a chunk it may **trim (delete) it** — so capture must never be blocked or risked.
+Decoding is the *rebuildable* part (features can always be re-derived from `frames`). The bridge
+respects that split: decode runs **after** the offload fully drains, never inside the persist-before-ack
+loop, and is **best-effort** — if `whoop-decode` isn't built or errors, the raw frames are already safe
+and `sync` still succeeds; just re-run `decode`. The payoff: one `sync` leaves the DB with **both** the
+durable raw frames **and** a complete, query-ready decoded view — the bridge between "we captured it"
+and "we can learn from it". Without it, every consumer would have to re-export and re-decode the hex
+themselves and risk diverging on the offsets.
+
+#### Tables
+
+| Table | Key | One row per |
+|---|---|---|
+| `feat_second` | `(device_id, unix)` | second — the wide design matrix |
+| `feat_rr` | `(device_id, unix, idx)` | R-R interval within a second |
+| `feat_ppg` | `(device_id, unix, sample_idx, channel)` | optical sample (WHOOP 5 v26, 24/sec) |
+| `feat_event` | `(device_id, unix, kind)` | strap event |
+
+#### Column reference (what each value means, as far as verified)
+
+`feat_second` — one row per second; the decoded values for that second:
+
+| Column | Unit / type | Meaning & caveats |
+|---|---|---|
+| `device_id` | int (FK `devices.id`) | which strap / subject this second belongs to |
+| `unix` | UTC seconds | timestamp, from the **decoder's** `unix` field (authoritative across record versions; v26 frames carry NULL `frames.unix`, so we never rely on the row's column) |
+| `hr` | bpm (u8) | heart rate. Sensor-startup/no-contact `hr==0` is stored as **NULL**, not 0, so it can't drag down averages |
+| `gx`, `gy`, `gz` | g (float) | accelerometer / gravity vector; magnitude ≈ 1.0 at rest. The dominant **motion** signal for activity recognition |
+| `rr_count` | int | number of beat-to-beat (R-R) intervals decoded in this second; NULL when none |
+| `rr_mean_ms` | ms | mean R-R interval (≈ 60000/`hr`) |
+| `rmssd` | ms | root-mean-square of successive R-R differences — standard short-window **HRV**; NULL when `rr_count` < 2 |
+| `spo2_red`, `spo2_ir` | raw ADC counts | red & IR optical channel intensities. **Not a blood-oxygen %** — the red/IR ratio underlies SpO₂, but we store raw counts (no calibration invented). WHOOP 4 (v24) only |
+| `skin_temp_raw` | raw ADC | skin-temperature sensor reading. **Not °C** — absolute raw count (the app derives a personal-baseline deviation; we keep the raw value). WHOOP 4 (v24) only |
+| `resp_raw` | raw ADC | respiration-related raw reading. WHOOP 4 (v24) only |
+| `record_version` | int | source record layout: **24** = WHOOP 4; **18 / 26** = WHOOP 5. Tells the consumer which columns are real vs NULL for this row |
+
+> **Provenance via NULLs.** WHOOP 5 **v18** leaves the optical region unmapped (no verified offsets), so
+> `spo2_*` / `skin_temp_raw` / `resp_raw` are **NULL** there; WHOOP 4 **v24** fills them. Per project rule
+> we never invent offsets — an honest NULL beats a fabricated number.
+
+`feat_rr` — individual beat-to-beat intervals (for HRV beyond the per-second summary):
+
+| Column | Unit | Meaning |
+|---|---|---|
+| `idx` | int | position of the interval within its second (0 … `rr_count`-1) |
+| `rr_ms` | ms | one R-R (inter-beat) interval |
+
+`feat_ppg` — the WHOOP 5 **v26** optical photoplethysmography waveform (the raw pulse signal):
+
+| Column | Unit | Meaning |
+|---|---|---|
+| `sample_idx` | int 0–23 | position within the 24-sample (≈ 24 Hz) burst for that second |
+| `channel` | int | raw optical channel id as the decoder reports it. **No colour claim** — which physical LED (green/red/IR) each id maps to is unverified, so the raw id is surfaced as-is |
+| `value` | relative ADC (signed) | one waveform sample. A **relative** optical intensity (AC+DC, uncalibrated) — useful for pulse shape / HR / perfusion features, **not** an absolute measurement |
+
+`feat_event` — strap lifecycle events (useful for non-wear masking and context):
+
+| Column | Type | Meaning |
+|---|---|---|
+| `kind` | text | event label as the decoder names it, e.g. `BLE_CONNECTION_UP(11)`, `BATTERY_LEVEL(3)`; events this firmware emits that the schema doesn't name stay raw, e.g. `0x7B(123)` (never cross-borrowed from another enum) |
+| `event_num` | int / NULL | numeric event id when the decoder emits a number; NULL when `kind` is a named string |
+| `payload_json` | text (JSON) | the event's remaining decoded fields (e.g. battery `soc`/`mv`), keys sorted |
+
+> The decoded-value tables are **derived state** — delete them any time and rebuild with `decode --full`; the
+> raw `frames` are the source of truth. Join `feat_second` to `labels` on `unix` for a labelled training set.
 
 ## Decode (`whoop-decode`)
 
