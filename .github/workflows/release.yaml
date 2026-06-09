@@ -53,12 +53,12 @@ jobs:
       - name: Generate Xcode Project
         run: xcodegen generate
 
-      # Nutzt 'build' statt 'archive' und steuert direkt das iOS-Target an
+      # Baut exakt das NOOPiOS-Target, welches die Mac-Dateien korrekt ausschließt
       - name: Build Unsigned iOS App
         run: |
           xcodebuild build \
             -project Strand.xcodeproj \
-            -target StrandiOS \
+            -target NOOPiOS \
             -sdk iphoneos \
             -configuration Release \
             CONFIGURATION_BUILD_DIR="$(pwd)/build/ios_output" \
