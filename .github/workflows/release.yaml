@@ -53,26 +53,25 @@ jobs:
       - name: Generate Xcode Project
         run: xcodegen generate
 
-      # Wir nutzen das funktionierende Scheme, schalten aber den fehlerhaften Icon-Check ab
-      - name: Build Unsigned iOS Archive
+      # Nutzt 'build' statt 'archive' und steuert direkt das iOS-Target an
+      - name: Build Unsigned iOS App
         run: |
-          xcodebuild archive \
+          xcodebuild build \
             -project Strand.xcodeproj \
-            -scheme Strand \
+            -target StrandiOS \
             -sdk iphoneos \
             -configuration Release \
-            -archivePath build/StrandiOS.xcarchive \
+            CONFIGURATION_BUILD_DIR="$(pwd)/build/ios_output" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            CODE_SIGN_ENTITLEMENTS="" \
-            ASSETCATALOG_COMPILER_APPICON_NAME="" # Erlaubt den Build ohne Mac-Icon-Validierung
+            CODE_SIGN_ENTITLEMENTS=""
 
-      # Sucht gezielt im iOS-Anwendungsordner des Archivs nach der .app
+      # Holt die App aus dem Ausgabeordner und packt sie in die .ipa
       - name: Package iOS App to .ipa
         run: |
           mkdir -p build/Payload
-          cp -R build/StrandiOS.xcarchive/Products/Applications/*.app build/Payload/
+          cp -R build/ios_output/*.app build/Payload/
           cd build
           zip -r ../NOOP-iOS-unsigned.ipa Payload/
 
