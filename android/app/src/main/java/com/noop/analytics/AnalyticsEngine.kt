@@ -5,6 +5,7 @@ import com.noop.data.GravitySample
 import com.noop.data.HrSample
 import com.noop.data.RespSample
 import com.noop.data.RrInterval
+import com.noop.data.StepSample
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
@@ -80,6 +81,15 @@ object AnalyticsEngine {
         rr: List<RrInterval> = emptyList(),
         resp: List<RespSample> = emptyList(),
         gravity: List<GravitySample> = emptyList(),
+        steps: List<StepSample> = emptyList(),
+        // Calendar-day-scoped overrides for the ADDITIVE daily totals (steps + activeKcalEst) ONLY.
+        // When null, the totals fall back to the same window the rest of the analysis uses (preserving
+        // the pure-function contract). The caller (IntelligenceEngine) supplies a full
+        // [midnightUtc(day), midnightUtc(day)+86400) read here so a PAST day's late hours — which fall
+        // outside the ~42h night-detection window when the current UTC time-of-day is before noon — are
+        // still counted. Sleep / recovery / strain / workouts keep using hr/rr/resp/gravity/steps.
+        dayHr: List<HrSample>? = null,
+        daySteps: List<StepSample>? = null,
         profile: UserProfile,
         baselines: ProfileBaselines = ProfileBaselines(),
         maxHROverride: Double? = null,
@@ -127,6 +137,18 @@ object AnalyticsEngine {
             }
         }
 
+        // Nightly APPROXIMATE respiratory rate (breaths/min) from the R-R stream via
+        // RSA. WHOOP5 v18 carries no raw resp ADC, so this is an on-device estimate,
+        // NOT a cloud/clinical respiration value. Per matched in-bed session, estimate
+        // over [start, end]; the night's value = median of finite per-session
+        // estimates; null only when no session yields a finite estimate.
+        val respRateDaily: Double? = run {
+            val perSession = matched
+                .map { SleepStager.respRateFromRR(rr, it.start, it.end) }
+                .filter { it.isFinite() }
+            if (perSession.isEmpty()) null else HrvAnalyzer.median(perSession)
+        }
+
         // sleepStart/sleepEnd available for callers wiring sleep_start/end columns.
         @Suppress("UNUSED_VARIABLE") val sleepStart = matched.minOfOrNull { it.start }
         @Suppress("UNUSED_VARIABLE") val sleepEnd = matched.maxOfOrNull { it.end }
@@ -171,6 +193,56 @@ object AnalyticsEngine {
             profile = profile,
         )
 
+        // ── Steps (APPROXIMATE) ───────────────────────────────────────────────
+        // step_motion_counter@57 is a CUMULATIVE u16 running counter. The daily total is the SUM of
+        // positive consecutive deltas across the day's samples (already ts-ASC from the DAO). u16
+        // wraparound: a negative delta means the counter rolled past 65535, so add 65536. The day's
+        // ~42h read window may include adjacent-day samples, so filter to dayString(ts)==day first.
+        // ESTIMATE only — not cloud/clinical parity.
+        val stepsTotal: Int? = run {
+            // Prefer the full-calendar-day stream for the additive total; fall back to the
+            // night-window stream when the caller didn't supply one (pure-function callers/tests).
+            val sorted = (daySteps ?: steps).filter { dayString(it.ts) == day }.sortedBy { it.ts }
+            if (sorted.size < 2) return@run null
+            // A firmware reboot resets the counter and is byte-indistinguishable from a u16 wrap.
+            // A genuine wrap yields a SMALL corrected delta (the steps since the last record); a
+            // reset-from-low yields a huge one. Cap each corrected delta so a reboot can't inject
+            // tens of thousands of phantom steps (30k steps between two history records is
+            // implausible for any reasonable sampling cadence). Heuristic — partial, since a reset
+            // from a HIGH prior count still looks like a small wrap; tune once @57's cadence is
+            // validated on hardware.
+            val maxStepDelta = 30_000
+            var total = 0L
+            for (i in 1 until sorted.size) {
+                var delta = sorted[i].counter - sorted[i - 1].counter
+                if (delta < 0) delta += 65_536 // u16 wraparound
+                if (delta in 1..maxStepDelta) total += delta // drop implausible deltas as resets
+            }
+            if (total > 0L) total.coerceAtMost(Int.MAX_VALUE.toLong()).toInt() else null
+        }
+
+        // ── Daily calories (APPROXIMATE, HR-only whole-day estimate) ──────────
+        // Whole-day active+resting energy from the full HR window, using the same resting/active
+        // per-second model the per-workout estimate uses (resting BMR below activeThreshold, Keytel
+        // active above). effMaxHR + restingHRDaily are the same effective HRmax / resting baseline
+        // strain uses. Null when there is no HR. A heart-rate ESTIMATE — not cloud/clinical parity.
+        // Whole-day additive totals (steps above, calories here) are summed over the full UTC
+        // calendar day supplied by the caller (dayHr / daySteps), NOT the ~42h sleep-detection
+        // window — which, anchored to the current time-of-day, would drop a past day's late hours
+        // and double-count seconds shared with adjacent days. Fall back to the night-window hr for
+        // pure-function callers that don't supply dayHr. Strain keeps the full window (bounded log).
+        val dayHrFiltered = (dayHr ?: hr).filter { dayString(it.ts) == day }
+        val activeKcalEst: Double? = if (dayHrFiltered.isEmpty()) {
+            null
+        } else {
+            Calories.estimateDayCalories(
+                hrSamples = dayHrFiltered,
+                profile = profile,
+                hrmax = effMaxHR,
+                restingHR = restingHRDaily?.toDouble(),
+            )
+        }
+
         // ── Assemble DailyMetric ──────────────────────────────────────────────
         // deviceId is stamped by the caller (IntelligenceEngine persists under
         // "<deviceId>-noop"); use the imported source id as a placeholder here so
@@ -191,7 +263,9 @@ object AnalyticsEngine {
             exerciseCount = workouts.size,
             spo2Pct = null,
             skinTempDevC = null,
-            respRateBpm = null,
+            respRateBpm = respRateDaily,
+            steps = stepsTotal,
+            activeKcalEst = activeKcalEst,
         )
 
         return DayResult(

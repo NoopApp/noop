@@ -8,6 +8,7 @@ import com.noop.data.RespRow
 import com.noop.data.RrRow
 import com.noop.data.SkinTempRow
 import com.noop.data.Spo2Row
+import com.noop.data.StepRow
 import com.noop.data.StreamBatch
 import com.noop.data.StreamPersistence
 
@@ -303,6 +304,7 @@ fun extractHistoricalStreams(
     val skinTemp = ArrayList<SkinTempRow>()
     val resp = ArrayList<RespRow>()
     val gravity = ArrayList<GravityRow>()
+    val steps = ArrayList<StepRow>()
     val events = ArrayList<EventEntry>()
     val battery = ArrayList<BatteryRow>()
 
@@ -328,6 +330,10 @@ fun extractHistoricalStreams(
                 }
                 p.intOrNull("skin_temp_raw")?.let { raw -> skinTemp.add(SkinTempRow(ts, raw)) }
                 p.intOrNull("resp_rate_raw")?.let { raw -> resp.add(RespRow(ts, raw)) }
+                // step_motion_counter@57 is the WHOOP5 CUMULATIVE u16 counter (decoded but, until now,
+                // dropped). Stored raw; AnalyticsEngine derives the daily step total from counter deltas.
+                // APPROXIMATE — @57 semantics unverified vs the official app (see decodeWhoop5Historical).
+                p.intOrNull("step_motion_counter")?.let { c -> steps.add(StepRow(ts, c)) }
                 p.doubleOrNull("gravity_x")?.let { gx ->
                     gravity.add(
                         GravityRow(
@@ -385,7 +391,7 @@ fun extractHistoricalStreams(
 
     return StreamBatch(
         hr = hr, rr = rr, events = events, battery = battery,
-        spo2 = spo2, skinTemp = skinTemp, resp = resp, gravity = gravity,
+        spo2 = spo2, skinTemp = skinTemp, resp = resp, gravity = gravity, steps = steps,
     )
 }
 

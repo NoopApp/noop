@@ -230,9 +230,25 @@ object Framing {
         // their per-type 5.0 offsets are confirmed on hardware — we don't invent offsets.
         when (name) {
             "REALTIME_DATA" -> decodeRealtimeWhoop5(frame, parsed)
+            "METADATA" -> decodeMetadataWhoop5(frame, parsed)
             else -> Unit
         }
         return ParsedFrame(ok = true, crcOk = check.crc32Ok, typeName = name, parsed = parsed)
+    }
+
+    /**
+     * METADATA (type 49) for WHOOP 5.0 — the 4.0 layout +4 (inner record at byte 8): meta_type@10
+     * (u8, MetadataType), and for a HISTORY_END payload unix@11 (u32), subsec@15 (u16), trim_cursor@21
+     * (u32). Confirmed against a real HISTORY_END frame from a 5/MG strap (byte[10]=0x02 HISTORY_END,
+     * trim≈0x0001fabc). Without this the offload's HISTORY_END is never classified, so the chunk is
+     * never acked/committed and the session idle-times-out — the missing link for 5/MG history sync.
+     */
+    private fun decodeMetadataWhoop5(frame: ByteArray, parsed: MutableMap<String, Any?>) {
+        val mt = frame.u8(10) ?: return
+        parsed["meta_type"] = metaLabel(mt)
+        frame.u32(11)?.let { parsed["unix"] = it.toInt() }
+        frame.u16(15)?.let { parsed["subsec"] = it }
+        frame.u32(21)?.let { parsed["trim_cursor"] = it.toInt() }
     }
 
     /**
@@ -411,10 +427,13 @@ object Framing {
         inner0[1] = (seq and 0xFF).toByte()
         inner0[2] = (cmd and 0xFF).toByte()
         System.arraycopy(payload, 0, inner0, 3, payload.size)
-        // Pad the inner record to a 4-byte boundary before length/CRC, exactly as the strap's maverick
-        // framing does (pad4). No-op for the 4-aligned commands shipped so far (toggle HR, historical),
-        // but REQUIRED for the 12-byte haptics payload (inner 15 -> 16) — otherwise the declared length
-        // and CRC32 cover the wrong byte count and the strap rejects the frame (#48).
+        // Pad the inner record to a 4-byte boundary BEFORE the declared length + CRC32, exactly as the
+        // strap's "maverick" framing does. No-op for the 4-aligned commands that already worked
+        // (TOGGLE_REALTIME_HR inner=4, SEND_HISTORICAL_DATA inner=4, HISTORICAL_DATA_RESULT inner=12), but
+        // REQUIRED for the haptic/alarm payloads: cmd-19 inner 15->16, SET_ALARM_TIME inner 23->24,
+        // RUN_ALARM inner 5->8. Without the pad the declLen + CRC32 cover the wrong byte count and the strap
+        // SILENTLY DROPS the frame (no COMMAND_RESPONSE, no motor) — the real reason cmd 19/66/68 looked
+        // "firmware-blocked". Matches a capture of the working WHOOP app (noop v1.35, #48).
         val pad = (4 - inner0.size % 4) % 4
         val inner = if (pad == 0) inner0 else inner0 + ByteArray(pad)
 

@@ -28,9 +28,11 @@ import com.noop.data.RrRow
 import com.noop.data.StreamBatch
 import com.noop.data.StreamPersistence
 import com.noop.data.WhoopRepository
+import com.noop.protocol.AlarmPayload
 import com.noop.protocol.CommandNumber
 import com.noop.protocol.DeviceFamily
 import com.noop.protocol.Framing
+import com.noop.protocol.MaverickHaptics
 import com.noop.protocol.Reassembler
 import com.noop.protocol.Streams
 import com.noop.protocol.extractStreams
@@ -247,9 +249,13 @@ class WhoopBleClient(
          * this firmware, so the backfill idle-watchdog must NOT be re-armed by it — only by genuine
          * offload progress. Port of Swift `BLEManager.isOffloadFrame`.
          */
-        fun isOffloadFrame(frame: ByteArray): Boolean {
-            if (frame.size <= 4) return false
-            return when (frame[4].toInt() and 0xFF) {
+        fun isOffloadFrame(frame: ByteArray, family: DeviceFamily = DeviceFamily.WHOOP4): Boolean {
+            // The inner record (type byte) starts at frame[4] for WHOOP4, but at frame[8] for WHOOP5/MG
+            // ("puffin", CRC16 envelope). Reading frame[4] on a puffin frame misclassifies EVERY offload
+            // frame as live-flood, so the idle watchdog never sees offload progress (Mac isOffloadFrame).
+            val typeIndex = if (family == DeviceFamily.WHOOP5) 8 else 4
+            if (frame.size <= typeIndex) return false
+            return when (frame[typeIndex].toInt() and 0xFF) {
                 47, 48, 49, 50 -> true // HISTORICAL_DATA / EVENT / METADATA / CONSOLE_LOGS
                 else -> false // 40 REALTIME_DATA, 43 REALTIME_RAW_DATA (live flood)
             }
@@ -598,29 +604,30 @@ class WhoopBleClient(
         }
         // WHOOP 5.0/MG uses puffin (CRC16) command framing, not the WHOOP4 frame. The realtime-HR toggle
         // is hardware-confirmed (issue #17 — a 5/MG owner saw live HR on v1.13), which proves the strap
-        // acts on puffin-framed commands. We now also send haptics (buzz) on that same proven transport —
-        // experimental: the strap may or may not honor that specific command, but it's no longer a blind
-        // guess. Everything else stays dropped (offload commands need the held work). WHOOP 4.0 unaffected.
+        // acts on puffin-framed commands. The allow-list below is the set of non-destructive commands whose
+        // 5/MG payloads are protocol facts confirmed against the official app's behaviour for interop:
+        // the maverick buzz (cmd 19), the firmware-alarm family (set/get/run/disable), and the historical
+        // offload (SEND_HISTORICAL_DATA + HISTORICAL_DATA_RESULT — the same trigger + per-chunk ACK the Mac
+        // sends a 5/MG strap, puffin-framed; proven at the wire level on the Linux capture tool). Gen-4's
+        // RUN_HAPTICS_PATTERN(79) is intentionally NOT here for 5/MG — a 5/MG strap ignores it; buzz() routes
+        // to RUN_HAPTIC_PATTERN_MAVERICK instead. Everything else stays dropped. WHOOP 4.0 unaffected.
         if (connectedFamily == DeviceFamily.WHOOP5) {
-            if (cmd != CommandNumber.TOGGLE_REALTIME_HR && cmd != CommandNumber.RUN_HAPTICS_PATTERN) {
+            val whoop5Sendable = cmd == CommandNumber.TOGGLE_REALTIME_HR ||
+                cmd == CommandNumber.RUN_HAPTIC_PATTERN_MAVERICK ||
+                cmd == CommandNumber.SET_ALARM_TIME ||
+                cmd == CommandNumber.GET_ALARM_TIME ||
+                cmd == CommandNumber.RUN_ALARM ||
+                cmd == CommandNumber.DISABLE_ALARM ||
+                cmd == CommandNumber.SEND_HISTORICAL_DATA ||
+                cmd == CommandNumber.HISTORICAL_DATA_RESULT
+            if (!whoop5Sendable) {
                 log("send(${cmd.name}) skipped — no WHOOP 5/MG framing for this command yet")
                 return
             }
-            // WHOOP 5/MG haptics differ from WHOOP 4.0 on BOTH the opcode AND the payload (#48, decoded
-            // from the working "maverick" app's binary). Opcode: 0x13, not RUN_HAPTICS_PATTERN=79 (a real-MG
-            // capture showed the strap rejecting 79 with COMMAND_RESPONSE result=0x03). Payload: the maverick
-            // haptic body [0x01, effects(8), loopControl(u16 LE), overallLoop] — here the "notify" preset
-            // (effects 47,152), NOT the 4.0 [patternId, loops, …]. puffinCommandFrame pads the inner to a
-            // 4-byte boundary, which this 12-byte payload needs. WHOOP 4.0 is untouched (79 + its own frame).
-            val isHaptics = cmd == CommandNumber.RUN_HAPTICS_PATTERN
-            val puffinCmd = if (isHaptics) 0x13 else cmd.rawValue
-            val puffinPayload = if (isHaptics)
-                byteArrayOf(0x01, 47, 152.toByte(), 0, 0, 0, 0, 0, 0, 0, 0, 0) else payload
             seq = (seq + 1) and 0xFF
-            val frame = Framing.puffinCommandFrame(cmd = puffinCmd, seq = seq, payload = puffinPayload)
+            val frame = Framing.puffinCommandFrame(cmd = cmd.rawValue, seq = seq, payload = payload)
             enqueueWrite(PendingWrite(frame, withResponse))
-            val cmdNote = if (isHaptics) " cmd=0x13" else ""
-            log("→ ${cmd.name} payload=${puffinPayload.toHex()} (puffin$cmdNote)")
+            log("→ ${cmd.name} payload=${payload.toHex()} (puffin)")
             return
         }
         seq = (seq + 1) and 0xFF
@@ -631,12 +638,25 @@ class WhoopBleClient(
 
     /**
      * Fire a preset haptic buzz on the strap.
-     * Port of `BLEManager.testAlarmBuzz()` / the contract's `buzz(loops:)`:
-     * RUN_HAPTICS_PATTERN(79) with payload `[patternId=2, loops, 0, 0, 0]`.
-     * patternId=2 is the graduated alarm buzz the official WHOOP app uses.
+     *
+     * WHOOP 4.0 → RUN_HAPTICS_PATTERN(79) with `[patternId=2, loops, 0, 0, 0]` (the graduated alarm buzz).
+     * WHOOP 5.0/MG (GOOSE/MAVERICK) → RUN_HAPTIC_PATTERN_MAVERICK(19) with the 12-byte waveform from
+     * [MaverickHaptics.notificationBuzz]; the Gen-4 command 79 is silently ignored by a 5/MG strap, which
+     * is why buzz did nothing on 5/MG before. The device-type dispatch + waveform layout are protocol
+     * facts confirmed against the official app for interoperability. [loops] → overallWaveformLoopControl.
      */
     fun buzz(loops: Int = 2) {
         val n = loops.coerceIn(0, 255)
+        if (connectedFamily == DeviceFamily.WHOOP5) {
+            // 5/MG buzz = RUN_HAPTIC_PATTERN_MAVERICK(0x13) + the 12-byte "notify" waveform (effects 47,152,
+            // overallLoop 1) — the official app's notification haptic. The earlier "strap is silent to cmd 19"
+            // was NOT a firmware gate: noop's puffin framing didn't pad the inner record to a 4-byte boundary,
+            // so the 15-byte cmd-19 inner carried a wrong declLen/CRC32 and the strap dropped it silently.
+            // With Framing.puffinCommandFrame now pad4-correct (#48 / noop v1.35), the frame is valid.
+            send(CommandNumber.RUN_HAPTIC_PATTERN_MAVERICK, MaverickHaptics.notificationBuzz(1))
+            log("Buzz (5/MG maverick cmd19, pad4): notify pattern 47/152")
+            return
+        }
         send(CommandNumber.RUN_HAPTICS_PATTERN, byteArrayOf(2, n.toByte(), 0, 0, 0))
         log("Buzz: patternId=2 loops=$n")
     }
@@ -672,6 +692,16 @@ class WhoopBleClient(
      * 5/MG `send()` drops it (the 5/MG command set isn't verified for this yet).
      */
     fun armStrapAlarm(epochSec: Long) {
+        if (connectedFamily == DeviceFamily.WHOOP5) {
+            // 5/MG SET_ALARM_TIME is REVISION_4: [04][id][u32 sec][u16 subsec][12-byte 47/152 pattern,
+            // overallLoop 7, 30 s]. The strap arms its own RTC and fires the
+            // wake haptic itself (EVENT STRAP_DRIVEN_ALARM_EXECUTED) even with the phone away. No SET_CLOCK
+            // here: the strap maintains its RTC (set during sync) and the official app's alarm path doesn't
+            // re-set it — forcing the phone clock onto a 5/MG strap is unverified, so we don't.
+            send(CommandNumber.SET_ALARM_TIME, AlarmPayload.build(epochSec * 1000L))
+            log("Alarm: armed 5/MG rev4 (epoch $epochSec)")
+            return
+        }
         send(CommandNumber.SET_CLOCK, setClockPayload())
         val e = epochSec.toInt()
         val payload = byteArrayOf(
@@ -688,6 +718,12 @@ class WhoopBleClient(
 
     /** Clear the strap's firmware alarm. Port of macOS `BLEManager.disableStrapAlarm`. */
     fun disableStrapAlarm() {
+        if (connectedFamily == DeviceFamily.WHOOP5) {
+            // 5/MG DISABLE_ALARM is REVISION_2 [0x02, 0xFF]; the rev-1 [0x01] form below is WHOOP4.
+            send(CommandNumber.DISABLE_ALARM, AlarmPayload.disableRev2())
+            log("Alarm: disarmed (5/MG rev2)")
+            return
+        }
         send(CommandNumber.DISABLE_ALARM, byteArrayOf(0x01))
         log("Alarm: disarmed")
     }
@@ -864,6 +900,16 @@ class WhoopBleClient(
                 }
                 drainCccdQueue(g)
                 if (wantsRealtime) send(CommandNumber.TOGGLE_REALTIME_HR, byteArrayOf(1))
+                // EXPERIMENTAL: kick the historical offload for 5/MG too. The strap replays its stored
+                // type-47 history over these same now-bonded notify chars — the path the Mac uses for 5/MG
+                // and that the Linux capture tool proved at the wire level. `connectHandshakeDone` here only
+                // means "ready to offload" (the WHOOP4 command handshake below is family-gated, so it still
+                // won't run for 5/MG). Deferred so the notify subscriptions settle first; then re-offload
+                // every BACKFILL_INTERVAL_MS. Runs once (this whole branch is guarded by `!didBond`).
+                connectHandshakeDone = true
+                backfillStarted = true
+                handler.postDelayed({ requestSync() }, INITIAL_BACKFILL_DELAY_MS)
+                startBackfillTimer()
             } else if (!didBond && connectedFamily == DeviceFamily.WHOOP4) {
                 didBond = true
                 _state.value = _state.value.copy(bonded = true, encryptedBond = true)   // WHOOP4 bond is genuine (#69)
@@ -976,7 +1022,7 @@ class WhoopBleClient(
                         // the serial drain (preserves chunk order) + re-arm the idle watchdog on them.
                         // The live type-40/43 flood is dropped here (extractHistoricalStreams ignores
                         // it; feeding it only delays each chunk's insert->trim-ack and stalls the strap).
-                        if (isOffloadFrame(frame)) {
+                        if (isOffloadFrame(frame, connectedFamily)) {
                             armBackfillTimeout()
                             routeBackfillFrame(frame)
                         }
@@ -997,6 +1043,15 @@ class WhoopBleClient(
     private fun handleFrame(frame: ByteArray) {
         val parsed = Framing.parseFrame(frame, connectedFamily)
         if (!parsed.ok) return
+        // DIAGNOSTIC (debug-logging only): surface only LOW-FREQUENCY inbound control frames so a
+        // buzz/alarm reply (COMMAND_RESPONSE) and offload control frames (METADATA / EVENT) are visible.
+        // We must NOT log HISTORICAL_DATA — a full offload streams 10k+ of them, and hex-formatting +
+        // logging each on the GATT/main looper pegs the main thread and ANRs the app. (REALTIME is
+        // likewise skipped as continuous noise.) Logged before the CRC gate so a questionable reply shows.
+        when (parsed.typeName) {
+            "COMMAND_RESPONSE", "METADATA", "EVENT", "CONSOLE_LOGS" ->
+                log("← ${parsed.typeName} crc=${parsed.crcOk} ${frame.toHex().take(56)}")
+        }
         // Reject frames that failed their checksum — never let bad bytes drive state.
         if (parsed.crcOk == false) return
 
@@ -1600,7 +1655,7 @@ class WhoopBleClient(
             return
         }
         if (backfilling) return
-        backfiller.begin()
+        backfiller.begin(connectedFamily)
         backfilling = true
         send(CommandNumber.SEND_HISTORICAL_DATA, byteArrayOf(0), withResponse = true)
         armBackfillTimeout()

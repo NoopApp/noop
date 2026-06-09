@@ -58,6 +58,9 @@ interface WhoopDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertGravity(rows: List<GravitySample>): List<Long>
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertSteps(rows: List<StepSample>): List<Long>
+
     // MARK: - Server-derived caches (latest value wins)
 
     @Upsert
@@ -138,6 +141,12 @@ interface WhoopDao {
     )
     suspend fun gravitySamples(deviceId: String, from: Long, to: Long, limit: Int): List<GravitySample>
 
+    @Query(
+        "SELECT * FROM stepSample WHERE deviceId = :deviceId AND ts >= :from AND ts <= :to " +
+            "ORDER BY ts ASC LIMIT :limit"
+    )
+    suspend fun stepSamples(deviceId: String, from: Long, to: Long, limit: Int): List<StepSample>
+
     // MARK: - Daily metrics / sleep reads (mirror MetricsCache.swift)
 
     /**
@@ -195,6 +204,10 @@ interface WhoopDao {
     @Query("UPDATE workout SET deviceId = :to WHERE deviceId = :from AND source = :source")
     suspend fun reassignWorkoutsBySource(from: String, to: String, source: String)
 
+    /** Delete a computed source's workouts of a given [sport] whose startTs is in [from, to]. */
+    @Query("DELETE FROM workout WHERE deviceId = :deviceId AND sport = :sport AND startTs >= :from AND startTs <= :to")
+    suspend fun deleteWorkoutsBySport(deviceId: String, sport: String, from: Long, to: Long)
+
     // MARK: - Journal / workouts / Apple-Health reads (mirror JournalWorkoutAppleCache.swift, v8)
 
     /**
@@ -241,6 +254,7 @@ interface WhoopDao {
     @Query("SELECT COUNT(*) FROM skinTempSample") suspend fun countSkinTemp(): Int
     @Query("SELECT COUNT(*) FROM respSample") suspend fun countResp(): Int
     @Query("SELECT COUNT(*) FROM gravitySample") suspend fun countGravity(): Int
+    @Query("SELECT COUNT(*) FROM stepSample") suspend fun countSteps(): Int
 
     // MARK: - Live convenience reads
 

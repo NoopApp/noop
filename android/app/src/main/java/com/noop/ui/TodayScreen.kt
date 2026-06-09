@@ -80,6 +80,7 @@ fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
         val hcDaysCount = viewModel.repo.appleDaily("health-connect", "0000-01-01", "9999-12-31").size
         footer = TodayFooterState(
             recentWorkouts = (viewModel.repo.workouts("my-whoop", recentCutoff, now) +
+                viewModel.repo.workouts("my-whoop-noop", recentCutoff, now) +
                 viewModel.repo.workouts("apple-health", recentCutoff, now) +
                 viewModel.repo.workouts("health-connect", recentCutoff, now))
                 .sortedByDescending { it.startTs },
@@ -280,10 +281,10 @@ private fun MetricGrid(d: DailyMetric?, w: Window) {
             SparkStatTile(
                 modifier = m,
                 label = "Steps",
-                value = NO_DATA,
-                caption = "not connected",
-                accent = Palette.textTertiary,
-                spark = emptyList(),
+                value = d?.steps?.let { String.format(Locale.US, "%,d", it) } ?: NO_DATA,
+                caption = d?.steps?.let { "steps" },
+                accent = d?.steps?.let { Palette.metricCyan } ?: Palette.textTertiary,
+                spark = w.steps,
                 sparkColor = Palette.metricCyan,
             )
         },
@@ -302,10 +303,10 @@ private fun MetricGrid(d: DailyMetric?, w: Window) {
             SparkStatTile(
                 modifier = m,
                 label = "Calories",
-                value = NO_DATA,
-                caption = "not connected",
-                accent = Palette.textTertiary,
-                spark = emptyList(),
+                value = d?.activeKcalEst?.let { String.format(Locale.US, "%,d", it.roundToInt()) } ?: NO_DATA,
+                caption = d?.activeKcalEst?.let { "kcal" },
+                accent = d?.activeKcalEst?.let { Palette.metricAmber } ?: Palette.textTertiary,
+                spark = w.calories,
                 sparkColor = Palette.metricAmber,
             )
         },
@@ -676,6 +677,8 @@ private data class Window(
     val rhr: List<Double>,
     val spo2: List<Double>,
     val resp: List<Double>,
+    val steps: List<Double>,
+    val calories: List<Double>,
 )
 
 /**
@@ -698,6 +701,8 @@ private fun remember14(days: List<com.noop.data.DailyMetric>): Window =
             rhr = series { it.restingHr?.toDouble() },
             spo2 = series { it.spo2Pct },
             resp = series { it.respRateBpm },
+            steps = series { it.steps?.toDouble() },
+            calories = series { it.activeKcalEst },
         )
     }
 

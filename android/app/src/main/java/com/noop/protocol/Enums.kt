@@ -83,6 +83,9 @@ enum class CommandNumber(val rawValue: Int) {
     GET_DATA_RANGE(34),
     GET_HELLO_HARVARD(35),
     SEND_R10_R11_REALTIME(63),
+    // WHOOP 5.0/MG (device family GOOSE/MAVERICK) one-shot buzz. Gen-4 straps use the legacy
+    // RUN_HAPTICS_PATTERN(79) below; a 5/MG strap only honors this command.
+    RUN_HAPTIC_PATTERN_MAVERICK(19),
     SET_ALARM_TIME(66),
     GET_ALARM_TIME(67),
     RUN_ALARM(68),

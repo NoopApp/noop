@@ -21,10 +21,12 @@ data class StreamBatch(
     val skinTemp: List<SkinTempRow> = emptyList(),
     val resp: List<RespRow> = emptyList(),
     val gravity: List<GravityRow> = emptyList(),
+    val steps: List<StepRow> = emptyList(),
 ) {
     val isEmpty: Boolean
         get() = hr.isEmpty() && rr.isEmpty() && events.isEmpty() && battery.isEmpty() &&
-            spo2.isEmpty() && skinTemp.isEmpty() && resp.isEmpty() && gravity.isEmpty()
+            spo2.isEmpty() && skinTemp.isEmpty() && resp.isEmpty() && gravity.isEmpty() &&
+            steps.isEmpty()
 }
 
 // Device-agnostic decoded rows (deviceId attached when inserted). Mirror Streams.swift shapes.
@@ -38,6 +40,8 @@ data class Spo2Row(val ts: Long, val red: Int, val ir: Int)
 data class SkinTempRow(val ts: Long, val raw: Int)
 data class RespRow(val ts: Long, val raw: Int)
 data class GravityRow(val ts: Long, val x: Double, val y: Double, val z: Double)
+/** Cumulative u16 step/motion counter at [ts] (WHOOP5 step_motion_counter@57). deviceId attached on insert. */
+data class StepRow(val ts: Long, val counter: Int)
 
 /** Count of rows ACTUALLY inserted per stream (mirrors WhoopStore.insert return tuple). */
 data class InsertCounts(
@@ -49,6 +53,7 @@ data class InsertCounts(
     val skinTemp: Int = 0,
     val resp: Int = 0,
     val gravity: Int = 0,
+    val steps: Int = 0,
 )
 
 /**
@@ -104,6 +109,8 @@ class WhoopRepository(private val dao: WhoopDao) {
             dao.insertResp(streams.resp.map { RespSample(deviceId, it.ts, it.raw) })
         val gravIds = if (streams.gravity.isEmpty()) emptyList() else
             dao.insertGravity(streams.gravity.map { GravitySample(deviceId, it.ts, it.x, it.y, it.z) })
+        val stepIds = if (streams.steps.isEmpty()) emptyList() else
+            dao.insertSteps(streams.steps.map { StepSample(deviceId, it.ts, it.counter) })
 
         // OnConflictStrategy.IGNORE returns -1 for skipped (already-present) rows; count the inserts.
         return InsertCounts(
@@ -115,6 +122,7 @@ class WhoopRepository(private val dao: WhoopDao) {
             skinTemp = skinIds.countInserted(),
             resp = respIds.countInserted(),
             gravity = gravIds.countInserted(),
+            steps = stepIds.countInserted(),
         )
     }
 
@@ -157,6 +165,9 @@ class WhoopRepository(private val dao: WhoopDao) {
     suspend fun gravitySamples(deviceId: String, from: Long, to: Long, limit: Int = DEFAULT_LIMIT) =
         dao.gravitySamples(deviceId, from, to, limit)
 
+    suspend fun stepSamples(deviceId: String, from: Long, to: Long, limit: Int = DEFAULT_LIMIT) =
+        dao.stepSamples(deviceId, from, to, limit)
+
     suspend fun sleepSessions(deviceId: String, from: Long, to: Long, limit: Int = DEFAULT_LIMIT) =
         dao.sleepSessions(deviceId, from, to, limit)
 
@@ -169,6 +180,10 @@ class WhoopRepository(private val dao: WhoopDao) {
     /** Workouts whose startTs falls in [from, to] (unix seconds), oldest first, row-limited. */
     suspend fun workouts(deviceId: String, from: Long, to: Long, limit: Int = DEFAULT_LIMIT): List<WorkoutRow> =
         dao.workouts(deviceId, from, to, limit)
+
+    /** Delete a computed source's [sport] workouts in [from, to] (makes re-detection idempotent). */
+    suspend fun deleteComputedWorkouts(deviceId: String, sport: String, from: Long, to: Long) =
+        dao.deleteWorkoutsBySport(deviceId, sport, from, to)
 
     /** Journal entries for the inclusive day range [from, to] (YYYY-MM-DD), oldest first. */
     suspend fun journal(deviceId: String, from: String, to: String): List<JournalEntry> =
@@ -273,7 +288,18 @@ class WhoopRepository(private val dao: WhoopDao) {
         ): List<DailyMetric> {
             val byDay = LinkedHashMap<String, DailyMetric>()
             for (d in computed) byDay[d.day] = d // computed first…
-            for (d in imported) byDay[d.day] = d // …import overwrites, so a real WHOOP import always wins
+            // …import overwrites, so a real WHOOP import always wins — BUT coalesce the strap-only
+            // on-device metrics (steps / calories / RSA resp) from the computed row, since importers
+            // (esp. Health Connect) write a "my-whoop" daily row with those columns null and would
+            // otherwise blank them on days the import also covers.
+            for (d in imported) {
+                val c = byDay[d.day]
+                byDay[d.day] = if (c == null) d else d.copy(
+                    steps = d.steps ?: c.steps,
+                    activeKcalEst = d.activeKcalEst ?: c.activeKcalEst,
+                    respRateBpm = d.respRateBpm ?: c.respRateBpm,
+                )
+            }
             return byDay.values.sortedBy { it.day }
         }
 

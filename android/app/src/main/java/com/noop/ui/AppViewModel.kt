@@ -138,7 +138,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // import. IntelligenceEngine computes, persists under "my-whoop-noop", and the
         // merged daysMergedFlow above republishes the freshly computed scores to the UI.
         // Mirrors macOS AppModel's launch + 15-min analyze loop.
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             delay(FIRST_OFFLOAD_GRACE_MS) // give the first offload a moment
             while (isActive) {
                 runCatching {

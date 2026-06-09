@@ -72,7 +72,10 @@ fun WorkoutsScreen(vm: AppViewModel) {
     // Load both sources once. Whole history (epoch → now) per source, newest first.
     LaunchedEffect(Unit) {
         val now = System.currentTimeMillis() / 1000
-        val whoop = vm.repo.workouts("my-whoop", 0L, now)
+        // Include the on-device computed source ("my-whoop-noop") so the HR+motion-detected
+        // bouts IntelligenceEngine persists show up here, not just real WHOOP imports.
+        val whoop = vm.repo.workouts("my-whoop", 0L, now) +
+            vm.repo.workouts("my-whoop-noop", 0L, now)
         // Apple Health export + Health Connect are separate sources (since #34) — include both.
         val apple = vm.repo.workouts("apple-health", 0L, now) +
             vm.repo.workouts("health-connect", 0L, now)

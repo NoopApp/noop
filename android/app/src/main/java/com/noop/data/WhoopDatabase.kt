@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 /**
  * Local Room database — the Android port of the GRDB store in
@@ -27,6 +29,7 @@ import androidx.room.RoomDatabase
         SkinTempSample::class,
         RespSample::class,
         GravitySample::class,
+        StepSample::class,
         DailyMetric::class,
         SleepSession::class,
         MetricSeriesRow::class,
@@ -34,7 +37,7 @@ import androidx.room.RoomDatabase
         WorkoutRow::class,
         AppleDaily::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class WhoopDatabase : RoomDatabase() {
@@ -64,10 +67,31 @@ abstract class WhoopDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v2 → v3: additive only — adds the stepSample table + the dailyMetric.steps /
+         * activeKcalEst columns. A real (non-destructive) migration so an existing user's
+         * already-offloaded raw streams are PRESERVED: the strap trims acked history chunks and
+         * will not re-send them, so a destructive rebuild would lose that history permanently.
+         * The SQL must match Room's generated schema exactly (no SQL DEFAULT for the Kotlin-default
+         * `synced`; nullable INTEGER/REAL for the two new nullable dailyMetric columns).
+         */
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `stepSample` (`deviceId` TEXT NOT NULL, " +
+                        "`ts` INTEGER NOT NULL, `counter` INTEGER NOT NULL, " +
+                        "`synced` INTEGER NOT NULL, PRIMARY KEY(`deviceId`, `ts`))",
+                )
+                db.execSQL("ALTER TABLE `dailyMetric` ADD COLUMN `steps` INTEGER")
+                db.execSQL("ALTER TABLE `dailyMetric` ADD COLUMN `activeKcalEst` REAL")
+            }
+        }
+
         private fun build(appContext: Context): WhoopDatabase =
             Room.databaseBuilder(appContext, WhoopDatabase::class.java, DB_NAME)
-                // Schema only ever moves forward from a fresh install; if a future entity
-                // change bumps the version, rebuild rather than crash on a missing migration.
+                // Preserve data across the v2→v3 bump with an additive migration; fall back to a
+                // destructive rebuild only for version jumps with no explicit migration path.
+                .addMigrations(MIGRATION_2_3)
                 .fallbackToDestructiveMigration()
                 .build()
     }
