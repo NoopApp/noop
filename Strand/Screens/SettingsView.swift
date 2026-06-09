@@ -25,6 +25,10 @@ struct SettingsView: View {
     /// "What's New" changelog sheet, reachable any time from About.
     @State private var showWhatsNew = false
 
+    /// User-initiated GitHub release check behind the About "Check for updates" button.
+    @StateObject private var updateChecker = UpdateChecker()
+    @Environment(\.openURL) private var openURL
+
     var body: some View {
         ScreenScaffold(title: "Settings",
                        subtitle: "Your numbers, your strap, and how NOOP works. All on this Mac.") {
@@ -408,6 +412,54 @@ struct SettingsView: View {
                     }
                     .buttonStyle(.bordered)
                     .tint(StrandPalette.accent)
+                }
+
+                // Check for updates — a single, user-initiated read of GitHub's public releases API.
+                // No background polling, no auto-update; sends nothing about you, just reads the version.
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 10) {
+                        Button {
+                            updateChecker.check(currentVersion: AppChangelog.currentVersion)
+                        } label: {
+                            if updateChecker.state == .checking {
+                                HStack(spacing: 6) {
+                                    ProgressView().controlSize(.small)
+                                    Text("Checking…")
+                                }
+                            } else {
+                                Label("Check for updates", systemImage: "arrow.triangle.2.circlepath")
+                                    .padding(.horizontal, 4)
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(updateChecker.state == .checking)
+
+                        switch updateChecker.state {
+                        case .upToDate(let v):
+                            Text("You're on the latest (\(v)).")
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textSecondary)
+                        case .available(let v, let url):
+                            Button {
+                                openURL(url)
+                            } label: {
+                                Label("Download \(v)", systemImage: "arrow.down.circle.fill")
+                                    .padding(.horizontal, 4)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(StrandPalette.accent)
+                        case .failed:
+                            Text("Couldn't check. Try again.")
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.statusWarning)
+                        default:
+                            EmptyView()
+                        }
+                        Spacer()
+                    }
+                    Text("Checks GitHub for the latest version when you tap — nothing else is sent.")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
                 }
 
                 Text("A standalone companion for your WHOOP. Everything stays on this device — your history, your live stream, your numbers. Nothing is uploaded. NOOP is an independent, experimental project, not the WHOOP app.")

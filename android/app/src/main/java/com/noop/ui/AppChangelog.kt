@@ -25,7 +25,7 @@ object AppChangelog {
      * Bump this when you add a release below. The "What's New" sheet shows automatically when the
      * stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
      */
-    const val CURRENT_VERSION = "1.39"
+    const val CURRENT_VERSION = "1.40"
 
     data class Release(
         val version: String,
@@ -36,6 +36,14 @@ object AppChangelog {
 
     /** Newest first. */
     val releases: List<Release> = listOf(
+        Release(
+            version = "1.40",
+            title = "Check for updates",
+            date = "June 2026",
+            items = listOf(
+                "New: a Check for updates button in Settings → About. It asks GitHub for the latest version and, if there's a newer one, links you straight to the download — so you're not stuck on an old build. It runs ONLY when you tap it: no background checks, no auto-updating, and nothing about you is sent — it just reads the latest version number. Manual, and in your control.",
+            ),
+        ),
         Release(
             version = "1.39",
             title = "Wrist alerts for incoming calls (Android)",

@@ -17,6 +17,23 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 1.40 — Check for updates (both platforms)
+
+- **New: a manual "Check for updates" button** in Settings → About. One user-initiated GET to the
+  PUBLIC GitHub releases API (`api.github.com/repos/NoopApp/noop/releases/latest`) — compares the
+  `tag_name` to the installed version and, if newer, shows a Download button that opens the release
+  page; otherwise "You're on the latest." Graceful failure on offline/rate-limit. **No background
+  polling, no auto-update, nothing about the user is sent** — it only runs on tap, and only reads a
+  version number.
+- **Version comparison is unit-tested** on both platforms (`VersionCheck.isNewer` in WhoopProtocol;
+  `UpdateCheck.isNewer` on Android) — it compares dot-separated numeric segments so `1.40 > 1.39` and
+  `1.9 < 1.10` (a plain string compare gets both wrong), tolerant of a leading `v` and the demo
+  flavour's `-demo` suffix.
+- **macOS posture note:** this is the first feature to make an outbound connection, so the macOS
+  sandbox entitlement `com.apple.security.network.client` was added. It's used only for this
+  user-tapped check and the opt-in, off-by-default AI Coach — there is no automatic/background traffic.
+  Android already declared `INTERNET` (for the opt-in Coach), so it needed no change.
+
 ## 1.39 — Wrist alerts for incoming calls (Android, #66)
 
 - **Buzz on incoming calls** (community PR #66 by DieserLiton; reimplemented as NoopApp). A dedicated

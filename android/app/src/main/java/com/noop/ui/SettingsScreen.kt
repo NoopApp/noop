@@ -63,6 +63,7 @@ import com.noop.BuildConfig
 import com.noop.analytics.Zones
 import com.noop.ble.PuffinExperiment
 import com.noop.data.DataBackup
+import com.noop.update.UpdateCheck
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -552,6 +553,72 @@ fun SettingsScreen(vm: AppViewModel) {
                 ) {
                     Text("NOOP", style = NoopType.title2, color = Palette.textPrimary)
                     StatePill("v${BuildConfig.VERSION_NAME}", tone = StrandTone.Neutral, showsDot = false)
+                }
+
+                // Check for updates — a single, user-initiated call to GitHub's public releases API
+                // when the button is tapped. No background polling, no auto-update; nothing about you
+                // is sent. Android already holds INTERNET (for the opt-in Coach), so this adds nothing.
+                var updChecking by remember { mutableStateOf(false) }
+                var updResult by remember { mutableStateOf<UpdateCheck.Result?>(null) }
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                if (!updChecking) {
+                                    updChecking = true
+                                    updResult = null
+                                    scope.launch {
+                                        updResult = UpdateCheck.check(BuildConfig.VERSION_NAME)
+                                        updChecking = false
+                                    }
+                                }
+                            },
+                            enabled = !updChecking,
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Palette.accent),
+                        ) {
+                            if (updChecking) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(14.dp).padding(end = 6.dp),
+                                    strokeWidth = 2.dp,
+                                    color = Palette.accent,
+                                )
+                                Text("Checking…", style = NoopType.captionNumber)
+                            } else {
+                                Text("Check for updates", style = NoopType.captionNumber)
+                            }
+                        }
+                        when (val r = updResult) {
+                            is UpdateCheck.Result.UpToDate ->
+                                Text(
+                                    "You're on the latest (${r.version}).",
+                                    style = NoopType.footnote, color = Palette.textSecondary,
+                                )
+                            is UpdateCheck.Result.Available ->
+                                Button(
+                                    onClick = {
+                                        context.startActivity(
+                                            Intent(Intent.ACTION_VIEW, Uri.parse(r.url)),
+                                        )
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Palette.accent, contentColor = Palette.surfaceBase,
+                                    ),
+                                ) { Text("Download ${r.version}", style = NoopType.captionNumber) }
+                            UpdateCheck.Result.Failed ->
+                                Text(
+                                    "Couldn't check. Try again.",
+                                    style = NoopType.footnote, color = Palette.statusWarning,
+                                )
+                            null -> {}
+                        }
+                    }
+                    Text(
+                        "Checks GitHub for the latest version when you tap — nothing else is sent.",
+                        style = NoopType.footnote, color = Palette.textTertiary,
+                    )
                 }
 
                 Text(
