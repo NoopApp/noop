@@ -287,7 +287,7 @@ private struct WhatItDoesStep: View {
 
     private let slides: [Slide] = [
         .init(icon: "circle.dashed.inset.filled",
-              tint: StrandPalette.recovery100,
+              tint: StrandPalette.accent,
               title: "See recovery, beautifully",
               body: "A signature ring distils HRV, resting heart rate and sleep into one calm read on whether to push or rest."),
         .init(icon: "waveform.path.ecg",
@@ -434,7 +434,7 @@ private struct WearStep: View {
             VStack(spacing: 22) {
                 ZStack {
                     Circle()
-                        .fill(StrandPalette.recovery078.opacity(0.16))
+                        .fill(StrandPalette.accent.opacity(0.16))
                         .frame(width: 130, height: 130)
                         .blur(radius: 24)
                     Image(systemName: "applewatch.side.right")
@@ -676,17 +676,18 @@ private struct ProfileStep: View {
 
                         Divider().overlay(StrandPalette.hairline)
 
-                        SliderRow(label: "Weight",
-                                  value: $profile.weightKg,
-                                  range: 35...200, step: 1,
-                                  display: "\(Int(profile.weightKg)) kg")
+                        // Steppers, not sliders — matches the Age row above and the macOS Settings
+                        // profile editor (same ranges/steps), so every numeric profile field is
+                        // consistent across onboarding and Settings on both platforms.
+                        Stepper(value: $profile.weightKg, in: 30...250, step: 0.5) {
+                            FieldRow(label: "Weight", value: "\(String(format: "%.1f", profile.weightKg)) kg")
+                        }
 
                         Divider().overlay(StrandPalette.hairline)
 
-                        SliderRow(label: "Height",
-                                  value: $profile.heightCm,
-                                  range: 130...220, step: 1,
-                                  display: "\(Int(profile.heightCm)) cm")
+                        Stepper(value: $profile.heightCm, in: 120...230, step: 1) {
+                            FieldRow(label: "Height", value: "\(String(format: "%.0f", profile.heightCm)) cm")
+                        }
                     }
                 }
 
@@ -1071,27 +1072,6 @@ private struct FieldRow: View {
             Text(value)
                 .font(StrandFont.bodyNumber)
                 .foregroundStyle(StrandPalette.textPrimary)
-        }
-    }
-}
-
-private struct SliderRow: View {
-    let label: String
-    @Binding var value: Double
-    let range: ClosedRange<Double>
-    let step: Double
-    let display: String
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(label).strandOverline()
-                Spacer()
-                Text(display)
-                    .font(StrandFont.bodyNumber)
-                    .foregroundStyle(StrandPalette.textPrimary)
-            }
-            Slider(value: $value, in: range, step: step)
-                .tint(StrandPalette.accent)
         }
     }
 }
