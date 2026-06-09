@@ -50,6 +50,14 @@ produced 15,000 heart-rate samples, HRV/RHR/SpO₂/respiratory-rate series, 878
 step records, 3 workouts, and 64 sleep-stage intervals (core 31, deep 14, REM 14,
 awake 5). Standard library only; no dependencies.
 
+Running the imported data through NOOP's `AppleHealthAggregator` produced correct
+per-night metrics (HRV ~30 ms, resting HR 57–58, respiratory 13–15, sleep
+efficiency 96–99%), and `RecoveryScorer` + `Baselines` consumed them: the
+production cold-start gate correctly withheld a score with fewer than four
+baseline nights, while a baseline-seeded run produced a plausible recovery
+(~71%, green). So the full recovery / strain / sleep pipeline runs on Google
+Health data unchanged — it just needs ~2 weeks of history to leave calibration.
+
 ## Roadmap
 
 This is the bridge (phase 1). A native Swift `GoogleHealthImporter` in

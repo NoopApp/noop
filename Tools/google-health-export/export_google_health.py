@@ -302,6 +302,14 @@ def _interval_ts(payload: dict) -> tuple[str | None, str | None]:
 
 def _sleep_records(payload: dict) -> list[str]:
     out: list[str] = []
+    # An explicit "InBed" record spanning the whole session, so sleep efficiency
+    # (asleep / in-bed) can be computed downstream — Apple Health records this
+    # separately from the per-stage intervals.
+    iv = payload.get("interval", {})
+    if iv.get("startTime") and iv.get("endTime"):
+        start = ah_datetime(iv["startTime"], _offset_seconds(iv.get("startUtcOffset")))
+        end = ah_datetime(iv["endTime"], _offset_seconds(iv.get("endUtcOffset")))
+        out.append(_record("HKCategoryTypeIdentifierSleepAnalysis", "HKCategoryValueSleepAnalysisInBed", start, end, None))
     for stage in payload.get("stages", []) or []:
         if not stage.get("startTime") or not stage.get("endTime"):
             continue
@@ -364,7 +372,17 @@ def main() -> None:
     parser.add_argument("--refresh-token")
     parser.add_argument("--fitbit-grafana", default=str(DEFAULT_FITBIT_GRAFANA),
                         help="Path to a fitbit-grafana checkout for credential fallback.")
+    parser.add_argument("--types", help="Comma-separated subset of data types to export "
+                        f"(default all: {','.join(DATA_TYPES)}).")
     args = parser.parse_args()
+
+    selected = DATA_TYPES
+    if args.types:
+        requested = [t.strip() for t in args.types.split(",") if t.strip()]
+        unknown = [t for t in requested if t not in DATA_TYPES]
+        if unknown:
+            sys.exit(f"Unknown data type(s): {', '.join(unknown)}. Known: {', '.join(DATA_TYPES)}")
+        selected = requested
 
     client_id, client_secret, refresh_token = load_credentials(args)
     token = get_access_token(client_id, client_secret, refresh_token)
@@ -375,7 +393,7 @@ def main() -> None:
 
     records: list[str] = []
     counts: dict[str, int] = {}
-    for data_type in DATA_TYPES:
+    for data_type in selected:
         per_type = 0
         for day in days:
             try:
