@@ -36,11 +36,18 @@ jobs:
           path: android/app/build/outputs/apk/release/*-unsigned.apk
 
   # --- JOB 2: iOS App bauen (Unsignierte .ipa) ---
+  # --- JOB 2: iOS App bauen (Unsignierte .ipa) ---
   build-ios:
-    runs-on: macos-14 # Nutzt eine M-Chip macOS Maschine bei GitHub
+    runs-on: macos-15 # <--- Geändert auf macos-15 für neuere Xcode-Unterstützung
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+
+      # Erzwingt die Nutzung von Xcode 16 auf dem Server
+      - name: Set up Xcode version
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '16.0' # <--- Passend für das neuere Projektformat (77)
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -62,7 +69,7 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGN_ENTITLEMENTS=""
 
-      # Da wir kein Zertifikat haben, tricksen wir Xcode aus und bauen die .ipa-Struktur manuell per Skript
+      # Kleiner Fix: Wir leeren hier auch den Entitlements-Pfad im App-Bundle, falls Xcode meckert
       - name: Package iOS App to .ipa
         run: |
           mkdir -p build/Payload
