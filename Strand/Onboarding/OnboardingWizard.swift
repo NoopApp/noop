@@ -37,7 +37,7 @@ public struct OnboardingWizard: View {
     // handles the bond→celebration transition without re-rendering the root.
 
     private enum Step: Int, CaseIterable {
-        case welcome, what, expectations, bluetooth, wear, scan, bonded, profile, importData, done
+        case welcome, what, expectations, bluetooth, wear, scan, bonded, profile, importData, notifications, done
 
         var isFirst: Bool { self == .welcome }
         var isLast: Bool { self == .done }
@@ -68,6 +68,7 @@ public struct OnboardingWizard: View {
                     case .bonded:     BondedStep()
                     case .profile:    ProfileStep()
                     case .importData: ImportStep()
+                    case .notifications: NotificationsStep()
                     case .done:       DoneStep()
                     }
                 }
@@ -184,6 +185,7 @@ public struct OnboardingWizard: View {
         case .bonded:     return "Continue"
         case .profile:    return "Save & Continue"
         case .importData: return "Continue"
+        case .notifications: return "Continue"
         case .done:       return "Enter NOOP"
         }
     }
@@ -822,7 +824,48 @@ private struct ImportStep: View {
     }
 }
 
-// MARK: - Step 9 · Done
+// MARK: - Step 9 · Notifications (wrist alerts priming)
+
+private struct NotificationsStep: View {
+    @State private var pulse = false
+    var body: some View {
+        StepShell(title: "Stay in the loop",
+                  subtitle: "NOOP can tap your wrist when your Mac needs you — no glance at the screen required.") {
+            VStack(spacing: 24) {
+                ZStack {
+                    Circle()
+                        .stroke(StrandPalette.accent.opacity(0.25), lineWidth: 2)
+                        .frame(width: 120, height: 120)
+                        .scaleEffect(pulse ? 1.2 : 0.9)
+                        .opacity(pulse ? 0 : 0.8)
+                    Circle()
+                        .fill(StrandPalette.accentMuted.opacity(0.5))
+                        .frame(width: 86, height: 86)
+                    Image(systemName: "bell.badge")
+                        .font(.system(size: 32, weight: .semibold))
+                        .foregroundStyle(StrandPalette.accent)
+                }
+                .frame(height: 130)
+
+                InfoCard(
+                    icon: "applewatch.radiowaves.left.and.right",
+                    tint: StrandPalette.statusPositive,
+                    title: "A buzz, not a banner",
+                    message: "When the Mac apps you choose send a notification, NOOP taps your strap — Slack, Calendar, Messages, whatever matters. Everything stays on this Mac."
+                )
+
+                VStack(spacing: 12) {
+                    Checkline(text: "Pick which apps reach your wrist in Settings → Notifications.")
+                    Checkline(text: "Strain nudges and your smart alarm tap your wrist the same way.")
+                }
+                .frame(maxWidth: 460)
+            }
+        }
+        .onAppear { withAnimation(StrandMotion.breathe) { pulse = true } }
+    }
+}
+
+// MARK: - Step 10 · Done
 
 private struct DoneStep: View {
     @State private var appear = false

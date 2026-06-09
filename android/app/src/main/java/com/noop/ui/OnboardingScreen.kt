@@ -94,6 +94,14 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
     // multi-window) doesn't recreate the Activity and throw the user back to page 1.
     var pageIndex by rememberSaveable { mutableIntStateOf(0) }
     val page = pages[pageIndex]
+    val live by viewModel.live.collectAsStateWithLifecycle()
+
+    // The bonded celebration only makes sense once a strap is actually bonded. Auto-advance to it
+    // the moment that happens on the Connect step (mirrors macOS's scan → celebration), and skip
+    // it in both directions when nothing is bonded so it never shows a false "You're connected".
+    LaunchedEffect(live.bonded) {
+        if (live.bonded && page == OnboardingPage.Connect) pageIndex++
+    }
 
     fun complete() {
         // Onboarding deferred the foreground promotion; do it now if a strap is live.
@@ -120,6 +128,10 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
                     ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
                 }
                 if (!granted) { bleAdvanceLauncher.launch(blePerms); return }
+            }
+            OnboardingPage.Connect -> {
+                // No strap bonded → skip the celebration and go straight to Profile.
+                if (!live.bonded) { pageIndex = pages.indexOf(OnboardingPage.Profile); return }
             }
             OnboardingPage.Notifications -> {
                 val needsNotif = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -167,6 +179,7 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
                     OnboardingPage.Bluetooth -> BluetoothStep()
                     OnboardingPage.Wear -> WearStep()
                     OnboardingPage.Connect -> ConnectStep(viewModel)
+                    OnboardingPage.Bonded -> BondedStep(viewModel)
                     OnboardingPage.Profile -> ProfileStep()
                     OnboardingPage.Import -> ImportStep(viewModel)
                     OnboardingPage.Notifications -> NotificationsStep()
@@ -177,7 +190,12 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
             OnboardingFooter(
                 canGoBack = pageIndex > 0,
                 cta = page.cta,
-                onBack = { if (pageIndex > 0) pageIndex-- },
+                onBack = {
+                    var target = pageIndex - 1
+                    // Skip the bonded celebration going back when nothing is bonded.
+                    if (target >= 0 && pages[target] == OnboardingPage.Bonded && !live.bonded) target--
+                    if (target >= 0) pageIndex = target
+                },
                 onNext = {
                     if (pageIndex == pages.lastIndex) {
                         complete()
@@ -197,6 +215,7 @@ private enum class OnboardingPage(val cta: String) {
     Bluetooth("Continue"),
     Wear("Continue"),
     Connect("Continue"),
+    Bonded("Continue"),
     Profile("Save & continue"),
     Import("Continue"),
     Notifications("Continue"),
@@ -562,6 +581,47 @@ private fun ConnectStep(viewModel: AppViewModel) {
                 tint = Palette.statusPositive,
                 title = "This can run while you finish setup",
                 message = "If the strap is nearby, NOOP will keep the BLE link alive in the background. You can continue through profile and import while it bonds.",
+            )
+        }
+    }
+}
+
+// A short celebration once the strap bonds — the Connect step auto-advances here on bond, and
+// the nav skips it entirely when nothing is bonded (mirrors the macOS scan → bonded moment).
+@Composable
+private fun BondedStep(viewModel: AppViewModel) {
+    val live by viewModel.live.collectAsStateWithLifecycle()
+    StepShell {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 430.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                RecoveryRing(score = 100.0, diameter = 200.dp, lineWidth = 14.dp, showsLabel = false)
+                Icon(
+                    Icons.Filled.Check,
+                    contentDescription = null,
+                    tint = Palette.statusPositive,
+                    modifier = Modifier.size(54.dp),
+                )
+            }
+            Spacer(Modifier.height(24.dp))
+            Text(
+                "You're connected.",
+                style = NoopType.title1,
+                color = Palette.textPrimary,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                live.batteryPct?.let { "Your strap is bonded · ${it.toInt()}% battery." }
+                    ?: "Your strap is bonded and ready to stream.",
+                style = NoopType.body,
+                color = Palette.textSecondary,
+                textAlign = TextAlign.Center,
             )
         }
     }
