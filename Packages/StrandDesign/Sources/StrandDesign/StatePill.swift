@@ -27,13 +27,13 @@ public enum StrandTone: Sendable {
 
 public struct StatePill: View {
 
-    public var title: String
+    public var title: LocalizedStringKey
     public var tone: StrandTone
     public var showsDot: Bool
     /// Pulse the leading dot (e.g. "live" / "syncing").
     public var pulsing: Bool
 
-    public init(_ title: String, tone: StrandTone = .neutral, showsDot: Bool = true, pulsing: Bool = false) {
+    public init(_ title: LocalizedStringKey, tone: StrandTone = .neutral, showsDot: Bool = true, pulsing: Bool = false) {
         self.title = title
         self.tone = tone
         self.showsDot = showsDot

@@ -61,6 +61,21 @@ class Capture:
     def __init__(self, family: str, out_path: str):
         self.family = family
         self.out_path = out_path
+        # Family-aware offload plumbing: the inner record (where the packet-type byte lives) starts at
+        # offset 8 on WHOOP 5 (puffin) but offset 4 on WHOOP 4 (Harvard), and the metadata/ack framing
+        # differs accordingly. Pick the right offsets + helpers once so the hot path stays generic.
+        if family == "whoop5":
+            self.inner_off = wf.WHOOP5_INNER_OFF
+            self.meta_type_off = wf.WHOOP5_META_TYPE_OFF
+            self._end_data_fn = wf.history_end_data
+            self._build_ack_fn = wf.build_history_ack
+            self._build_cmd_fn = wf.build_puffin_command
+        else:
+            self.inner_off = wf.WHOOP4_INNER_OFF
+            self.meta_type_off = wf.WHOOP4_META_TYPE_OFF
+            self._end_data_fn = wf.history_end_data_whoop4
+            self._build_ack_fn = wf.build_history_ack_whoop4
+            self._build_cmd_fn = wf.build_command_frame
         self.records = []
         self.latest_hr = None
         self.reassemblers = {}     # char uuid -> Reassembler
@@ -96,13 +111,13 @@ class Capture:
                 "ts_ms": self.last_frame_ms,
                 "hr": self.latest_hr,
             })
-            if self.family == "whoop5" and len(frame) > wf.WHOOP5_INNER_OFF:
-                t = frame[wf.WHOOP5_INNER_OFF]
+            if len(frame) > self.inner_off:
+                t = frame[self.inner_off]
                 if t == wf.PACKET_HISTORICAL_DATA:
                     self.type47_count += 1          # the prize — log it loudly in run()
                 elif t == wf.PACKET_METADATA:
-                    if len(frame) > wf.WHOOP5_META_TYPE_OFF \
-                            and frame[wf.WHOOP5_META_TYPE_OFF] == wf.META_HISTORY_COMPLETE:
+                    if len(frame) > self.meta_type_off \
+                            and frame[self.meta_type_off] == wf.META_HISTORY_COMPLETE:
                         self.history_complete += 1   # store fully drained at least once
                     if self.ack_queue is not None:
                         self._maybe_queue_ack(frame)
@@ -114,7 +129,7 @@ class Capture:
     def _maybe_queue_ack(self, frame: bytes):
         """Enqueue a HISTORY_END's end_data for acking (non-blocking — the write happens in the
         ack-sender task). Dedups a burst of identical cursors but retries a stuck one."""
-        end_data = wf.history_end_data(frame)
+        end_data = self._end_data_fn(frame)
         if end_data is None:
             return
         now_ms = int(time.time() * 1000)
@@ -155,18 +170,29 @@ async def run(args):
     cfg = WHOOP5 if args.model == "whoop5" else WHOOP4
     cap = Capture(args.model, args.out)
 
-    address = args.address
-    if not address:
+    target = args.address
+    if not args.address:
         device = await find_address(cfg, args.name_filter)
         if device is None:
             print("no WHOOP strap found. Make sure it is awake, near, and not bonded to a phone.")
             return
-        address = device.address
-        print(f"found {device.name or '?'} @ {address}")
+        target = device
+        print(f"found {device.name or '?'} @ {device.address}")
+    else:
+        # Even with an explicit --address, resolve the device via a scan first: BlueZ connects far more
+        # reliably to a freshly-discovered device object than to a bare address, especially for a strap
+        # that just woke (a bare-address connect raises "Device ... not found" if BlueZ has no cache).
+        print(f"scanning to resolve {args.address} …")
+        device = await BleakScanner.find_device_by_address(args.address, timeout=20.0)
+        if device is None:
+            print(f"{args.address} not found. Wake the strap (wear or tap it so it advertises) and "
+                  f"make sure the phone's Bluetooth is OFF, then retry.")
+            return
+        target = device
 
     stop = asyncio.Event()
 
-    async with BleakClient(address) as client:
+    async with BleakClient(target) as client:
         print(f"connected: {client.is_connected}")
 
         # Just-works bond: the protocol bonds via a single CONFIRMED WRITE (the session frame below),
@@ -181,7 +207,7 @@ async def run(args):
 
         # Arm the chunk-ack queue BEFORE subscribing, so a HISTORY_END arriving in the very first
         # post-bond burst is enqueued rather than dropped.
-        if args.history_ack and args.model == "whoop5":
+        if args.history_ack:
             cap.ack_queue = asyncio.Queue()
 
         # Standard HR (unbonded) → ground-truth bpm for correlation.
@@ -255,6 +281,54 @@ async def run(args):
                 seq += 1
                 await asyncio.sleep(1.5)
 
+        # WHOOP 4 command probe: the same read-only GETs, 4.0 (CRC8) framing. The strap's COMMAND_RESPONSE
+        # (type 36) replies decode via the existing 4.0 command_response post-hook — useful to validate
+        # the 4.0 decoder against real hardware and to spot any firmware-version divergence.
+        if args.commands and args.model == "whoop4":
+            await asyncio.sleep(1.0)
+            probes4 = [
+                (wf.CMD_GET_BATTERY_LEVEL, b"\x00", "GET_BATTERY_LEVEL"),
+                (wf.CMD_GET_CLOCK, b"", "GET_CLOCK"),
+                (wf.CMD_REPORT_VERSION_INFO, b"\x00", "REPORT_VERSION_INFO"),
+                (wf.CMD_GET_EXTENDED_BATTERY_INFO, b"\x00", "GET_EXTENDED_BATTERY_INFO"),
+                (wf.CMD_GET_DATA_RANGE, b"\x00", "GET_DATA_RANGE"),
+                (wf.CMD_GET_HELLO_HARVARD, b"\x00", "GET_HELLO_HARVARD"),
+            ]
+            seq = 2
+            for cmd, pl, name in probes4:
+                frame = wf.build_command_frame(cmd, seq=seq, payload=pl)
+                try:
+                    await client.write_gatt_char(cfg["cmd_write"], frame, response=False)
+                    print(f"probe(4.0) → {name} (cmd {cmd}): {frame.hex()}")
+                except Exception as e:
+                    print(f"probe {name} failed: {e}")
+                seq += 1
+                await asyncio.sleep(1.5)
+
+        # WHOOP 4 historical offload: turn the realtime streams OFF (so the type-43 flood doesn't
+        # starve the offload — the 4.0 handshake does this), then request the historical store. With
+        # --history-ack each HISTORY_END is echoed back to walk the trim cursor (see ack_sender). The
+        # command NUMBERS are shared with 5.0; only the framing differs (CRC8). Used to read the 4.0
+        # historical record version on this firmware (is it still v24, or has it drifted?).
+        if (args.history_only or args.history_ack) and args.model == "whoop4":
+            await asyncio.sleep(1.0)
+            probes4h = [
+                (wf.PUFFIN_CMD_TOGGLE_REALTIME_HR, b"\x00", "TOGGLE_REALTIME_HR(off)"),
+                (wf.PUFFIN_CMD_SEND_R10_R11_REALTIME, b"\x00", "SEND_R10_R11_REALTIME(off)"),
+                (wf.CMD_GET_DATA_RANGE, b"\x00", "GET_DATA_RANGE"),
+                (wf.PUFFIN_CMD_SEND_HISTORICAL_DATA, b"\x00", "SEND_HISTORICAL_DATA"),
+            ]
+            seq = 2
+            for cmd, pl, name in probes4h:
+                frame = wf.build_command_frame(cmd, seq=seq, payload=pl)
+                try:
+                    await client.write_gatt_char(cfg["cmd_write"], frame, response=False)
+                    print(f"probe(4.0) → {name} (cmd {cmd}): {frame.hex()}")
+                except Exception as e:
+                    print(f"probe {name} failed: {e}")
+                seq += 1
+                await asyncio.sleep(1.5)
+
         # Capture until Ctrl-C or the optional duration elapses.
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
@@ -273,8 +347,8 @@ async def run(args):
                 await asyncio.sleep(args.history_repeat)
                 if stop.is_set():
                     break
-                frame = wf.build_puffin_command(wf.PUFFIN_CMD_SEND_HISTORICAL_DATA, seq=seq2 & 0xFF,
-                                                payload=b"\x00")
+                frame = cap._build_cmd_fn(wf.PUFFIN_CMD_SEND_HISTORICAL_DATA, seq=seq2 & 0xFF,
+                                          payload=b"\x00")
                 try:
                     await client.write_gatt_char(cfg["cmd_write"], frame, response=False)
                     print(f"  re-request SEND_HISTORICAL_DATA (#{seq2-99})")
@@ -292,7 +366,7 @@ async def run(args):
                     end_data = await asyncio.wait_for(cap.ack_queue.get(), timeout=0.5)
                 except asyncio.TimeoutError:
                     continue
-                ack = wf.build_history_ack(end_data, seq=seq3 & 0xFF)
+                ack = cap._build_ack_fn(end_data, seq=seq3 & 0xFF)
                 trim = int.from_bytes(end_data[0:4], "little")
                 try:
                     await client.write_gatt_char(cfg["cmd_write"], ack, response=True)
@@ -352,16 +426,30 @@ async def run(args):
             chans[r["char"]] = chans.get(r["char"], 0) + 1
         for c, n in sorted(chans.items(), key=lambda kv: -kv[1]):
             print(f"  {n:6d}  {c}")
-        # Per-type tally so the result is obvious without a separate decode pass.
+        # Per-type tally so the result is obvious without a separate decode pass. The inner record
+        # (where the packet-type byte lives) starts at offset 8 on WHOOP 5 but offset 4 on WHOOP 4.
+        inner_off = cap.inner_off
         types = {}
         for r in cap.records:
             h = bytes.fromhex(r["hex"])
-            t = h[wf.WHOOP5_INNER_OFF] if len(h) > wf.WHOOP5_INNER_OFF else None
+            t = h[inner_off] if len(h) > inner_off else None
             types[t] = types.get(t, 0) + 1
         print("  by inner type:", dict(sorted(types.items(), key=lambda kv: -kv[1])))
-        if args.model == "whoop5":
+        if cap.type47_count or args.history_only or args.history_ack:
             verdict = "GOT THEM" if cap.type47_count else "none"
             print(f"  type-47 HISTORICAL_DATA frames: {cap.type47_count}  → {verdict}")
+            # The historical record VERSION byte (the answer to "did the layout drift?"): it sits at
+            # the inner record's seq slot — frame[5] on 4.0, frame[9] on 5.0 (inner_off + 1). 4.0 is
+            # documented as v24; anything else on this firmware is a genuine drift finding.
+            ver_off = inner_off + 1
+            versions = {}
+            for r in cap.records:
+                h = bytes.fromhex(r["hex"])
+                if len(h) > ver_off and h[inner_off] == wf.PACKET_HISTORICAL_DATA:
+                    versions[h[ver_off]] = versions.get(h[ver_off], 0) + 1
+            if versions:
+                print(f"  type-47 record version(s) [frame[{ver_off}]]: "
+                      f"{dict(sorted(versions.items(), key=lambda kv: -kv[1]))}")
             if cap.ack_queue is not None:
                 drained = "yes" if cap.history_complete else "no (no HISTORY_COMPLETE seen)"
                 print(f"  offload drained to completion: {drained} "
@@ -380,20 +468,20 @@ def main():
                    help="WHOOP 5 only: after CLIENT_HELLO, send candidate puffin commands (realtime "
                         "toggles + history request) to try to start the biometric stream. Experimental.")
     p.add_argument("--commands", action="store_true",
-                   help="WHOOP 5 only: after CLIENT_HELLO, send the read-only GET commands (battery, "
-                        "clock, version, ext-battery, battery-pack, data-range) to capture their "
-                        "COMMAND_RESPONSE (type 36) frames for mapping the +4 response payloads.")
+                   help="after bond/hello, send the read-only GET commands (battery, clock, version, "
+                        "ext-battery, data-range, hello) to capture their COMMAND_RESPONSE (type 36) "
+                        "frames. WHOOP 5 uses puffin framing (+ battery-pack); WHOOP 4 uses 4.0 framing.")
     p.add_argument("--history-only", dest="history_only", action="store_true",
-                   help="WHOOP 5 only: turn the realtime streams OFF, then request the historical "
-                        "offload (type-47 records). Use instead of --probe to avoid the realtime "
-                        "flood starving the offload.")
+                   help="turn the realtime streams OFF, then request the historical offload (type-47 "
+                        "records). Use instead of --probe to avoid the realtime flood starving the "
+                        "offload. Works for both whoop4 (CRC8) and whoop5 (puffin).")
     p.add_argument("--history-repeat", dest="history_repeat", type=float, default=5.0,
                    help="In --history-only mode, re-request the offload every N seconds (default 5). "
                         "The offload is deterministic, so repeating + dedup recovers drop-lost frames.")
     p.add_argument("--history-ack", dest="history_ack", action="store_true",
-                   help="WHOOP 5 only: ack each HISTORY_END with HISTORICAL_DATA_RESULT(23) to advance "
-                        "the strap's trim cursor (the 4.0 offload handshake). Without this the cursor "
-                        "stays stuck and the type-47 DSP records past it are never served.")
+                   help="ack each HISTORY_END with HISTORICAL_DATA_RESULT(23) to advance the strap's "
+                        "trim cursor (the offload handshake). Without this the cursor stays stuck and "
+                        "the type-47 DSP records past it are never served. Both generations.")
     p.add_argument("--stop-on-idle", dest="stop_on_idle", type=float, default=0,
                    help="stop the capture once no frame has arrived for N seconds (the offload has "
                         "drained). 0 = off (use --duration / Ctrl-C instead).")

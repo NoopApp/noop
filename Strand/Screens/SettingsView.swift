@@ -157,7 +157,7 @@ struct SettingsView: View {
         ) {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 12) {
-                    StatePill(strapStatusTitle, tone: strapTone, pulsing: live.connected)
+                    StatePill("\(strapStatusTitle)", tone: strapTone, pulsing: live.connected)
                     if let pct = live.batteryPct {
                         StatePill("Battery \(Int(pct.rounded()))%",
                                   tone: batteryTone(pct), showsDot: false)
@@ -491,8 +491,8 @@ struct SettingsView: View {
 /// A grouped settings card: icon + title header, an explanatory blurb, then content.
 private struct SettingsSection<Content: View>: View {
     let icon: String
-    let title: String
-    let blurb: String
+    let title: LocalizedStringKey
+    let blurb: LocalizedStringKey
     @ViewBuilder var content: () -> Content
 
     var body: some View {
@@ -520,7 +520,7 @@ private struct SettingsSection<Content: View>: View {
 
 /// Label on the left, control on the right — the two-column form feel.
 private struct FormRow<Control: View>: View {
-    let label: String
+    let label: LocalizedStringKey
     @ViewBuilder var control: () -> Control
 
     var body: some View {

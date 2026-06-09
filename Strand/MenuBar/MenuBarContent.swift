@@ -142,7 +142,7 @@ public struct MenuBarContent: View {
                     .foregroundStyle(StrandPalette.textTertiary)
             }
             Spacer(minLength: 8)
-            StatePill(connectionTitle, tone: connectionTone, pulsing: live.bonded)
+            StatePill("\(connectionTitle)", tone: connectionTone, pulsing: live.bonded)
         }
     }
 

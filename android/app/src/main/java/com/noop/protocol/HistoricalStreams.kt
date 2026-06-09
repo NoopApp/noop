@@ -124,9 +124,6 @@ private fun histVersionLayout(version: Int): HistVersion? = when (version) {
  * `gravity_y`, `gravity_z`. These match the keys [extractHistoricalStreams] reads.
  */
 fun decodeHistorical(frame: ByteArray, family: DeviceFamily = DeviceFamily.WHOOP4): Map<String, Any?>? {
-    // WHOOP5 type-47 offsets are a later milestone (the live Framing.parseFrame defers WHOOP5
-    // biometric decode too); only WHOOP4 historical decode is hardware-verified.
-    if (family != DeviceFamily.WHOOP4) return null
     if (frame.size < 8 || frame[0] != 0xAA.toByte()) return null
 
     // Integrity gate: validate the envelope + CRC32 via the shared Framing parser. We reuse its
@@ -134,6 +131,11 @@ fun decodeHistorical(frame: ByteArray, family: DeviceFamily = DeviceFamily.WHOOP
     // `parsed` empty (the live decoder skips type-47), so we decode the record ourselves below.
     val checked = Framing.parseFrame(frame, family)
     if (!checked.ok || checked.crcOk == false) return null
+
+    // WHOOP 5.0/MG has the longer puffin envelope (record @8), so its v18 layout is decoded separately
+    // at its own absolute offsets (port of Swift decodeWhoop5Historical). WHOOP 4 below is unchanged.
+    if (family == DeviceFamily.WHOOP5) return decodeWhoop5Historical(frame)
+    if (family != DeviceFamily.WHOOP4) return null
     if (frame[4].toInt() and 0xFF != PacketType.HISTORICAL_DATA.rawValue) return null
 
     val version = frame[5].toInt() and 0xFF
@@ -165,6 +167,47 @@ fun decodeHistorical(frame: ByteArray, family: DeviceFamily = DeviceFamily.WHOOP
     layout.gravityYOff?.let { off -> frame.histF32(off)?.let { out["gravity_y"] = it } }
     layout.gravityZOff?.let { off -> frame.histF32(off)?.let { out["gravity_z"] = it } }
 
+    return out
+}
+
+/**
+ * WHOOP 5.0/MG type-47 "v18" historical decode. The puffin envelope is longer, so the record starts at
+ * byte 8 (type@8, version@9) and fields sit at their WHOOP5-ABSOLUTE offsets — NOT the WHOOP4 V24 layout
+ * shifted by +4 (that decodes to garbage on v18). Offsets verified against real worn/off-wrist frames
+ * (the data is the arbiter): unix@15, hr@22, rr@24+, gravity@45/49/53, and per-second fields each gated
+ * to a physical range so a wrong offset on unmapped firmware stores nothing. Mirrors Swift
+ * `decodeWhoop5Historical`, and emits the same keys [extractHistoricalStreams] reads. v26 (PPG) and other
+ * versions aren't stored, so they return null here (skipped), matching the Swift raw-region treatment.
+ */
+private fun decodeWhoop5Historical(frame: ByteArray): Map<String, Any?>? {
+    if (frame.histU8(8) != PacketType.HISTORICAL_DATA.rawValue) return null
+    val version = frame.histU8(9) ?: return null
+    if (version != 18) return null
+
+    val out = LinkedHashMap<String, Any?>()
+    out["hist_version"] = version
+    frame.histU32(15)?.let { out["unix"] = it.toInt() }
+    frame.histU8(22)?.let { out["heart_rate"] = it }
+    val rrn = frame.histU8(23) ?: 0
+    out["rr_count"] = rrn
+    val rrVals = ArrayList<Int>()
+    for (i in 0 until minOf(rrn, 4)) {
+        val v = frame.histU16(24 + i * 2)
+        if (v != null && v != 0) rrVals.add(v)
+    }
+    out["rr_intervals"] = rrVals
+    frame.histF32(45)?.let { out["gravity_x"] = it }
+    frame.histF32(49)?.let { out["gravity_y"] = it }
+    frame.histF32(53)?.let { out["gravity_z"] = it }
+
+    // Per-second fields beyond HR/gravity, each gated to a physically-real range (cross-validated
+    // worn vs off-wrist). Fields the source report listed but that didn't decode consistently on this
+    // firmware (cardiac_flags@33, sleep-state@81, perfusion@69/71) are deliberately not decoded.
+    frame.histF32(41)?.let { if (it.isFinite() && it in 0.0..8.0) out["dynamic_acceleration"] = it }
+    frame.histU16(57)?.let { out["step_motion_counter"] = it }
+    frame.histU8(63)?.let { if (it in 0..2) out["motion_wear_quality"] = it }
+    // skin temp: raw u16 (the store keeps it raw, /100 at display); gate on the °C being physical.
+    frame.histU16(73)?.let { if ((it / 100.0) in 20.0..45.0) out["skin_temp_raw"] = it }
     return out
 }
 
@@ -247,7 +290,9 @@ fun extractHistoricalStreams(
     val battery = ArrayList<BatteryRow>()
 
     for (frame in rawFrames) {
-        val t = if (frame.size > 4) frame[4].toInt() and 0xFF else -1
+        // Packet type byte: WHOOP 5/MG's longer puffin envelope puts it at frame[8]; WHOOP 4 at frame[4].
+        val t = if (family == DeviceFamily.WHOOP5) (frame.histU8(8) ?: -1)
+                else if (frame.size > 4) frame[4].toInt() and 0xFF else -1
         when (t) {
             PacketType.HISTORICAL_DATA.rawValue -> {
                 // type-47 carries a REAL unix timestamp + the full DSP record. No wall-clock offset.

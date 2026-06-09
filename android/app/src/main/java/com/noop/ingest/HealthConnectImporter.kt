@@ -56,7 +56,11 @@ object HealthConnectImporter {
     const val SOURCE = "Health Connect"
 
     private const val WHOOP = "my-whoop"
-    private const val APPLE = "apple-health"
+    // Health Connect data is stored under its OWN source ("health-connect"), NOT the shared
+    // "apple-health" bucket — otherwise it's mis-attributed to Apple Health in the UI (issue #34).
+    // (The recovery/sleep backfill still lands under "my-whoop"; only the external-health aggregates
+    // + workouts carry this source.)
+    private const val HC_DEVICE = "health-connect"
     private const val HC_WORKOUT_SOURCE = "health-connect"
 
     /** Read window: a wide ~10-year span ending now. Health Connect itself caps retention. */
@@ -108,6 +112,10 @@ object HealthConnectImporter {
         if (sdkStatus(context) != HealthConnectClient.SDK_AVAILABLE) {
             return ImportSummary.failure(SOURCE, "Health Connect is not available on this device.")
         }
+
+        // Refile any legacy Health Connect data that landed in the shared "apple-health" bucket before
+        // #34 BEFORE importing, so a re-import refiles cleanly instead of duplicating across both sources.
+        try { repo.refileLegacyHealthConnect() } catch (_: Exception) { /* best-effort */ }
 
         val client = client(context)
 
@@ -211,7 +219,7 @@ object HealthConnectImporter {
                 val endS = r.endTime.epochSecond
                 workouts.add(
                     WorkoutRow(
-                        deviceId = APPLE,
+                        deviceId = HC_DEVICE,
                         startTs = startS,
                         endTs = endS,
                         sport = exerciseName(r),
@@ -258,7 +266,7 @@ object HealthConnectImporter {
             if (hasApple) {
                 appleRows.add(
                     AppleDaily(
-                        deviceId = APPLE,
+                        deviceId = HC_DEVICE,
                         day = day,
                         steps = if (a.steps > 0L) a.steps.toInt() else null,
                         activeKcal = if (a.activeKcal > 0.0) round1(a.activeKcal) else null,
@@ -303,7 +311,7 @@ object HealthConnectImporter {
         // Persist. Register the devices we write under so name() lookups resolve.
         try {
             if (appleRows.isNotEmpty()) {
-                repo.upsertDevice(APPLE, name = "Apple Health")
+                repo.upsertDevice(HC_DEVICE, name = "Health Connect")
                 repo.upsertAppleDaily(appleRows)
             }
             if (dailyRows.isNotEmpty()) {
@@ -356,18 +364,26 @@ object HealthConnectImporter {
         onRecord: (T) -> Unit,
     ) {
         var pageToken: String? = null
-        do {
-            val response = client.readRecords(
-                ReadRecordsRequest(
-                    recordType = type,
-                    timeRangeFilter = filter,
-                    pageSize = PAGE_SIZE,
-                    pageToken = pageToken,
+        try {
+            do {
+                val response = client.readRecords(
+                    ReadRecordsRequest(
+                        recordType = type,
+                        timeRangeFilter = filter,
+                        pageSize = PAGE_SIZE,
+                        pageToken = pageToken,
+                    )
                 )
-            )
-            for (record in response.records) onRecord(record)
-            pageToken = response.pageToken
-        } while (pageToken != null)
+                for (record in response.records) onRecord(record)
+                pageToken = response.pageToken
+            } while (pageToken != null)
+        } catch (e: Exception) {
+            // One record type failing (e.g. a device/SDK validation quirk like "count must not be less
+            // than 1" seen on some Health Connect builds) must NOT abort the whole import — log it and
+            // keep whatever was read, so every other data type still comes in (issue #34). The reads
+            // accumulate into shared buckets, so a partial type is simply absent, never corrupt.
+            android.util.Log.w("HealthConnect", "read of ${type.simpleName} failed; skipping: ${e.message}")
+        }
     }
 
     // MARK: - field mapping helpers
@@ -410,33 +426,35 @@ object HealthConnectImporter {
     }
 
     /**
-     * Minimal, stable map of common ExerciseSessionRecord.EXERCISE_TYPE_* constants to labels.
-     * The constants are stable public ints; unknown/other types fall back to "Workout".
-     * (We hardcode the int values to avoid a brittle dependency on every constant existing
-     * across connect-client patch versions; values are from the published EXERCISE_TYPE_* set.)
+     * Map of common ExerciseSessionRecord.EXERCISE_TYPE_* constants to readable labels. We reference the
+     * library constants directly rather than hardcoding ints — the old hardcoded values were WRONG (e.g.
+     * 79 was mapped to "Swimming" but 79 is actually WALKING, so a walking session showed as swimming —
+     * issue #53; 80 was "Swimming" but is WATER_POLO; 82 was "Walking" but is WHEELCHAIR; etc.). Using
+     * the constants makes the int↔label mapping impossible to get wrong, and a renamed/removed constant
+     * becomes a compile error instead of a silent mismatch. Unknown types fall back to "Workout".
      */
     private val EXERCISE_TYPE_NAMES: Map<Int, String> = mapOf(
-        56 to "Running",
-        57 to "Running",          // RUNNING_TREADMILL
-        8 to "Cycling",           // BIKING
-        9 to "Cycling",           // BIKING_STATIONARY
-        79 to "Swimming",         // SWIMMING_OPEN_WATER
-        80 to "Swimming",         // SWIMMING_POOL
-        70 to "Strength",         // STRENGTH_TRAINING
-        82 to "Walking",          // WALKING
-        90 to "Yoga",             // YOGA
-        53 to "Rowing",           // ROWING
-        54 to "Rowing",           // ROWING_MACHINE
-        37 to "HIIT",             // HIGH_INTENSITY_INTERVAL_TRAINING
-        25 to "Elliptical",       // ELLIPTICAL
-        48 to "Pilates",          // PILATES
-        13 to "Boxing",           // BOXING
-        33 to "Hiking",           // HIKING
-        2 to "Badminton",         // BADMINTON
-        4 to "Baseball",          // BASEBALL
-        5 to "Basketball",        // BASKETBALL
-        64 to "Soccer",           // SOCCER
-        87 to "Weightlifting",    // WEIGHTLIFTING
+        ExerciseSessionRecord.EXERCISE_TYPE_RUNNING to "Running",
+        ExerciseSessionRecord.EXERCISE_TYPE_RUNNING_TREADMILL to "Running",
+        ExerciseSessionRecord.EXERCISE_TYPE_BIKING to "Cycling",
+        ExerciseSessionRecord.EXERCISE_TYPE_BIKING_STATIONARY to "Cycling",
+        ExerciseSessionRecord.EXERCISE_TYPE_SWIMMING_OPEN_WATER to "Swimming",
+        ExerciseSessionRecord.EXERCISE_TYPE_SWIMMING_POOL to "Swimming",
+        ExerciseSessionRecord.EXERCISE_TYPE_STRENGTH_TRAINING to "Strength",
+        ExerciseSessionRecord.EXERCISE_TYPE_WALKING to "Walking",
+        ExerciseSessionRecord.EXERCISE_TYPE_HIKING to "Hiking",
+        ExerciseSessionRecord.EXERCISE_TYPE_YOGA to "Yoga",
+        ExerciseSessionRecord.EXERCISE_TYPE_ROWING to "Rowing",
+        ExerciseSessionRecord.EXERCISE_TYPE_ROWING_MACHINE to "Rowing",
+        ExerciseSessionRecord.EXERCISE_TYPE_HIGH_INTENSITY_INTERVAL_TRAINING to "HIIT",
+        ExerciseSessionRecord.EXERCISE_TYPE_ELLIPTICAL to "Elliptical",
+        ExerciseSessionRecord.EXERCISE_TYPE_PILATES to "Pilates",
+        ExerciseSessionRecord.EXERCISE_TYPE_BOXING to "Boxing",
+        ExerciseSessionRecord.EXERCISE_TYPE_BADMINTON to "Badminton",
+        ExerciseSessionRecord.EXERCISE_TYPE_BASEBALL to "Baseball",
+        ExerciseSessionRecord.EXERCISE_TYPE_BASKETBALL to "Basketball",
+        ExerciseSessionRecord.EXERCISE_TYPE_SOCCER to "Soccer",
+        ExerciseSessionRecord.EXERCISE_TYPE_WEIGHTLIFTING to "Weightlifting",
     )
 
     private fun round1(x: Double) = round(x * 10.0) / 10.0

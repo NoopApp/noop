@@ -732,16 +732,16 @@ private struct ImportStep: View {
                 StrandCard {
                     VStack(spacing: 10) {
                         ImportActionButton(
-                            title: model.importing ? "Importing…" : "Import WHOOP export",
+                            title: model.isImporting(.whoop) ? "Importing…" : "Import WHOOP export",
                             systemImage: "tray.and.arrow.down",
-                            disabled: model.importing
+                            disabled: model.hasActiveImport
                         ) {
                             presentImporter(.whoop)
                         }
                         ImportActionButton(
-                            title: model.importing ? "Working…" : "Import Apple Health export",
+                            title: model.isImporting(.appleHealth) ? "Working…" : "Import Apple Health export",
                             systemImage: "heart.fill",
-                            disabled: model.importing
+                            disabled: model.hasActiveImport
                         ) {
                             presentImporter(.appleHealth)
                         }
@@ -749,16 +749,18 @@ private struct ImportStep: View {
                 }
                 .frame(maxWidth: 480)
 
-                if model.importing {
+                if model.hasActiveImport {
                     ProgressView()
                         .controlSize(.small)
                         .tint(StrandPalette.accent)
                 }
 
-                if let summary = model.importSummary {
+                // Show the summary for the source the user last imported, styled off the typed
+                // failure flag (not a substring match) so real errors read as warnings.
+                if let summary = lastSummary {
                     Text(summary)
                         .font(StrandFont.subhead)
-                        .foregroundStyle(model.importFailed ? StrandPalette.statusWarning : StrandPalette.statusPositive)
+                        .foregroundStyle(model.importFailed(importKind) ? StrandPalette.statusWarning : StrandPalette.statusPositive)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: 460)
                 }
@@ -770,6 +772,22 @@ private struct ImportStep: View {
             allowsMultipleSelection: false
         ) { result in
             handleImportResult(result, for: importTarget)
+        }
+    }
+
+    /// The AppModel source kind matching the last-chosen import target.
+    private var importKind: DataSourceImportKind {
+        switch importTarget {
+        case .whoop: return .whoop
+        case .appleHealth: return .appleHealth
+        }
+    }
+
+    /// The summary for the source the user last imported in this step.
+    private var lastSummary: String? {
+        switch importTarget {
+        case .whoop: return model.whoopImportSummary
+        case .appleHealth: return model.appleHealthImportSummary
         }
     }
 

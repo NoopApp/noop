@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MonitorHeart
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.Button
@@ -100,42 +101,33 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
         onFinished()
     }
 
-    // Notification permission is requested here at the end — it powers the background keep-alive
-    // notification — rather than at launch. We proceed regardless of the result (best-effort).
-    val notifPermLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { complete() }
-
-    fun finishOnboarding() {
-        val needsNotif = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        if (needsNotif) notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) else complete()
-    }
-
-    // BLE permission is requested as the user leaves the Bluetooth explainer step (its CTA), so the
-    // OS prompt lands right after the screen that justifies it — never on top of the Connect step,
-    // which by then just scans. We advance once the prompt is dismissed, whatever the result.
-    val blePerms = remember {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
-        } else {
-            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
-        }
-    }
+    // Each permission is requested as the user LEAVES the step that explains it — never on top of
+    // the explaining screen, and never at launch: Bluetooth on the "before you connect" step,
+    // notifications on the dedicated notifications step. We advance once the prompt is dismissed,
+    // whatever the result. blePermissions() is the same shared source of truth Live/Settings use.
+    val blePerms = remember { blePermissions() }
     val bleAdvanceLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { pageIndex++ }
+    val notifAdvanceLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { pageIndex++ }
 
     fun advance() {
-        if (page == OnboardingPage.Bluetooth) {
-            val granted = blePerms.all {
-                ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+        when (page) {
+            OnboardingPage.Bluetooth -> {
+                val granted = blePerms.all {
+                    ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+                }
+                if (!granted) { bleAdvanceLauncher.launch(blePerms); return }
             }
-            if (!granted) {
-                bleAdvanceLauncher.launch(blePerms)
-                return
+            OnboardingPage.Notifications -> {
+                val needsNotif = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+                    PackageManager.PERMISSION_GRANTED
+                if (needsNotif) { notifAdvanceLauncher.launch(Manifest.permission.POST_NOTIFICATIONS); return }
             }
+            else -> {}
         }
         pageIndex++
     }
@@ -177,6 +169,7 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
                     OnboardingPage.Connect -> ConnectStep(viewModel)
                     OnboardingPage.Profile -> ProfileStep()
                     OnboardingPage.Import -> ImportStep(viewModel)
+                    OnboardingPage.Notifications -> NotificationsStep()
                     OnboardingPage.Done -> DoneStep()
                 }
             }
@@ -187,7 +180,7 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
                 onBack = { if (pageIndex > 0) pageIndex-- },
                 onNext = {
                     if (pageIndex == pages.lastIndex) {
-                        finishOnboarding()
+                        complete()
                     } else {
                         advance()
                     }
@@ -206,6 +199,7 @@ private enum class OnboardingPage(val cta: String) {
     Connect("Continue"),
     Profile("Save & continue"),
     Import("Continue"),
+    Notifications("Continue"),
     Done("Enter NOOP"),
 }
 
@@ -458,23 +452,15 @@ private fun ConnectStep(viewModel: AppViewModel) {
     val live by viewModel.live.collectAsStateWithLifecycle()
     val selectedModel by viewModel.selectedModel.collectAsStateWithLifecycle()
 
-    val blePerms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
-    } else {
-        arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
-    }
-    // Onboarding connects without promoting the foreground service (persistent notification);
+    val blePerms = remember { blePermissions() }
+    // The Scan button goes through the same shared gate as Live/Settings (requests the permission
+    // if missing, then connects). Onboarding connects without promoting the foreground service —
     // OnboardingScreen promotes it on completion. See AppViewModel.connect(promoteService).
-    val blePermLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions(),
-    ) { grants -> if (grants.values.all { it }) viewModel.connect(promoteService = false) }
+    val requestConnect = rememberRequestScan { viewModel.connect(promoteService = false) }
     var autoConnectStarted by rememberSaveable { mutableStateOf(false) }
 
-    fun requestConnect() {
-        val granted = blePerms.all {
-            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
-        }
-        if (granted) viewModel.connect(promoteService = false) else blePermLauncher.launch(blePerms)
+    val bleGranted = blePerms.all {
+        ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
     }
 
     LaunchedEffect(Unit) {
@@ -482,16 +468,10 @@ private fun ConnectStep(viewModel: AppViewModel) {
             autoConnectStarted = true
             // Only auto-scan if permission is already in hand (granted on the Bluetooth step). We
             // never raise the OS prompt here — that would land on top of this step's own content.
-            val granted = blePerms.all {
-                ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
-            }
-            if (granted) viewModel.connect(promoteService = false)
+            if (bleGranted) viewModel.connect(promoteService = false)
         }
     }
 
-    val bleGranted = blePerms.all {
-        ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
-    }
     StepShell(
         title = "Find your strap",
         subtitle = when {
@@ -775,6 +755,30 @@ private fun ImportStep(viewModel: AppViewModel) {
                     textAlign = TextAlign.Center,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun NotificationsStep() {
+    StepShell(
+        title = "Stay in the loop",
+        subtitle = "NOOP keeps your strap connected in the background. When you continue, allow notifications so it can show that link and reach your wrist.",
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            IconBadge(icon = Icons.Filled.Notifications, tint = Palette.accent, size = 86)
+            InfoCard(
+                icon = Icons.Filled.Bluetooth,
+                tint = Palette.statusPositive,
+                title = "A quiet, ongoing status",
+                message = "NOOP holds the Bluetooth link open in the background so your data stays current. One low-priority notification shows it's connected — nothing noisy.",
+            )
+            Checkline("Wrist alerts — strain nudges and your smart alarm — arrive as notifications too.")
+            Checkline("When Android asks, allow notifications so NOOP can keep you informed.")
         }
     }
 }

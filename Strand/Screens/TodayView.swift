@@ -37,7 +37,7 @@ struct TodayView: View {
     private let grid = [GridItem(.adaptive(minimum: 168), spacing: NoopMetrics.gap)]
 
     var body: some View {
-        ScreenScaffold(title: "Control Center", subtitle: dateLine) {
+        ScreenScaffold(title: "Control Center", subtitle: "\(dateLine)") {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                 HealthAlertBanner()
                 if repo.today?.recovery == nil {
@@ -164,8 +164,8 @@ struct TodayView: View {
                 // Right: the plain-English read-out, equal width.
                 InsightCard(
                     category: "Recovery",
-                    status: synthesisWord(score),
-                    detail: synthesisDetail(d),
+                    status: "\(synthesisWord(score))",
+                    detail: "\(synthesisDetail(d))",
                     statusColor: score.map { StrandPalette.recoveryColor($0) } ?? StrandPalette.textTertiary
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -277,7 +277,7 @@ struct TodayView: View {
                 LazyVGrid(columns: grid, alignment: .leading, spacing: NoopMetrics.gap) {
                     ForEach(Array(workouts.prefix(6).enumerated()), id: \.offset) { _, w in
                         StatTile(
-                            label: w.sport,
+                            label: "\(w.sport)",
                             value: workoutDuration(w),
                             caption: workoutCaption(w),
                             accent: StrandPalette.strainColor(w.strain ?? 0),
@@ -319,7 +319,7 @@ struct TodayView: View {
     @ViewBuilder
     private func sourceRow(badge: String, tint: Color, present: Bool, detail: String) -> some View {
         HStack(spacing: 10) {
-            SourceBadge(badge, tint: present ? tint : StrandPalette.textTertiary)
+            SourceBadge("\(badge)", tint: present ? tint : StrandPalette.textTertiary)
             Spacer()
             Text(present ? detail : "Not connected")
                 .font(StrandFont.captionNumber)
@@ -348,15 +348,17 @@ struct TodayView: View {
         appleDays = await repo.appleDailyRows()
     }
 
-    /// Trailing-window values for a metric, with the sparse-data fallback:
-    /// if the trailing window has <2 points, fall back to ALL history so sparse
-    /// series (weight) still render a value + line instead of an empty state.
+    /// Trailing-window values for a metric — NO fall back to all history. The section is labelled a
+    /// current trend ("14-day trend"), so a stale import must not render months-old points as if they
+    /// were recent (same spirit as the #23 trailing-window fix). The window is generous enough that a
+    /// genuinely sparse-but-recent series still renders — weight uses 90 days — and the Sparkline view
+    /// already handles 0/1 points (empty / a single head dot), so no fallback is needed for layout.
+    /// `latestString` reads `.last` of this windowed series, so a value older than the window shows
+    /// "—" rather than a stale number under a Today tile (#49).
     private func sparkValues(_ key: String, source: String, window: Int) async -> [Double] {
         let all = await repo.series(key: key, source: source)   // full history, asc
         guard !all.isEmpty else { return [] }
-        let windowed = trailingWindow(all, days: window)
-        let chosen = windowed.count >= 2 ? windowed : all
-        return chosen.map { $0.value }
+        return trailingWindow(all, days: window).map { $0.value }
     }
 
     /// Keep only points within the trailing `days` CALENDAR days ending TODAY (the phone's local date).

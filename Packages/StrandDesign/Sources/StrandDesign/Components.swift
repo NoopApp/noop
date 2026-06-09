@@ -41,14 +41,14 @@ public struct NoopCard<Content: View>: View {
 // MARK: - Section header
 
 public struct SectionHeader: View {
-    let overline: String?; let title: String; let trailing: String?
-    public init(_ title: String, overline: String? = nil, trailing: String? = nil) {
+    let overline: LocalizedStringKey?; let title: LocalizedStringKey; let trailing: String?
+    public init(_ title: LocalizedStringKey, overline: LocalizedStringKey? = nil, trailing: String? = nil) {
         self.title = title; self.overline = overline; self.trailing = trailing
     }
     public var body: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
-                if let overline { Text(overline.uppercased()).strandOverline() }
+                if let overline { Text(overline).strandOverline() }
                 Text(title).font(StrandFont.title2).foregroundStyle(StrandPalette.textPrimary)
             }
             Spacer()
@@ -62,7 +62,7 @@ public struct SectionHeader: View {
 // MARK: - Metric tile (UNIFORM fixed height)
 
 public struct StatTile: View {
-    let label: String, value: String
+    let label: LocalizedStringKey, value: String
     var caption: String? = nil
     var accent: Color = StrandPalette.textPrimary
     var delta: String? = nil
@@ -70,7 +70,7 @@ public struct StatTile: View {
     var sparkline: [Double]? = nil
     var sparkColor: Color = StrandPalette.accent
 
-    public init(label: String, value: String, caption: String? = nil,
+    public init(label: LocalizedStringKey, value: String, caption: String? = nil,
                 accent: Color = StrandPalette.textPrimary, delta: String? = nil,
                 deltaColor: Color = StrandPalette.textTertiary,
                 sparkline: [Double]? = nil, sparkColor: Color = StrandPalette.accent) {
@@ -81,7 +81,7 @@ public struct StatTile: View {
     public var body: some View {
         NoopCard(padding: 14) {
             VStack(alignment: .leading, spacing: 0) {
-                Text(label.uppercased()).strandOverline()
+                Text(label).strandOverline()
                 Spacer(minLength: 4)
                 Text(value).font(StrandFont.number(26)).foregroundStyle(accent).lineLimit(1).minimumScaleFactor(0.6)
                 if let sparkline, sparkline.count > 1 {
@@ -102,14 +102,14 @@ public struct StatTile: View {
 // MARK: - Chart card (UNIFORM: header + fixed chart body + footer)
 
 public struct ChartCard<ChartBody: View, Footer: View>: View {
-    let title: String
+    let title: LocalizedStringKey
     var subtitle: String? = nil
     var trailing: String? = nil
     var height: CGFloat = NoopMetrics.chartHeight
     @ViewBuilder let chart: () -> ChartBody
     @ViewBuilder let footer: () -> Footer
 
-    public init(title: String, subtitle: String? = nil, trailing: String? = nil,
+    public init(title: LocalizedStringKey, subtitle: String? = nil, trailing: String? = nil,
                 height: CGFloat = NoopMetrics.chartHeight,
                 @ViewBuilder chart: @escaping () -> ChartBody,
                 @ViewBuilder footer: @escaping () -> Footer = { EmptyView() }) {
@@ -122,7 +122,7 @@ public struct ChartCard<ChartBody: View, Footer: View>: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(title.uppercased()).strandOverline()
+                        Text(title).strandOverline()
                         if let subtitle { Text(subtitle).font(StrandFont.footnote).foregroundStyle(StrandPalette.textTertiary) }
                     }
                     Spacer()
@@ -141,13 +141,13 @@ public struct ChartCard<ChartBody: View, Footer: View>: View {
 
 /// A footer row of small "label / value" stats for ChartCard.
 public struct ChartFooter: View {
-    let items: [(String, String)]
-    public init(_ items: [(String, String)]) { self.items = items }
+    let items: [(LocalizedStringKey, String)]
+    public init(_ items: [(LocalizedStringKey, String)]) { self.items = items }
     public var body: some View {
         HStack(spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.offset) { _, it in
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(it.0.uppercased()).font(StrandFont.footnote).foregroundStyle(StrandPalette.textTertiary)
+                    Text(it.0).textCase(.uppercase).font(StrandFont.footnote).foregroundStyle(StrandPalette.textTertiary)
                     Text(it.1).font(StrandFont.captionNumber).foregroundStyle(StrandPalette.textSecondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -159,15 +159,15 @@ public struct ChartFooter: View {
 // MARK: - Insight card
 
 public struct InsightCard: View {
-    let category: String, status: String, detail: String
+    let category: LocalizedStringKey, status: LocalizedStringKey, detail: LocalizedStringKey
     var statusColor: Color = StrandPalette.accent
-    public init(category: String, status: String, detail: String, statusColor: Color = StrandPalette.accent) {
+    public init(category: LocalizedStringKey, status: LocalizedStringKey, detail: LocalizedStringKey, statusColor: Color = StrandPalette.accent) {
         self.category = category; self.status = status; self.detail = detail; self.statusColor = statusColor
     }
     public var body: some View {
         NoopCard(padding: 18) {
             VStack(alignment: .leading, spacing: 8) {
-                Text(category.uppercased()).strandOverline()
+                Text(category).strandOverline()
                 Text(status).font(StrandFont.title1).foregroundStyle(statusColor)
                 Text(detail).font(StrandFont.subhead).foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -209,10 +209,10 @@ public struct SegmentedPillControl<T: Hashable>: View {
 // MARK: - Badges
 
 public struct SourceBadge: View {
-    let text: String; var tint: Color = StrandPalette.accent
-    public init(_ text: String, tint: Color = StrandPalette.accent) { self.text = text; self.tint = tint }
+    let text: LocalizedStringKey; var tint: Color = StrandPalette.accent
+    public init(_ text: LocalizedStringKey, tint: Color = StrandPalette.accent) { self.text = text; self.tint = tint }
     public var body: some View {
-        Text(text.uppercased()).font(.system(size: 10, weight: .semibold)).tracking(0.5)
+        Text(text).textCase(.uppercase).font(.system(size: 10, weight: .semibold)).tracking(0.5)
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background(tint.opacity(0.14), in: Capsule())
             .foregroundStyle(tint)

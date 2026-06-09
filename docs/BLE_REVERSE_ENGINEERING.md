@@ -414,16 +414,83 @@ are left as a single raw region rather than guessed (project rule: real captures
 offsets). The decoded fields feed the existing `extractHistoricalStreams` path unchanged, so WHOOP 5
 historical HR / HRV / gravity land in the datastore exactly like 4.0.
 
-The same WHOOP 5 also emits an **88-byte type-47 record with version byte 26** — its body is a
-high-rate big-endian i16 waveform buffer (a PPG/IMU trace), distinct from the v18 per-second summary.
-It is not mapped; `decodeWhoop5Historical` keys on the version byte and falls back to a labelled raw
-region for any version other than 18, so an unknown record is described, never mis-decoded.
+### The WHOOP 5.0 type-47 record (version 26) — high-rate optical PPG
+
+The same WHOOP 5 also emits an **88-byte type-47 record with version byte 26**, distinct from the v18
+per-second summary: a high-rate **optical PPG** waveform — **24 little-endian i16 samples at bytes
+[27:75]**, one record per second (`unix` u32 LE @15, the same slot v18 uses), i.e. a **24 Hz** trace.
+(It is little-endian — the high byte of each sample is `0xFA..0xFF` / `0x00..0x01` — not big-endian.)
+
+It is identified as PPG, not IMU/motion, using the **heart rate as internal ground truth** — no external
+reference or app export needed:
+
+- Autocorrelating the concatenated trace peaks at the HR: **lag 14 = 102.9 bpm** vs a v18-measured
+  101.7 bpm, with the half-period anti-correlation and 2-beat harmonic of a real pulse.
+- Independent trough-detection gives a **563 ms inter-beat interval (≈106 bpm)**, again matching HR.
+- The pulse stays HR-locked even in the **stillest** seconds, and its amplitude is not motion-driven
+  (`corr(amplitude, |Δgravity|) = +0.35` — mild motion artifact, not the signal) — so it is optical,
+  not a ballistocardiographic IMU reading.
+
+**Time-multiplexed optical channels.** Byte `frame[21]` is the channel index: the strap sweeps **26
+optical channels (values 1…26)**, one per ~40-frame (~39 s) block, revisiting a given channel only
+~20 min later — so a full 1→26 sweep is spread over hours and **no two channels are ever sampled
+simultaneously**. Each channel's waveform autocorrelates to the heart rate (lag 14 ≈ 103 bpm) with its
+own DC baseline. Which physical LED each index maps to is **not** verifiable from the data, so the raw
+index is surfaced (`ppg_channel`, gated to 1…26) with no colour claim. *(An earlier read at `frame[12]`
+— the "two channels `0x41`/`0x46`" — was a high-entropy counter byte mistaken for the channel during a
+short 2-burst capture; verified against a 22 h overnight corpus, `frame[12]` takes 67 distinct values
+while `frame[21]` takes exactly 26. The PPG **sample** decode (LE i16 @[27:75]) is unaffected and
+correct.) This 26-way time-multiplex is also why **SpO₂ is not recoverable offline** — it needs
+*simultaneous* red+IR, and no two channels are ever co-sampled.
+
+The full v26 byte map (88 bytes; CRC32 @84):
+
+| Bytes | Field | Status |
+|---|---|---|
+| 8 / 9 | type 47 / version 26 | — |
+| 10, 13, 14 | `0x80` / `0x84` / `0x01` | constant header |
+| 11 | per-record counter (+1/s) | sequence |
+| **12** | **`ppg_channel`** (`0x41` / `0x46`) | **mapped** — optical channel id |
+| **15** | **`unix`** u32 LE | **mapped** — real seconds (v18's slot) |
+| 19 | `0x000147AE` constant | config param |
+| 23–26 | high-entropy (DC / checksum?) | raw — no ground truth |
+| **27–74** | **`ppg_waveform`** 24× LE-i16 | **mapped** — 24 Hz PPG, HR-locked |
+| 75–83 | footer (random + `0x50`,`0x08` const) | raw — no ground truth |
+
+`decodeWhoop5HistoricalV26` exposes `ppg_waveform` (+ `ppg_sample_count`), `ppg_channel`, and `unix`. The
+samples are raw AC-coupled ADC counts — PPG has no absolute unit — so no scale is invented; the
+high-entropy `23–26` and the footer are left raw (no internal ground truth). Reproduce the proof with
+`tools/linux-capture/analyze_v26_waveform.py`; parity tests `Whoop5PpgWaveformTests.swift`.
+
+> The v18 per-second record's own optical region (bytes [57:120]) carries **no simple summary of this
+> PPG** (no field tracks its DC or AC amplitude), and its SpO₂ / skin-temp channels have no internal
+> proxy — HR, R-R, gravity and PPG morphology don't determine blood-oxygen or temperature. Those remain
+> a raw region; positively mapping them needs an external reference (a worn pulse-oximeter / thermometer,
+> or the official app's readout for matching timestamps), so they are intentionally left undecoded.
 
 > **Firmware-version caveat.** The 4.0 `v24` layout in `whoop_protocol.json` reflects one firmware
 > revision (the `my-whoop` reference device); a given strap may run older or newer firmware with a
 > different record version. Always key the decode on the version byte and anchor offsets to a real
 > capture from the device in hand — do not assume one generation's documented layout transfers to
 > another, even within the same generation.
+
+### WHOOP 4 firmware-drift check — still v24 (hardware-verified)
+
+The v18 surprise prompted the obvious question: does a *different* device on *different* firmware still
+emit the documented record? Tested on a real WHOOP 4 (firmware **41.17.6.0**) with the tool's WHOOP 4
+offload mode (`whoop_capture.py --model whoop4 --history-only --history-ack`). The 4.0 handshake is the
+image of the 5.0 one with the envelope shift removed: `meta_type` at `frame[6]`, `trim_cursor` at
+`frame[17]`, `end_data` = `frame[17:25]` (vs 5.0's `[21:29]`), and acks are CRC8-framed COMMANDs
+(`build_history_ack_whoop4` / `history_end_data_whoop4`). The cursor walked (`22303 → 22395 …`) exactly
+as on 5.0.
+
+**Result: no drift.** All **1704** type-47 frames pulled were **version 24** (`frame[5] == 24`),
+CRC-valid, and decoded cleanly through the *existing* documented v24 decoder — HR equalled
+`60000 / mean(R-R)` to ~1 bpm and \|gravity\| ≈ 1 g. So the documented v24 layout is confirmed on a
+second device and generation, and the v18 record is specific to the WHOOP 5's firmware, not a sign the
+v24 documentation was wrong. Real-frame parity test: `Whoop4HistoricalV24HardwareTests.swift`
+(`HistoricalV24Tests` covers the same layout synthetically). The offload streamed the same way as 4.0's
+realtime path, so its HR/HRV/gravity feed `extractHistoricalStreams` unchanged.
 
 ### WHOOP 5.0 COMMAND_RESPONSE (type 36)
 
@@ -448,6 +515,28 @@ stub payloads on this firmware (so the firmware version lives in the `GET_HELLO`
 > offsets), so no real device name or token ever enters a committed fixture. The version offset sits
 > after the variable name+token region, so it is anchored to a 50.38.1.0 capture and guarded on the
 > "5.0" generation byte (`pay[93] == 50`) — re-verify it across firmwares.
+
+### WHOOP 5.0 EVENT (type 48)
+
+The event frame is the 4.0 layout shifted +4: `event` (u8/`EventNumber`) at frame[10] and
+`event_timestamp` (u32 real unix) at frame[12] are surfaced by the `parseFrameWhoop5` static walk, so
+simple events (wrist on/off, double-tap, boot, pairing, BLE up/down, bonded) decode with no extra code.
+A u16 **payload length** at frame[18] gives the size of the per-event body that starts at frame[20]
+(verified: it predicts the frame size exactly across every event class in the capture).
+
+`decodeWhoop5Event` adds the one per-event payload with on-device ground truth — **BATTERY_LEVEL** (3),
+again following the +4 rule (4.0 soc@17 / mv@21 / charge@26 → soc@21 / mv@25 / charge@30). Unlike the
+COMMAND_RESPONSE battery above, the EVENT battery keeps 4.0's **deci-percent** (`soc / 10`), confirmed
+by a clean monotonic discharge across a real capture (49.9 → 47.7 %, mV ≈ 3.8 V). The same range guards
+as the 4.0 `event` post-hook fail closed.
+
+> **Enum-drift guard.** Event names come **only** from the shared `EventNumber` schema. This firmware
+> also emits numbers the schema does not name (61, 62, 110, 112, 116, 120, 123); they stay raw
+> (`0x7B(123)`) and are never given a name borrowed from another enum — note `CommandNumber` 123 is
+> `SELECT_WRIST`, an unrelated meaning — nor invented. Other event payloads
+> (`EXTENDED_BATTERY_INFORMATION`, `STRAP_CONDITION_REPORT`, and the serial-bearing 61/62) lack 5.0
+> ground truth and are left raw rather than ported from 4.0 on faith. Parity tests use real frames
+> verified to carry no device name / serial / token (battery and simple events do not).
 
 ---
 

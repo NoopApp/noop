@@ -21,8 +21,14 @@ import zlib
 # COMMAND packet type byte (PacketType.COMMAND).
 COMMAND_TYPE = 35
 
-# Command numbers (subset; mirrors WhoopCommand in Commands.swift).
+# Command numbers (subset; mirrors WhoopCommand in Commands.swift). The numbers are shared with the
+# 5.0 puffin command set — only the framing differs (CRC8 here vs CRC16 there).
 CMD_GET_BATTERY_LEVEL = 26
+CMD_GET_CLOCK = 11
+CMD_REPORT_VERSION_INFO = 7
+CMD_GET_EXTENDED_BATTERY_INFO = 98
+CMD_GET_DATA_RANGE = 34
+CMD_GET_HELLO_HARVARD = 35
 
 # WHOOP 5.0 session-start frame, written verbatim to fd4b0002 to open the puffin session.
 # (DeviceFamily.whoop5ClientHello — a fully-formed type-35 COMMAND with valid CRC16 header + CRC32.)
@@ -185,6 +191,65 @@ def build_history_ack(end_data: bytes, seq: int = 0) -> bytes:
     """
     return build_puffin_command(PUFFIN_CMD_HISTORICAL_DATA_RESULT, seq=seq,
                                 payload=b"\x01" + bytes(end_data))
+
+
+# --- WHOOP 4.0 historical-offload helpers ---------------------------------------------------------
+# The 4.0 image of the whoop5 helpers above. The inner record starts at offset 4 (vs 5.0's 8), so the
+# metadata fields sit 4 bytes earlier: meta_type at frame[6] (5.0's 10 − 4) and trim_cursor at
+# frame[17] (5.0's 21 − 4). The 8-byte end_data the ack echoes is the trim u32 + next u32 = frame[17:25]
+# (vs 5.0's frame[21:29]). PACKET_* / META_* / the command numbers (22 SEND_HISTORICAL_DATA, 23
+# HISTORICAL_DATA_RESULT) are SHARED across generations — only the framing differs (CRC8 here, CRC16
+# there) — so they are reused as-is rather than forked. See PostHooks.swift `metadata` (4.0) and
+# docs/BLE_REVERSE_ENGINEERING.md §5.
+WHOOP4_INNER_OFF = 4
+WHOOP4_META_TYPE_OFF = 6
+WHOOP4_META_TRIM_OFF = 17
+WHOOP4_END_DATA_LEN = 8
+
+
+def verify_whoop4_frame(frame: bytes) -> bool:
+    """True if a WHOOP 4.0 frame's declared length, CRC8 header and CRC32 trailer all check out.
+
+    As on 5.0, the ack must only echo a genuine, intact HISTORY_END — CRC is the protocol's only
+    integrity check, so a garbled BLE frame must never advance the strap's trim cursor.
+    """
+    if len(frame) < 8 or frame[0] != 0xAA:
+        return False
+    declared = frame[1] | (frame[2] << 8)
+    total = declared + 4
+    if total != len(frame):
+        return False
+    if crc8(bytes(frame[1:3])) != frame[3]:
+        return False
+    inner = bytes(frame[4:total - 4])
+    wire = int.from_bytes(frame[total - 4:total], "little")
+    return crc32(inner) == wire
+
+
+def history_end_data_whoop4(frame: bytes):
+    """If `frame` is a CRC-valid WHOOP 4.0 METADATA HISTORY_END, return its 8-byte end_data
+    (trim u32 + next u32 at frame[17]) to echo back in the ack; otherwise None.
+
+    Echoing these bytes verbatim in a HISTORICAL_DATA_RESULT(23) advances the strap's trim cursor to
+    the next chunk — the 4.0 image of `history_end_data`, with offsets 4 bytes earlier.
+    """
+    if len(frame) < WHOOP4_META_TRIM_OFF + WHOOP4_END_DATA_LEN:
+        return None
+    if frame[WHOOP4_INNER_OFF] != PACKET_METADATA:
+        return None
+    if frame[WHOOP4_META_TYPE_OFF] != META_HISTORY_END:
+        return None
+    if not verify_whoop4_frame(frame):
+        return None
+    return bytes(frame[WHOOP4_META_TRIM_OFF:WHOOP4_META_TRIM_OFF + WHOOP4_END_DATA_LEN])
+
+
+def build_history_ack_whoop4(end_data: bytes, seq: int = 0) -> bytes:
+    """Build the WHOOP 4.0 HISTORICAL_DATA_RESULT(23) ack: payload = 0x01 + the 8-byte end_data,
+    framed as a 4.0 COMMAND (CRC8 header). The 4.0 image of `build_history_ack`.
+    """
+    return build_command_frame(PUFFIN_CMD_HISTORICAL_DATA_RESULT, seq=seq,
+                               payload=b"\x01" + bytes(end_data))
 
 
 class Reassembler:

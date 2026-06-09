@@ -275,7 +275,7 @@ struct TrendsView: View {
 
     @ViewBuilder
     private func metricChart(
-        title: String, unit: String,
+        title: LocalizedStringKey, unit: String,
         points pts: [TrendPoint],
         subtitle: String,
         gradient: Gradient,
@@ -323,7 +323,7 @@ struct TrendsView: View {
         let title = (range == .all && repo.days.count > 365) ? "Recovery — all history" : "Recovery — past year"
         return NoopCard {
             VStack(alignment: .leading, spacing: 12) {
-                SectionHeader(title, overline: "Calendar", trailing: "\(recoveryDays.filter { $0.score != nil }.count) days")
+                SectionHeader("\(title)", overline: "Calendar", trailing: "\(recoveryDays.filter { $0.score != nil }.count) days")
                 if recoveryDays.isEmpty {
                     sparsePlaceholder.frame(height: 120)
                 } else {

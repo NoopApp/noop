@@ -3,8 +3,8 @@ import StrandDesign
 
 /// Standard scrollable screen container: title + dark surface + content column.
 struct ScreenScaffold<Content: View>: View {
-    let title: String
-    var subtitle: String? = nil
+    let title: LocalizedStringKey
+    var subtitle: LocalizedStringKey? = nil
     @ViewBuilder var content: () -> Content
 
     var body: some View {
@@ -27,7 +27,7 @@ struct ScreenScaffold<Content: View>: View {
 
 /// Placeholder body for screens the design agents are still building.
 struct ComingSoon: View {
-    let what: String
+    let what: LocalizedStringKey
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Coming together")
@@ -44,8 +44,8 @@ struct ComingSoon: View {
 /// body line, with an info/sparkles SF Symbol. Used for empty/pending data states so
 /// every screen explains the live-now path and the import path with timing.
 struct DataPendingNote: View {
-    let title: String
-    let message: String
+    let title: LocalizedStringKey
+    let message: LocalizedStringKey
     var symbol: String = "sparkles"
 
     var body: some View {

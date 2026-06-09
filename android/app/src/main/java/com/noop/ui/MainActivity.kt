@@ -115,6 +115,11 @@ object NoopPrefs {
     /** "Keep connected in the background" — drives [com.noop.ble.WhoopConnectionService]. Default on. */
     const val KEY_BACKGROUND_CONNECTION = "noop.backgroundConnection"
 
+    /** "Debug logging" — when on, the strap log is also written to logcat (`adb`). Default OFF so a
+     *  normal user never emits the connection log to the system log; the in-app ring buffer (and the
+     *  "Share strap log" export) work regardless. See [com.noop.ble.WhoopBleClient.debugLogcat]. */
+    const val KEY_DEBUG_LOGGING = "noop.debugLogging"
+
     fun of(context: Context): SharedPreferences =
         context.getSharedPreferences(NAME, Context.MODE_PRIVATE)
 
@@ -124,6 +129,33 @@ object NoopPrefs {
 
     fun setBackgroundConnection(context: Context, enabled: Boolean) {
         of(context).edit().putBoolean(KEY_BACKGROUND_CONNECTION, enabled).apply()
+    }
+
+    /** Whether the strap log is mirrored to logcat. Default false (normal users don't log to adb). */
+    fun debugLogging(context: Context): Boolean =
+        of(context).getBoolean(KEY_DEBUG_LOGGING, false)
+
+    fun setDebugLogging(context: Context, enabled: Boolean) {
+        of(context).edit().putBoolean(KEY_DEBUG_LOGGING, enabled).apply()
+    }
+
+    /** Smart alarm: arm the strap's firmware alarm to buzz at a wake time. Default off; default time 07:00. */
+    const val KEY_SMART_ALARM = "noop.smartAlarmEnabled"
+    const val KEY_SMART_ALARM_MINUTES = "noop.smartAlarmMinutes"
+
+    fun smartAlarmEnabled(context: Context): Boolean =
+        of(context).getBoolean(KEY_SMART_ALARM, false)
+
+    fun setSmartAlarmEnabled(context: Context, enabled: Boolean) {
+        of(context).edit().putBoolean(KEY_SMART_ALARM, enabled).apply()
+    }
+
+    /** Wake time as minutes since midnight (default 420 = 07:00). */
+    fun smartAlarmMinutes(context: Context): Int =
+        of(context).getInt(KEY_SMART_ALARM_MINUTES, 7 * 60)
+
+    fun setSmartAlarmMinutes(context: Context, minutes: Int) {
+        of(context).edit().putInt(KEY_SMART_ALARM_MINUTES, minutes).apply()
     }
 }
 

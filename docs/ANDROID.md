@@ -399,6 +399,34 @@ This is the **highest-risk** part of the port and the least validated. The macOS
 - **Strap must be out of range of the official app** during initial bonding, worn, and charged
   enough to report a non-zero heart rate.
 
+### Debugging the strap connection
+
+The BLE client keeps a running **strap log** of the connection's control flow — scan results,
+the bond/handshake state machine, every command sent (name + payload hex), and offload progress
+(trim cursors, chunk acks). It is the primary tool for **debugging and protocol development** on
+Android, and the same log is what users attach to bug reports.
+
+By default the log is kept **only** in an in-memory ring buffer (so a normal user never writes the
+connection log to the device-wide system log). To watch a session live while developing, turn the
+log on:
+
+1. In the app: **Settings → Strap → "Debug logging"** (off by default).
+2. Then tail it over adb, filtered to the BLE client tag:
+
+   ```bash
+   adb logcat -s WhoopBleClient
+   # e.g.
+   #   D WhoopBleClient: Discovered WHOOP 5AG… (rssi -52) — connecting
+   #   D WhoopBleClient: → TOGGLE_REALTIME_HR payload=01 (puffin)
+   #   D WhoopBleClient: Backfill: acked chunk trim=113681
+   #   D WhoopBleClient: Backfill: session ended — reason=HISTORY_COMPLETE
+   ```
+
+The toggle drives `WhoopBleClient.debugLogcat` (persisted as `NoopPrefs.KEY_DEBUG_LOGGING`); it
+gates only the `Log.d` call. Whether or not it is on, **Settings → Strap → "Share strap log"**
+exports the same in-app buffer to a file (the path for users with no adb). What the log does and
+does not contain — and why logcat is opt-in — is covered in `PRIVACY_SECURITY.md` §2.4.
+
 ---
 
 ## Storage with Room

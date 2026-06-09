@@ -73,7 +73,9 @@ fun WorkoutsScreen(vm: AppViewModel) {
     LaunchedEffect(Unit) {
         val now = System.currentTimeMillis() / 1000
         val whoop = vm.repo.workouts("my-whoop", 0L, now)
-        val apple = vm.repo.workouts("apple-health", 0L, now)
+        // Apple Health export + Health Connect are separate sources (since #34) — include both.
+        val apple = vm.repo.workouts("apple-health", 0L, now) +
+            vm.repo.workouts("health-connect", 0L, now)
         val merged = (whoop + apple).sortedByDescending { it.startTs }
         allRows = merged
         loaded = true
@@ -384,10 +386,8 @@ private fun SessionRow(row: WorkoutRow, background: Color) {
             color = if (row.energyKcal != null) Palette.metricAmber else null,
         )
         Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
-            SourceBadge(
-                if (row.isWhoop) "Whoop" else "Apple",
-                tint = if (row.isWhoop) Palette.accent else Palette.metricCyan,
-            )
+            val (srcLabel, srcTint) = row.sourceBadge
+            SourceBadge(srcLabel, tint = srcTint)
         }
     }
 }
@@ -487,7 +487,43 @@ private fun sportGroups(rows: List<WorkoutRow>): List<SportGroup> =
         }
         .sortedWith(compareByDescending<SportGroup> { it.count }.thenByDescending { it.totalTimeS })
 
-private val WorkoutRow.isWhoop: Boolean get() = source.lowercase().contains("whoop")
+/**
+ * The Src-column badge (label + tint) for a session. Sessions are loaded by their source's
+ * deviceId — "my-whoop" / "apple-health" / "health-connect" — and each row also carries a `source`
+ * label ("my-whoop" / "Apple Health" / "health-connect"), so we classify on both. This used to be a
+ * binary `isWhoop ? "Whoop" : "Apple"`, which mislabelled EVERY Health Connect workout as "Apple"
+ * (#53). "HC" is abbreviated to fit the narrow column (Apple is likewise short for "Apple Health");
+ * the Data Sources and Today screens spell out "Health Connect". Tints match those screens: WHOOP
+ * accent green, Apple cyan, Health Connect purple.
+ */
+/**
+ * Pure source → short badge label. `internal` + Compose-free so the unit test can pin the three
+ * stored origins ("my-whoop" / "apple-health"+"Apple Health" / "health-connect") to their labels
+ * without dragging in Palette. This is the classification that used to be a binary
+ * `isWhoop ? "Whoop" : "Apple"`, which mislabelled every Health Connect workout as "Apple" (#53).
+ * Rows are loaded by deviceId, and also carry a `source` label, so we check both.
+ */
+internal fun workoutSourceLabel(deviceId: String, source: String): String {
+    val id = deviceId.lowercase()
+    val src = source.lowercase()
+    return when {
+        id == "health-connect" || src.contains("health-connect") -> "HC"
+        id.contains("whoop") || src.contains("whoop") -> "Whoop"
+        else -> "Apple"
+    }
+}
+
+/**
+ * The Src-column badge (label + tint). "HC" is abbreviated to fit the narrow column (Apple is
+ * likewise short for "Apple Health"); Data Sources / Today spell out "Health Connect". Tints match
+ * those screens: WHOOP accent green, Apple cyan, Health Connect purple.
+ */
+private val WorkoutRow.sourceBadge: Pair<String, Color>
+    get() = when (workoutSourceLabel(deviceId, source)) {
+        "HC" -> "HC" to Palette.metricPurple
+        "Whoop" -> "Whoop" to Palette.accent
+        else -> "Apple" to Palette.metricCyan
+    }
 
 // MARK: - Formatting
 

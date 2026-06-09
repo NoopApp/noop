@@ -148,7 +148,7 @@ struct AppleHealthView: View {
     }
 
     var body: some View {
-        ScreenScaffold(title: "Apple Health", subtitle: spanSubtitle) {
+        ScreenScaffold(title: "Apple Health", subtitle: "\(spanSubtitle)") {
             if loaded && !hasAnyData {
                 ComingSoon(what: "Nothing imported yet. On an iPhone: Health app, tap your photo, Export All Health Data, then import the .zip here in Data Sources.")
             } else if !loaded {
@@ -329,7 +329,7 @@ struct AppleHealthView: View {
     /// A StatTile for one metric. Sparse-safe: the window auto-falls-back to ALL,
     /// the hero is the LATEST point ("as of <date>") unless a mean is requested,
     /// and the sparkline + caption track the same resolved window.
-    private func statTile(key: String, label: String,
+    private func statTile(key: String, label: LocalizedStringKey,
                           accent: Color, unit: String = "",
                           aggregate: Aggregate = .latest,
                           fmt: @escaping (Double) -> String) -> some View {
@@ -438,7 +438,7 @@ struct AppleHealthView: View {
     /// One uniform ChartCard for a metric series: header + TrendChart body (same
     /// height) + avg/min/max ChartFooter. Sparse-safe via resolvedWindow.
     @ViewBuilder
-    private func chartCard(title: String, key: String, gradient: Gradient,
+    private func chartCard(title: LocalizedStringKey, key: String, gradient: Gradient,
                            fallback: ClosedRange<Double>,
                            fmt: @escaping (Double) -> String) -> some View {
         let rows = resolvedWindow(key)
@@ -447,7 +447,7 @@ struct AppleHealthView: View {
         let trailing = mean(vals).map { fmt($0) }
         // One concrete footer type (ChartFooter) keeps every card uniform — avg /
         // min / max / point-count, with dashes only in the defensive no-data case.
-        let footerItems: [(String, String)] = {
+        let footerItems: [(LocalizedStringKey, String)] = {
             guard let avg = mean(vals), let lo = vals.min(), let hi = vals.max() else {
                 return [("Avg", "—"), ("Min", "—"), ("Max", "—"), ("Points", "0")]
             }

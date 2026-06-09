@@ -88,6 +88,10 @@ fun DataSourcesScreen(vm: AppViewModel) {
     var whoopHasHr by remember { mutableStateOf(false) }
     var appleDays by remember { mutableStateOf<Int?>(null) }
     var appleWorkouts by remember { mutableStateOf<Int?>(null) }
+    // Health Connect has its OWN source ("health-connect"), counted separately from an Apple Health
+    // export so each card reflects its own data rather than both showing under Apple Health (issue #34).
+    var hcDays by remember { mutableStateOf<Int?>(null) }
+    var hcWorkouts by remember { mutableStateOf<Int?>(null) }
 
     LaunchedEffect(Unit) {
         val now = System.currentTimeMillis() / 1000
@@ -96,6 +100,8 @@ fun DataSourcesScreen(vm: AppViewModel) {
         whoopHasHr = vm.repo.latestHrSampleTs("my-whoop") != null
         appleDays = vm.repo.appleDaily("apple-health", "0000-01-01", "9999-12-31").size
         appleWorkouts = vm.repo.workouts("apple-health", 0L, now).size
+        hcDays = vm.repo.appleDaily("health-connect", "0000-01-01", "9999-12-31").size
+        hcWorkouts = vm.repo.workouts("health-connect", 0L, now).size
     }
 
     // Whole-store backup: export to a user-created document; import from a picked one.
@@ -147,6 +153,8 @@ fun DataSourcesScreen(vm: AppViewModel) {
         whoopHasHr = vm.repo.latestHrSampleTs("my-whoop") != null
         appleDays = vm.repo.appleDaily("apple-health", "0000-01-01", "9999-12-31").size
         appleWorkouts = vm.repo.workouts("apple-health", 0L, nowS).size
+        hcDays = vm.repo.appleDaily("health-connect", "0000-01-01", "9999-12-31").size
+        hcWorkouts = vm.repo.workouts("health-connect", 0L, nowS).size
     }
 
     // Run an importer off the main thread, refresh the counts, then toast the result.
@@ -263,6 +271,14 @@ fun DataSourcesScreen(vm: AppViewModel) {
                 "Android's Health Connect — no file needed. Read-only, on-device; it never overwrites " +
                 "richer WHOOP data.",
         ) {
+            val hasHc = (hcDays ?: 0) > 0 || (hcWorkouts ?: 0) > 0
+            if (hasHc) {
+                StatePill(title = "Imported", tone = StrandTone.Accent, showsDot = true)
+                CountLine(
+                    primary = hcDays?.let { "$it days" } ?: "—",
+                    secondary = hcWorkouts?.let { "$it workouts" } ?: "Counting…",
+                )
+            }
             if (healthConnectAvailable) {
                 BackupButton(
                     label = "Import from Health Connect",

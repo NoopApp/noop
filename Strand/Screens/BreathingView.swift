@@ -335,7 +335,7 @@ struct BreathingView: View {
                 HStack {
                     Text("Coherence estimate").strandOverline()
                     Spacer()
-                    StatePill(coherenceLabel, tone: coherenceTone, showsDot: true)
+                    StatePill("\(coherenceLabel)", tone: coherenceTone, showsDot: true)
                 }
 
                 // A simple normalized bar — RMSSD mapped 0…120ms → 0…1.
