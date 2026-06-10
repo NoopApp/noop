@@ -729,9 +729,8 @@ public final class BLEManager: NSObject, ObservableObject {
     ///
     /// Sequence: SET_CLOCK first to ensure the strap RTC is UTC-correct, then SET_ALARM_TIME.
     /// The strap will buzz at `date` even if the app is backgrounded or force-quit
-    /// (event STRAP_DRIVEN_ALARM_EXECUTED=57). This is the guaranteed fixed-time fallback path —
-    /// the smart-wake layer (`SmartAlarmController`) fires on top of this if conditions are met,
-    /// but this firmware alarm always fires as the safety net.
+    /// (event STRAP_DRIVEN_ALARM_EXECUTED=57). This is the only alarm path: the strap fires at
+    /// the fixed time — NOOP has no light-sleep early-wake layer.
     ///
     /// On-device verification needed: confirm the strap ACKs SET_ALARM_TIME and that the
     /// alarm persists across BLE disconnect (cannot be verified in the simulator).

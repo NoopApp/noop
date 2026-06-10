@@ -27,8 +27,6 @@ final class BehaviorStore: ObservableObject {
     @Published var smartAlarmEnabled: Bool { didSet { d.set(smartAlarmEnabled, forKey: K.alarmOn) } }
     /// Target wake time, minutes since local midnight.
     @Published var smartAlarmMinutes: Int { didSet { d.set(smartAlarmMinutes, forKey: K.alarmTime) } }
-    /// Light-sleep window before the target, in minutes (wake early if a light phase is detected).
-    @Published var smartAlarmWindow: Int { didSet { d.set(smartAlarmWindow, forKey: K.alarmWindow) } }
 
     // MARK: Illness early-warning
     @Published var illnessWatch: Bool { didSet { d.set(illnessWatch, forKey: K.illness) } }
@@ -44,7 +42,9 @@ final class BehaviorStore: ObservableObject {
         static let stress = "behavior.stressNudge"
         static let alarmOn = "behavior.smartAlarmEnabled"
         static let alarmTime = "behavior.smartAlarmMinutes"
-        static let alarmWindow = "behavior.smartAlarmWindow"
+        // "behavior.smartAlarmWindow" retired: it was stored but never read (no wake-window
+        // watcher ever shipped). The defaults key is left orphaned on purpose — harmless, and
+        // preserved should a real light-sleep watcher ever land.
         static let illness = "behavior.illnessWatch"
     }
 
@@ -58,7 +58,6 @@ final class BehaviorStore: ObservableObject {
         stressNudge = d.object(forKey: K.stress) as? Bool ?? false
         smartAlarmEnabled = d.object(forKey: K.alarmOn) as? Bool ?? false
         smartAlarmMinutes = d.object(forKey: K.alarmTime) as? Int ?? 7 * 60       // 07:00
-        smartAlarmWindow = d.object(forKey: K.alarmWindow) as? Int ?? 30          // wake up to 30m early
         illnessWatch = d.object(forKey: K.illness) as? Bool ?? false
     }
 }

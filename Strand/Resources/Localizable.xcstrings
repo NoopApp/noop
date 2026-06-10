@@ -3250,22 +3250,6 @@
         }
       }
     },
-    "Light-sleep window": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Light-sleep window"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Leichtschlaf-Fenster"
-          }
-        }
-      }
-    },
     "Live": {
       "localizations": {
         "en": {
@@ -6495,22 +6479,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Aufwachen um"
-          }
-        }
-      }
-    },
-    "Wake up to this many minutes early if the Mac stays awake & connected and a light phase is detected.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Wake up to this many minutes early if the Mac stays awake & connected and a light phase is detected."
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Wache bis zu so viele Minuten früher auf, wenn der Mac wach & verbunden bleibt und eine Leichtschlafphase erkannt wird."
           }
         }
       }

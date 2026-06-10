@@ -129,19 +129,6 @@ struct AutomationsView: View {
                             .labelsHidden().datePickerStyle(.compact)
                     }
                     .frame(minHeight: 42).padding(.vertical, 4)
-                    rowDivider
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Light-sleep window").font(StrandFont.body).foregroundStyle(StrandPalette.textPrimary)
-                            Text("Wake up to this many minutes early if the Mac stays awake & connected and a light phase is detected.")
-                                .font(StrandFont.footnote).foregroundStyle(StrandPalette.textTertiary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer()
-                        Stepper("\(behavior.smartAlarmWindow) min", value: $behavior.smartAlarmWindow, in: 0...60, step: 5)
-                            .fixedSize()
-                    }
-                    .frame(minHeight: 42).padding(.vertical, 4)
                 }
             }
             .onChange(of: behavior.smartAlarmEnabled) { _ in model.applySmartAlarm() }

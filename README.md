@@ -190,8 +190,8 @@ and an in-app **"What's new"** changelog shown after each update.
 - **Haptic coaching.** HR-zone coaching and an experimental resting-stress nudge —
   the strap buzzes so you don't have to watch a screen.
 - **Smart alarm.** Arms the strap's own **firmware** alarm to buzz at your wake
-  time (still fires if the Mac is asleep or NOOP is closed), with an optional
-  light-sleep wake window when the Mac stays awake and connected.
+  time (still fires if the Mac is asleep or NOOP is closed). Fixed-time only —
+  no light-sleep early wake.
 
 ---
 

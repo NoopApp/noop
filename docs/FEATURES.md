@@ -421,8 +421,8 @@ React when the strap comes off or goes on:
 
 ### Smart alarm
 Wake to a wrist buzz. This arms the strap's **own firmware alarm**, so it still fires even if the
-Mac is asleep or NOOP is closed. Set your wake time, and an optional **light-sleep window** (wake
-up to N minutes early if the Mac stays awake and connected and a light phase is detected).
+Mac is asleep or NOOP is closed. Set your wake time — the strap buzzes at exactly that time.
+NOOP does not currently do light-sleep early wake.
 
 Mac side-effects are sandbox-friendly: screen lock uses macOS's own lock entry point, and
 Shortcuts run via the `shortcuts://` URL scheme — anything you can build in Shortcuts is reachable.
