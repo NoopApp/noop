@@ -504,7 +504,7 @@ async def _session(client, s, db, fam, args, stop_all):
 
 # --- realtime capture session ---------------------------------------------------------------------
 
-async def _realtime_session(client, s, db, fam, args, stop_all):
+async def _realtime_session(client, s, db, fam, args, stop_all, deadline):
     """One connected REALTIME session: enable the live streams (type-40 REALTIME_DATA = HR + R-R,
     type-43 raw IMU), persist every frame continuously, and hold the link open with a keep-alive
     re-arm. Returns (outcome, frames_committed_this_session).
@@ -570,6 +570,8 @@ async def _realtime_session(client, s, db, fam, args, stop_all):
                 outcome["v"] = "dropped"; sess_stop.set(); return
             if stop_all.is_set():
                 outcome["v"] = "stopped"; sess_stop.set(); return
+            if time.time() >= deadline:                # enforce --duration even on a never-dropping link
+                outcome["v"] = "done"; sess_stop.set(); return
             now = int(time.time() * 1000)
             if now - last_report >= 5000:
                 last_report = now
@@ -635,7 +637,7 @@ async def run_realtime(args):
                 except Exception:
                     pass
                 print(f"connected: {client.is_connected}  ATT MTU={getattr(client, 'mtu_size', '?')}", flush=True)
-                outcome, got = await _realtime_session(client, s, db, fam, args, stop_all)
+                outcome, got = await _realtime_session(client, s, db, fam, args, stop_all, deadline)
                 print(f"  session ended: {outcome} (+{got} frames; {s.committed} total this run)", flush=True)
         except (BleakError, asyncio.TimeoutError, EOFError) as e:
             print(f"  connect/session error: {e} — reconnecting", flush=True)
