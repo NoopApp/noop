@@ -25,7 +25,7 @@ object AppChangelog {
      * Bump this when you add a release below. The "What's New" sheet shows automatically when the
      * stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
      */
-    const val CURRENT_VERSION = "1.74"
+    const val CURRENT_VERSION = "1.75"
 
     data class Release(
         val version: String,
@@ -36,6 +36,15 @@ object AppChangelog {
 
     /** Newest first. */
     val releases: List<Release> = listOf(
+        Release(
+            version = "1.75",
+            title = "Personal vital baselines + Mac analytics parity",
+            date = "June 2026",
+            items = listOf(
+                "New (Mac and Android): the Health Monitor now judges each vital — HRV, resting heart rate, respiratory rate, skin temperature — against YOUR own learned baseline (after about 14 nights), not just a one-size-fits-all population range. So a personal normal that happens to sit outside the textbook band — say a naturally lower HRV — stops reading as \"off\" when it's perfectly fine for you. Until your baseline is established it falls back to the typical range.",
+                "New (Mac): macOS now computes steps, respiratory rate, daily calories and nightly skin temperature on-device, matching what Android already did — and nightly respiration now feeds into the recovery score on both platforms. Existing recoveries are unchanged when respiration isn't available.",
+            ),
+        ),
         Release(
             version = "1.74",
             title = "Android reconnect guide + a startup-crash fix",
