@@ -25,7 +25,7 @@ object AppChangelog {
      * Bump this when you add a release below. The "What's New" sheet shows automatically when the
      * stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
      */
-    const val CURRENT_VERSION = "1.62"
+    const val CURRENT_VERSION = "1.67"
 
     data class Release(
         val version: String,
@@ -36,6 +36,46 @@ object AppChangelog {
 
     /** Newest first. */
     val releases: List<Release> = listOf(
+        Release(
+            version = "1.67",
+            title = "Track a workout manually",
+            date = "June 2026",
+            items = listOf(
+                "New (Mac and Android): start and stop a workout yourself, instead of waiting for NOOP to detect one. Tap Start workout on the Live screen and you get a live card — elapsed time, heart rate, and strain building in real time; tap End and it's scored and saved to your Workouts, contributing to the day. Perfect for a session NOOP might not auto-detect, or when you just want a clean start/stop. Needs a connected strap streaming live heart rate. A community request — thanks for the nudge.",
+            ),
+        ),
+        Release(
+            version = "1.66",
+            title = "Android: WHOOP 4 on newer firmware now records data",
+            date = "June 2026",
+            items = listOf(
+                "Fixed (Android): a WHOOP 4.0 on a firmware version NOOP hadn't mapped recorded NOTHING — the history sync finished but every record was silently dropped, so heart rate, sleep and recovery all stayed empty. Mac already handled this (it falls back to the standard record layout for unknown firmware); Android didn't, so it dropped the data entirely. Android now does the same fallback, accepting an unmapped firmware's records only when they decode to physically-real data (so it can never store garbage). If your WHOOP 4 was syncing but showing no data, update and it should start filling in. Investigating exactly this on a Samsung report (#77). Mac: version bump only.",
+            ),
+        ),
+        Release(
+            version = "1.65",
+            title = "Sync diagnostics: surfacing silently-dropped history",
+            date = "June 2026",
+            items = listOf(
+                "Diagnostics (Mac and Android): if a chunk of history arrives from the strap but none of it can be decoded — frames failing their checksum, an unrecognised firmware layout, or out-of-range timestamps — NOOP now says so plainly in the strap log instead of quietly moving on. Until now a sync like that looked completely healthy (\"history synced\") while the data went nowhere, which made a rare \"I wore it but got no data\" report almost impossible to diagnose. This release changes no behaviour — it just makes that case visible — so if your history isn't showing up, turning on Debug logging and sharing your strap log will now point straight at the cause. Investigating a report along these lines (#77).",
+            ),
+        ),
+        Release(
+            version = "1.64",
+            title = "Android: faster sync, skin temp, sync status, alarm groundwork",
+            date = "June 2026",
+            items = listOf(
+                "New (Android): a batch of WHOOP 5/MG improvements, with thanks to a community contributor. Sync is faster and more reliable — NOOP now negotiates a larger Bluetooth packet size on connect, so a full history record rides one packet instead of being chopped into fragments. The Live screen now tells you the honest truth about syncing: \"History synced N ago,\" or a clear note if a sync stalled — no more silent guessing for a cloud-free app. Skin-temperature deviation now builds offline from the strap's own nights (wear-gated, in-bed only, baseline-seeded like recovery — APPROXIMATE), which also re-arms the illness early-warning signal. And the recovery ring now shows \"Calibrating — N of 4 nights\" while it learns your baseline, instead of a blank \"No Data.\" Also groundwork for a 5/MG firmware wake alarm — it's behind the Experimental toggle and UNCONFIRMED (help us verify it actually wakes you before relying on it). Mac: version bump only.",
+            ),
+        ),
+        Release(
+            version = "1.63",
+            title = "Mac: strap-computed nights show in Sleep",
+            date = "June 2026",
+            items = listOf(
+                "Fixed (Mac): nights computed from the strap alone were missing from the Sleep tab entirely — Intelligence scored them, but Sleep showed nothing (#77). The strap's on-device analysis stores its stage data in a different shape than a WHOOP import, and the Sleep tab only knew how to read the imported one. Bonus of the fix: Bluetooth-only nights now draw their REAL stage timeline in the hypnogram (imported nights still use an approximate reconstruction, since the export carries totals only). The usual honesty note applies: on-device stages are approximations from heart rate, HRV and movement — not PSG-validated. Android already handled both shapes; version bump only there.",
+            ),
+        ),
         Release(
             version = "1.62",
             title = "WHOOP 5/MG history: the missing clock",

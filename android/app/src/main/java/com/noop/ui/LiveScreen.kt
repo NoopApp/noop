@@ -27,6 +27,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -46,6 +50,8 @@ fun LiveScreen(viewModel: AppViewModel) {
     val live by viewModel.live.collectAsStateWithLifecycle()
     val bpm by viewModel.bpm.collectAsStateWithLifecycle()
     val selectedModel by viewModel.selectedModel.collectAsStateWithLifecycle()
+    val activeWorkout by viewModel.activeWorkout.collectAsStateWithLifecycle()
+    val lastWorkout by viewModel.lastWorkout.collectAsStateWithLifecycle()
 
     // The runtime Bluetooth permission gates scanning. If it isn't granted, the Connect button
     // REQUESTS it (rather than silently doing nothing), then connects once allowed. Shared with
@@ -87,8 +93,9 @@ fun LiveScreen(viewModel: AppViewModel) {
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        // Honest sync outcome for a cloud-free app: a non-silent error if the last offload stalled, else
-        // a relative "history synced N ago". Hidden while actively syncing (the pill already says so).
+
+        // Honest sync outcome for a cloud-free app: a non-silent error if the last offload stalled,
+        // else a relative "history synced N ago". Hidden while actively syncing (the pill says so). (PR #85)
         if (!live.backfilling) {
             val syncError = live.lastSyncError
             if (syncError != null) {
@@ -133,6 +140,65 @@ fun LiveScreen(viewModel: AppViewModel) {
                 value = live.lastEvent ?: "—",
                 accent = Palette.textPrimary,
             )
+        }
+
+        // Manual workout — start/stop a session yourself; records HR + strain until you end it.
+        val w = activeWorkout
+        if (w != null) {
+            var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+            LaunchedEffect(w.startMs) {
+                while (true) { nowMs = System.currentTimeMillis(); delay(1000) }
+            }
+            val elapsedS = ((nowMs - w.startMs) / 1000).coerceAtLeast(0)
+            NoopCard {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        Text("● RECORDING WORKOUT", style = NoopType.overline, color = Palette.statusCritical)
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            String.format("%d:%02d", elapsedS / 60, elapsedS % 60),
+                            style = NoopType.title2, color = Palette.textPrimary,
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(Metrics.gap)) {
+                        StatTile(modifier = Modifier.weight(1f), label = "HR", value = bpm?.toString() ?: "—")
+                        StatTile(modifier = Modifier.weight(1f), label = "Avg", value = if (w.avgHr > 0) "${w.avgHr}" else "—")
+                        StatTile(modifier = Modifier.weight(1f), label = "Peak", value = if (w.peakHr > 0) "${w.peakHr}" else "—")
+                        StatTile(modifier = Modifier.weight(1f), label = "Strain", value = String.format("%.1f", w.liveStrain))
+                    }
+                    Button(
+                        onClick = { viewModel.endWorkout() },
+                        modifier = Modifier.fillMaxWidth(),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Palette.statusCritical, contentColor = Palette.surfaceBase,
+                        ),
+                    ) { Text("End workout", style = NoopType.captionNumber) }
+                }
+            }
+        } else {
+            if (live.bonded) {
+                Button(
+                    onClick = { viewModel.startWorkout() },
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Palette.accent, contentColor = Palette.surfaceBase,
+                    ),
+                ) { Text("Start workout", style = NoopType.captionNumber) }
+            }
+            lastWorkout?.let { row ->
+                val mins = ((row.durationS ?: 0.0) / 60).toInt()
+                val parts = listOfNotNull(
+                    "$mins min",
+                    row.avgHr?.let { "$it avg bpm" },
+                    row.strain?.let { String.format("strain %.1f", it) },
+                )
+                Text(
+                    "✓ Workout saved · ${parts.joinToString(" · ")}",
+                    style = NoopType.footnote, color = Palette.textSecondary,
+                )
+            }
         }
 
         // Strap picker — choose the model before scanning so we look for exactly one device family.
@@ -291,7 +357,7 @@ private fun batteryColor(pct: Double?): Color = when {
 
 /**
  * Coarse relative-time label for the "History synced N ago" sync-status line. Pure + unit-tested
- * (see RelativeAgoTest); [nowSec] is injectable for determinism. Buckets to just-now / min / h / d.
+ * (RelativeAgoTest); [nowSec] is injectable for determinism. Buckets to just-now / min / h / d. (PR #85)
  */
 internal fun relativeAgo(epochSec: Long, nowSec: Long = System.currentTimeMillis() / 1000L): String {
     val d = (nowSec - epochSec).coerceAtLeast(0)

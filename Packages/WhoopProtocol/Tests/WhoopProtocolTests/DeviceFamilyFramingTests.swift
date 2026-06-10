@@ -253,7 +253,7 @@ final class DeviceFamilyFramingTests: XCTestCase {
         XCTAssertEqual(puffinCommandFrame(cmd: 3, seq: 7, payload: [0x01]).count, 16)
     }
 
-    // MARK: - 5/MG firmware-alarm payloads (REVISION_4 / REVISION_2) — macOS port of HapticPayloadsTest.kt
+    // MARK: - 5/MG firmware-alarm payloads (REVISION_4 / REVISION_2) — Swift twin of AlarmPayloadTest.kt
 
     func testMaverickAlarmPayloadBytes() {
         // wakeEpochMs 1_700_000_000_123 → seconds 1700000000 (LE 00 f1 53 65),

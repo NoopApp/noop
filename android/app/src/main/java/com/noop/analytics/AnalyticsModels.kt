@@ -245,7 +245,7 @@ data class DayResult(
      * Wear-gated mean in-bed skin temperature (°C) for this night, or null when no worn in-bed
      * samples were available. Baseline-INDEPENDENT (like avgHrv): the caller seeds a personal
      * skin-temp baseline from these nightly means and re-derives [com.noop.data.DailyMetric.skinTempDevC]
-     * in a second pass. APPROXIMATE.
+     * in a second pass. APPROXIMATE. (PR #85)
      */
     val nightlySkinTempC: Double? = null,
 )

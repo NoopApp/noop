@@ -746,9 +746,10 @@ public final class BLEManager: NSObject, ObservableObject {
     /// (event STRAP_DRIVEN_ALARM_EXECUTED=57). This is the only alarm path: the strap fires at
     /// the fixed time — NOOP has no light-sleep early-wake layer.
     ///
-    /// On-device verification needed on the Mac path: confirm the strap ACKs SET_ALARM_TIME and
-    /// that the alarm persists across BLE disconnect (cannot be verified in the simulator). The
-    /// byte-identical Android rev-4 frame is hardware-validated on a real 5/MG.
+    /// EXPERIMENTAL / UNCONFIRMED on 5/MG (same posture as the Android client): the byte-identical
+    /// Android rev-4 frame has been ACKed by a real 5/MG when arming, but a strap-driven wake fire
+    /// has NOT been captured on our side (no STRAP_DRIVEN_ALARM_EXECUTED event observed yet) — do
+    /// not present the 5/MG alarm as guaranteed until one is.
     func armStrapAlarm(at date: Date) {
         // Log the wake time in the user's LOCAL zone. `Date` prints in UTC by default, so an alarm
         // for (say) 07:00 in New York logged as "11:00:00 +0000" reads like a timezone bug — but it

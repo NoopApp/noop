@@ -58,6 +58,12 @@ class Backfiller(
      */
     private val onChunkCommitted: (StreamBatch) -> Unit = {},
     /**
+     * Diagnostic sink into the strap log. Lets [finishChunk] surface a chunk that arrived with frames
+     * but decoded to ZERO rows — the otherwise-invisible silent-data-loss case (frames failing CRC /
+     * an unmapped layout are dropped, the chunk looks empty, the trim acks past them). Without this a
+     * "zero data" strap log shows healthy "acked chunk" lines while data is being discarded (#77). */
+    private val log: (String) -> Unit = {},
+    /**
      * The (device, wall) clock reference. type-47 records carry their OWN real unix timestamp so
      * the offset is a no-op for them; this is supplied only for the REALTIME_RAW_DATA fallback and
      * to mirror the Swift signature. Defaults to an identity ref (device == wall == now): the Swift
@@ -155,6 +161,14 @@ class Backfiller(
         if (frames.isNotEmpty()) {
             val ref = clockRef
             val decoded = extractHistoricalStreams(frames, ref.device, ref.wall, family)
+            // DIAGNOSTIC (#77): frames arrived but produced no rows — they were dropped (CRC fail /
+            // unmapped layout / out-of-range timestamp), so this chunk persists nothing yet still acks
+            // below and the strap trims past it. Surface it loudly so a "zero data" strap log reveals
+            // the silent loss instead of looking healthy. (Observability only — behaviour unchanged
+            // pending a confirmed root cause; not acking here would wedge the offload on a re-send loop.)
+            if (decoded.isEmpty) {
+                log("Backfill: WARNING ${frames.size} frame(s) decoded to 0 rows (trim=$trim) — dropped (CRC/layout/timestamp); nothing persisted for this chunk")
+            }
             try {
                 repository.insert(decoded, deviceId) // DECODED FIRST (durable)
                 committed = decoded

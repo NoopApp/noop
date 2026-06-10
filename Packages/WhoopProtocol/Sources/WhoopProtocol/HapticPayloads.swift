@@ -3,11 +3,16 @@ import Foundation
 /// WHOOP 5.0 / MG (device family GOOSE/MAVERICK) haptic + alarm command payload encoders.
 ///
 /// These are WHOOP 5.0/MG protocol facts — command numbers, field offsets and byte layouts —
-/// documented as factual wire-format observations and confirmed against the official app's
-/// behaviour for interoperability; no proprietary code is reproduced (see ATTRIBUTION.md /
-/// DISCLAIMER.md). Byte-for-byte port of the hardware-tested Android `HapticPayloads.kt`
-/// (MaverickHaptics + AlarmPayload) on this branch. All multi-byte fields are little-endian.
-/// Revision values: REVISION_1=1, REVISION_2=2, REVISION_4=4.
+/// documented as factual wire-format observations for interoperability; no proprietary code is
+/// reproduced (see ATTRIBUTION.md / DISCLAIMER.md). Swift twin of the Android
+/// `protocol/AlarmPayload.kt`; byte parity is pinned by cross-platform golden frames in both
+/// test suites. All multi-byte fields are little-endian. Revision values: REVISION_1=1,
+/// REVISION_2=2, REVISION_4=4.
+///
+/// EXPERIMENTAL / UNCONFIRMED (same posture as the Android client): unlike the maverick buzz
+/// (hardware-confirmed on a real MG), the rev4 alarm layout is self-consistent and arming has
+/// been ACKed on hardware, but a strap-driven wake fire has NOT been captured on our side
+/// (no STRAP_DRIVEN_ALARM_EXECUTED event observed yet).
 
 /// The canonical WHOOP waveform-effect pair, used by both the notification buzz and the wake alarm.
 private let waveformEffects: [UInt8] = [47, 152, 0, 0, 0, 0, 0, 0]

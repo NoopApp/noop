@@ -62,14 +62,14 @@ fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
     val live by viewModel.live.collectAsStateWithLifecycle()
     var footer by remember { mutableStateOf(TodayFooterState()) }
 
+    // Recovery cold-start: recovery is null until the HRV baseline crosses the seed gate
+    // (Baselines.minNightsSeed valid nights). Show honest "calibrating — N of 4 nights" progress
+    // instead of a bare "No Data" so a new BLE-only user knows scores are coming, not broken. (PR #85)
+    val recoveryCalibration: Int? = recoveryCalibrationNights(days, today?.recovery != null)
+
     // 14-day trailing calendar window ending on the phone's actual local day.
     // Old imports stay in history, but they do not fill the Today trend tiles.
     val window = remember14(days)
-
-    // Recovery cold-start: recovery is null until the HRV baseline crosses the seed gate
-    // (Baselines.minNightsSeed valid nights). Show honest "calibrating — N of 4 nights" progress
-    // instead of a bare "No Data" so a new BLE-only user knows scores are coming, not broken.
-    val recoveryCalibration: Int? = recoveryCalibrationNights(days, today?.recovery != null)
 
     LaunchedEffect(days) {
         val now = System.currentTimeMillis() / 1000
@@ -209,7 +209,7 @@ private fun TodayRecoveryRing(day: DailyMetric?, calibratingNights: Int? = null)
  * Recent nights carrying a usable nightly HRV — the signal that seeds the recovery baseline. While
  * recovery is still null and this count is in [1, seed), it is the honest "calibrating N of <seed>"
  * progress shown in place of "No Data"; null once recovery exists or no night has data yet. Pure +
- * unit-tested (see RecoveryCalibrationTest). Mirrors Baselines.minNightsSeed as the seed gate.
+ * unit-tested (RecoveryCalibrationTest). Mirrors Baselines.minNightsSeed as the seed gate. (PR #85)
  */
 internal fun recoveryCalibrationNights(
     days: List<DailyMetric>,

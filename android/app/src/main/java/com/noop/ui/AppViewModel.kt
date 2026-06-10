@@ -6,13 +6,16 @@ import androidx.lifecycle.viewModelScope
 import com.noop.NoopApplication
 import com.noop.analytics.IllnessWatch
 import com.noop.analytics.IntelligenceEngine
+import com.noop.analytics.StrainScorer
 import com.noop.analytics.UserProfile
 import com.noop.ble.LiveState
 import com.noop.ble.WhoopConnectionService
 import com.noop.ble.WhoopModel
 import androidx.health.connect.client.HealthConnectClient
 import com.noop.data.DailyMetric
+import com.noop.data.HrSample
 import com.noop.data.WhoopRepository
+import com.noop.data.WorkoutRow
 import com.noop.ingest.HealthConnectImporter
 import com.noop.ingest.HealthConnectWriter
 import com.noop.notif.IllnessAlertNotifier
@@ -235,6 +238,70 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         while (hrWindow.size > hrWindowSize) hrWindow.removeFirst()
         val sorted = hrWindow.sorted()
         _bpm.value = sorted[sorted.size / 2]
+        captureWorkoutSample(_bpm.value!!)
+    }
+
+    // MARK: - Manual workout tracking
+    //
+    // Lets a user start/stop a workout themselves rather than relying on auto-detection (a top request).
+    // Holds the start time + the live HR collected since; on End the window is scored via StrainScorer
+    // and saved as a WorkoutRow (source "manual"), which then shows in the Workouts screen. The day's
+    // strain already counts this HR (same live stream the store persists), so it's a per-session
+    // annotation, not a double-count. Mirrors macOS AppModel.
+
+    /** A manual workout in progress. [samples] accumulate from the smoothed live bpm; [liveStrain] is
+     *  recomputed as the window grows so the active card shows strain building in real time. */
+    data class ActiveWorkout(
+        val startMs: Long,
+        val samples: List<HrSample> = emptyList(),
+        val liveStrain: Double = 0.0,
+        val avgHr: Int = 0,
+        val peakHr: Int = 0,
+    )
+
+    private val _activeWorkout = MutableStateFlow<ActiveWorkout?>(null)
+    val activeWorkout: StateFlow<ActiveWorkout?> = _activeWorkout.asStateFlow()
+    private val _lastWorkout = MutableStateFlow<WorkoutRow?>(null)
+    val lastWorkout: StateFlow<WorkoutRow?> = _lastWorkout.asStateFlow()
+
+    /** Begin a manually-tracked workout (single buzz confirms). */
+    fun startWorkout() {
+        if (_activeWorkout.value != null) return
+        _lastWorkout.value = null
+        _activeWorkout.value = ActiveWorkout(startMs = System.currentTimeMillis())
+        buzz(1)
+    }
+
+    /** Finish the active workout: score the captured HR window and save it as a WorkoutRow. A session
+     *  with too few samples (never streamed HR) is discarded quietly. Double-buzz confirms the save. */
+    fun endWorkout() {
+        val w = _activeWorkout.value ?: return
+        _activeWorkout.value = null
+        val samples = w.samples
+        if (samples.size < 2) { _lastWorkout.value = null; return }
+        val endMs = System.currentTimeMillis()
+        val avg = samples.sumOf { it.bpm } / samples.size
+        val peak = samples.maxOf { it.bpm }
+        val strain = StrainScorer.strain(samples, maxHR = profileStore.hrMax.toDouble(), sex = profileStore.sex)
+        val row = WorkoutRow(
+            deviceId = deviceId, startTs = w.startMs / 1000, endTs = endMs / 1000,
+            sport = "Workout", source = "manual", durationS = (endMs - w.startMs) / 1000.0,
+            avgHr = avg, maxHr = peak, strain = strain,
+        )
+        _lastWorkout.value = row
+        buzz(2)
+        viewModelScope.launch { runCatching { repository.upsertWorkouts(listOf(row)) } }
+    }
+
+    /** Append the current smoothed bpm to the active workout and recompute its running strain. Called
+     *  from ingestHr on every fresh sample; a no-op when no workout is running. */
+    private fun captureWorkoutSample(bpm: Int) {
+        val w = _activeWorkout.value ?: return
+        val s = w.samples + HrSample(deviceId = deviceId, ts = System.currentTimeMillis() / 1000, bpm = bpm)
+        val strain = StrainScorer.strain(s, maxHR = profileStore.hrMax.toDouble(), sex = profileStore.sex) ?: 0.0
+        _activeWorkout.value = w.copy(
+            samples = s, avgHr = s.sumOf { it.bpm } / s.size, peakHr = s.maxOf { it.bpm }, liveStrain = strain,
+        )
     }
 
     /**

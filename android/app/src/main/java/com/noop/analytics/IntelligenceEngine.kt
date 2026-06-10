@@ -104,7 +104,7 @@ object IntelligenceEngine {
         val nightlyHrvByDay = LinkedHashMap<String, Double?>()
         val nightlyRhrByDay = LinkedHashMap<String, Double?>()
         // Wear-gated nightly skin-temp means (on-device only — imported rows carry the deviation, not
-        // the raw mean, so the skin-temp baseline is seeded purely from these).
+        // the raw mean, so the skin-temp baseline is seeded purely from these). (PR #85)
         val nightlySkinByDay = LinkedHashMap<String, Double?>()
 
         for (offset in 0 until maxDays) {
@@ -142,9 +142,9 @@ object IntelligenceEngine {
                 resp = resp,
                 gravity = grav,
                 steps = steps,
-                skinTemp = skin,
                 dayHr = dayHr,
                 daySteps = daySteps,
+                skinTemp = skin,
                 profile = profile,
                 baselines = baselines1,
                 maxHROverride = maxHROverride,
@@ -181,7 +181,7 @@ object IntelligenceEngine {
         val hrvBase2 = Baselines.foldHistory(hrvSeq, hrvCfg)
         val rhrBase2 = Baselines.foldHistory(rhrSeq, rhrCfg)
         // Skin-temp baseline is on-device-only (imported rows carry skinTempDevC, not the raw mean),
-        // so fold purely over the pass-1 nightly means in chronological order.
+        // so fold purely over the pass-1 nightly means in chronological order. (PR #85)
         val skinSeq = nightlySkinByDay.entries.sortedBy { it.key }.map { it.value }
         val skinBase2 = Baselines.foldHistory(skinSeq, skinCfg)
         val baselines2 = ProfileBaselines(hrv = hrvBase2, restingHR = rhrBase2, skinTemp = skinBase2)
@@ -295,7 +295,7 @@ object IntelligenceEngine {
      * Re-derive the skin-temperature deviation (°C) for a night against the freshly-seeded personal
      * baseline, mirroring the avgHrv→recovery re-score. Null when the night had no wear-gated mean or
      * the skin-temp baseline isn't usable yet (< minNightsSeed) — honest cold-start. Rounded to 2 dp
-     * to match the imported/demo precision. APPROXIMATE.
+     * to match the imported/demo precision. APPROXIMATE. (PR #85)
      */
     private fun recomputeSkinTempDev(nightly: Double?, base: BaselineState?): Double? {
         val v = nightly ?: return null

@@ -3,9 +3,9 @@ package com.noop.analytics
 import com.noop.data.DailyMetric
 import com.noop.data.GravitySample
 import com.noop.data.HrSample
+import com.noop.data.SkinTempSample
 import com.noop.data.RespSample
 import com.noop.data.RrInterval
-import com.noop.data.SkinTempSample
 import com.noop.data.StepSample
 import org.json.JSONArray
 import org.json.JSONObject
@@ -31,52 +31,6 @@ import java.time.format.DateTimeFormatter
  * uses Int seconds.
  */
 object AnalyticsEngine {
-
-    /**
-     * Minimum worn, in-bed skin-temperature samples (1 Hz ⇒ seconds) before a nightly mean is
-     * trusted. ~5 min guards against a few stray samples fabricating a baseline value.
-     */
-    const val MIN_SKIN_TEMP_SAMPLES: Int = 300
-
-    /** Plausible worn skin-temperature range (°C). Off-wrist/charging samples drift to ambient
-     *  (~20–27 °C seen on hardware) and are excluded; the strap's own decode gate is 20–45. */
-    private const val SKIN_TEMP_MIN_C: Double = 28.0
-    private const val SKIN_TEMP_MAX_C: Double = 42.0
-
-    /**
-     * Wear-gated mean in-bed skin temperature (°C) for the night, or null when too few worn samples.
-     *
-     * WHOOP treats skin temperature as a SLEEP signal, so the mean is taken over the detected
-     * in-bed [sessions] only. A sample counts when (a) its timestamp falls inside a session,
-     * (b) a concurrent HR sample reads a worn, alive BPM (the strap streams HR only on-wrist), and
-     * (c) the value is in the plausible worn range — so an on-charger interval that drifts to ambient
-     * (which still passes the strap's looser 20–45 decode gate, e.g. the ~22 °C off-wrist vector in
-     * the decode fixtures) cannot poison the nightly mean. All values APPROXIMATE.
-     */
-    internal fun wornNightlySkinTempC(
-        sessions: List<DetectedSleep>,
-        hr: List<HrSample>,
-        skinTemp: List<SkinTempSample>,
-        minSamples: Int = MIN_SKIN_TEMP_SAMPLES,
-    ): Double? {
-        if (sessions.isEmpty() || skinTemp.isEmpty()) return null
-        val wornSeconds = HashSet<Long>(hr.size)
-        for (h in hr) if (h.bpm in 30..220) wornSeconds.add(h.ts)
-        var sum = 0.0
-        var n = 0
-        for (t in skinTemp) {
-            if (t.ts !in wornSeconds) continue
-            if (sessions.none { t.ts in it.start..it.end }) continue
-            val c = t.raw / 100.0
-            if (c < SKIN_TEMP_MIN_C || c > SKIN_TEMP_MAX_C) continue
-            sum += c
-            n++
-        }
-        return if (n >= minSamples) sum / n else null
-    }
-
-    /** Round to 2 decimal places (matches the imported/demo skin-temp deviation precision). */
-    private fun round2(v: Double): Double = kotlin.math.round(v * 100.0) / 100.0
 
     // ─────────────────────────────────────────────────────────────────────────
     // Day-string helper (UTC YYYY-MM-DD), mirrors Swift AnalyticsEngine.isoDay.
@@ -129,7 +83,6 @@ object AnalyticsEngine {
         resp: List<RespSample> = emptyList(),
         gravity: List<GravitySample> = emptyList(),
         steps: List<StepSample> = emptyList(),
-        skinTemp: List<SkinTempSample> = emptyList(),
         // Calendar-day-scoped overrides for the ADDITIVE daily totals (steps + activeKcalEst) ONLY.
         // When null, the totals fall back to the same window the rest of the analysis uses (preserving
         // the pure-function contract). The caller (IntelligenceEngine) supplies a full
@@ -138,6 +91,10 @@ object AnalyticsEngine {
         // still counted. Sleep / recovery / strain / workouts keep using hr/rr/resp/gravity/steps.
         dayHr: List<HrSample>? = null,
         daySteps: List<StepSample>? = null,
+        // Wear-gated nightly skin-temp mean is harvested here (baseline-independent); IntelligenceEngine
+        // seeds a personal baseline from these means across nights and re-derives skinTempDevC in pass 2
+        // (same two-pass shape as avgHrv→recovery). (PR #85)
+        skinTemp: List<SkinTempSample> = emptyList(),
         profile: UserProfile,
         baselines: ProfileBaselines = ProfileBaselines(),
         maxHROverride: Double? = null,
@@ -291,11 +248,11 @@ object AnalyticsEngine {
             )
         }
 
-        // ── Skin-temperature deviation (APPROXIMATE) ──────────────────────────
-        // Wear-gated mean in-bed skin temp for the night (baseline-independent); the caller seeds a
-        // personal baseline from these means across nights and re-derives skinTempDevC in pass 2 (same
-        // shape as avgHrv→recovery). In the single-pass path a usable baseline here yields the
-        // deviation directly; null until the baseline crosses the seed gate (honest cold-start).
+        // ── Skin-temperature deviation (offline) ──────────────────────────────
+        // Wear-gated in-bed mean (baseline-independent, harvested every pass) + the deviation against
+        // the personal baseline. In pass 1 baselines.skinTemp is null so the deviation is null and the
+        // mean is harvested; IntelligenceEngine seeds the baseline from those means and re-derives the
+        // deviation in pass 2 (mirrors avgHrv→recovery). APPROXIMATE. (PR #85)
         val nightlySkinTempC = wornNightlySkinTempC(matched, hr, skinTemp)
         val skinTempDevC: Double? = nightlySkinTempC?.let { v ->
             baselines.skinTemp?.takeIf { it.usable }?.let { round2(Baselines.deviation(v, it).delta) }
@@ -335,4 +292,46 @@ object AnalyticsEngine {
             nightlySkinTempC = nightlySkinTempC,
         )
     }
+
+    /** Round to 2 decimal places (matches the imported/demo skin-temp deviation precision). (PR #85) */
+    private fun round2(v: Double): Double = kotlin.math.round(v * 100.0) / 100.0
+
+    /** Min worn, in-bed skin-temp samples (1 Hz ⇒ seconds) before a nightly mean is trusted. ~5 min
+     *  guards against a few stray samples fabricating a baseline value. (PR #85) */
+    private const val MIN_SKIN_TEMP_SAMPLES_INLINE = 300
+
+    /**
+     * Wear-gated mean in-bed skin temperature (°C) for the night, or null when too few worn samples.
+     * A sample counts when (a) its timestamp falls inside a detected in-bed [sessions] span, (b) a
+     * concurrent HR sample reads a worn, alive BPM (the strap streams HR only on-wrist), and (c) the
+     * value is in the plausible worn range — so an on-charger interval drifting to ambient (which still
+     * passes the strap's looser 20–45 decode gate, e.g. the ~22 °C off-wrist decode fixture) can't
+     * poison the nightly mean. Uses the decoder's /100 scale. All values APPROXIMATE. (PR #85)
+     */
+    internal fun wornNightlySkinTempC(
+        sessions: List<DetectedSleep>,
+        hr: List<HrSample>,
+        skinTemp: List<SkinTempSample>,
+        minSamples: Int = MIN_SKIN_TEMP_SAMPLES_INLINE,
+    ): Double? {
+        if (sessions.isEmpty() || skinTemp.isEmpty()) return null
+        val wornSeconds = HashSet<Long>(hr.size)
+        for (h in hr) if (h.bpm in 30..220) wornSeconds.add(h.ts)
+        var sum = 0.0
+        var n = 0
+        for (t in skinTemp) {
+            if (t.ts !in wornSeconds) continue
+            if (sessions.none { t.ts in it.start..it.end }) continue
+            val c = t.raw / 100.0
+            if (c < SKIN_TEMP_MIN_C || c > SKIN_TEMP_MAX_C) continue
+            sum += c
+            n++
+        }
+        return if (n >= minSamples) sum / n else null
+    }
+
+    /** Plausible worn skin-temperature range (°C). Off-wrist/charging samples drift to ambient and are
+     *  excluded; the strap's own decode gate is the looser 20–45. (PR #85) */
+    private const val SKIN_TEMP_MIN_C: Double = 28.0
+    private const val SKIN_TEMP_MAX_C: Double = 42.0
 }

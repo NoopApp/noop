@@ -108,6 +108,14 @@ public struct Streams: Equatable, Codable {
         self.events = events; self.battery = battery
     }
 
+    /// True when no decoded rows landed in any stream — used to flag a historical chunk whose frames
+    /// all dropped (CRC fail / unmapped layout / out-of-range timestamp), the silent-data-loss
+    /// diagnostic in `Backfiller.finishChunk` (#77).
+    public var isEmpty: Bool {
+        hr.isEmpty && rr.isEmpty && spo2.isEmpty && skinTemp.isEmpty && resp.isEmpty
+            && gravity.isEmpty && steps.isEmpty && events.isEmpty && battery.isEmpty
+    }
+
     private enum CodingKeys: String, CodingKey {
         case hr, rr, spo2, skinTemp = "skin_temp", resp, gravity, steps, events, battery
     }
