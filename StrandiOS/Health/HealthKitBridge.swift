@@ -254,9 +254,12 @@ final class HealthKitBridge: ObservableObject {
 
     // MARK: - Date helpers
 
+    // UTC: the rest of the store keys days by UTC (Repository's compareDayParser, the
+    // dailyMetric primary key). Using .current here would split the same physical day across
+    // two `yyyy-MM-dd` keys when the user crosses a time zone, causing duplicate daily rows.
     private static let dayFormatter: DateFormatter = {
         let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyy-MM-dd"; f.timeZone = .current; return f
+        f.dateFormat = "yyyy-MM-dd"; f.timeZone = TimeZone(identifier: "UTC")!; return f
     }()
     private static func dayString(_ date: Date) -> String { dayFormatter.string(from: date) }
     private static func date(from day: String) -> Date? { dayFormatter.date(from: day) }
