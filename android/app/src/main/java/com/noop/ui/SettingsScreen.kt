@@ -338,7 +338,8 @@ fun SettingsScreen(vm: AppViewModel) {
                     )
                     live.batteryPct?.let { pct ->
                         StatePill(
-                            title = "Battery ${pct.roundToInt()}%",
+                            title = "Battery ${pct.roundToInt()}%" +
+                                if (live.charging == true) " · Charging" else "",
                             tone = batteryTone(pct),
                             showsDot = false,
                         )

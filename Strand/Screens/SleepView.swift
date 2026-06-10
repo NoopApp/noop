@@ -87,7 +87,8 @@ struct SleepView: View {
                           trailing: "\(night.dateLabel) · \(night.onsetText)–\(night.wakeText)")
             ChartCard(
                 title: "Stage breakdown",
-                subtitle: "\(durationText(night.timeInBed)) in bed · \(efficiencyText(night)) efficiency",
+                subtitle: "\(durationText(night.timeInBed)) in bed · \(efficiencyText(night)) efficiency"
+                    + (model.isPersistedHypnogram ? " · stages approximate (on-device)" : ""),
                 trailing: durationText(s.asleep),
                 height: NoopMetrics.chartHeight,
                 chart: {
@@ -359,7 +360,8 @@ struct SleepView: View {
             firstDay: repo.days.first?.day,
             lastDay: repo.days.last?.day,
             lastDayUpdated: repo.days.last,
-            lastSleep: repo.sleeps.last)
+            lastSleep: repo.sleeps.last,
+            refreshSeq: repo.refreshSeq)
     }
 
     /// Build every expensive derivation exactly once. Called only when `dataKey` changes,
@@ -370,6 +372,7 @@ struct SleepView: View {
         return SleepModel(
             night: night,
             intervals: night.intervals,
+            isPersistedHypnogram: (night.realSegments?.count ?? 0) >= 2,
             performance: performanceSeries,
             efficiency: efficiencySeries,
             consistency: consistencySeries,
@@ -423,14 +426,16 @@ struct SleepView: View {
         return (series.last, mean(series), series)
     }
 
-    /// Sleep performance % = asleep / sleep-need, where need = 7.75h baseline + debt-style
-    /// nudge. We don't have a stored need, so approximate against the personal asleep mean
-    /// (capped 0–100): how much of a *typical* night you achieved.
+    /// Sleep performance %: the imported WHOOP figure (sleep_performance, 0–100) when the
+    /// export carried one for that day; else the APPROXIMATE fallback (asleep / personal
+    /// need, capped 100) so strap-only days after the import horizon stay populated.
     private var performanceSeries: Metric {
+        let imported = repo.importedSleep
         let need = sleepNeedMin
         return metric { d in
+            if let p = imported[d.day]?.performancePct { return p }   // export-verbatim
             guard let asleep = d.totalSleepMin, asleep > 0, need > 0 else { return nil }
-            return min(100, asleep / need * 100)
+            return min(100, asleep / need * 100)   // APPROXIMATE fallback
         }
     }
 
@@ -441,9 +446,16 @@ struct SleepView: View {
         }
     }
 
-    /// Consistency per day from the rolling bedtime spread of the trailing window up to
-    /// each night; lower spread → higher score. Reuses the same SD→score mapping.
+    /// Consistency: prefer the imported sleep_consistency series, but only when it covers
+    /// the latest night — otherwise "latest" would silently be a months-old import-era
+    /// value. Fallback is the APPROXIMATE rolling bedtime-spread score (per session, lower
+    /// spread → higher score, same SD→score mapping).
     private var consistencySeries: Metric {
+        let imported = repo.importedSleep
+        if let lastDay = repo.days.last?.day, imported[lastDay]?.consistencyPct != nil {
+            let series = repo.days.compactMap { imported[$0.day]?.consistencyPct }
+            return (series.last, mean(series), series)
+        }
         let cal = Calendar.current
         func bedMinutes(_ s: CachedSleepSession) -> Double {
             let d = Date(timeIntervalSince1970: TimeInterval(s.startTs))
@@ -467,11 +479,15 @@ struct SleepView: View {
         return (scores.last, mean(scores), scores)
     }
 
-    /// Hours vs needed % = asleep / need (can exceed 100 on a long night).
+    /// Hours vs needed % = asleep / need (can exceed 100 on a long night). The imported
+    /// sleep_need_min wins per day; else the APPROXIMATE personal-mean need.
     private var hoursVsNeededSeries: Metric {
-        let need = sleepNeedMin
+        let imported = repo.importedSleep
+        let fallbackNeed = sleepNeedMin
         return metric { d in
-            guard let asleep = d.totalSleepMin, asleep > 0, need > 0 else { return nil }
+            guard let asleep = d.totalSleepMin, asleep > 0 else { return nil }
+            let need = imported[d.day]?.needMin ?? fallbackNeed
+            guard need > 0 else { return nil }
             return asleep / need * 100
         }
     }
@@ -489,12 +505,15 @@ struct SleepView: View {
         metric { $0.respRateBpm }
     }
 
-    /// Sleep debt (minutes) per night = need − asleep, floored at 0 (no "credit").
+    /// Sleep debt (minutes): the imported sleep_debt_min when the export carried it; else
+    /// the APPROXIMATE per-night need − asleep, floored at 0 (no "credit").
     private var sleepDebtSeries: Metric {
+        let imported = repo.importedSleep
         let need = sleepNeedMin
         let series = repo.days.compactMap { d -> Double? in
+            if let debt = imported[d.day]?.debtMin { return debt }   // minutes, export-verbatim
             guard let asleep = d.totalSleepMin, asleep > 0, need > 0 else { return nil }
-            return Swift.max(0, need - asleep)
+            return Swift.max(0, need - asleep)   // APPROXIMATE fallback
         }
         return (series.last, mean(series), series)
     }
@@ -696,6 +715,9 @@ private struct SleepInputKey: Equatable {
     let lastDayUpdated: DailyMetric?
     /// Newest sleep session (Equatable) — catches a re-import of the latest night.
     let lastSleep: CachedSleepSession?
+    /// Bumped on every Repository.refresh — catches a re-import that changes only the
+    /// imported metricSeries figures (importedSleep) without touching days/sleeps.
+    let refreshSeq: Int
 }
 
 /// Memoized result of every expensive SleepView derivation. Built once per data change in
@@ -706,9 +728,12 @@ private struct SleepModel {
     typealias Metric = (latest: Double?, typical: Double?, series: [Double])
 
     let night: Night
-    /// Reconstructed stage intervals for the hypnogram — computed once (Night.intervals is a
-    /// computed property; it was previously re-derived on each access during render).
+    /// Stage intervals for the hypnogram — computed once (Night.intervals is a computed
+    /// property; it was previously re-derived on each access during render).
     let intervals: [SleepInterval]
+    /// True when `intervals` are the stager's persisted per-epoch segments (on-device
+    /// APPROXIMATE staging), not the synthesized architecture.
+    let isPersistedHypnogram: Bool
 
     let performance: Metric
     let efficiency: Metric

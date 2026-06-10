@@ -15,6 +15,7 @@ struct AutomationsView: View {
             wearCard
             coachingCard
             alarmCard
+            illnessCard
         }
     }
 
@@ -129,23 +130,32 @@ struct AutomationsView: View {
                             .labelsHidden().datePickerStyle(.compact)
                     }
                     .frame(minHeight: 42).padding(.vertical, 4)
-                    rowDivider
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Light-sleep window").font(StrandFont.body).foregroundStyle(StrandPalette.textPrimary)
-                            Text("Wake up to this many minutes early if the Mac stays awake & connected and a light phase is detected.")
-                                .font(StrandFont.footnote).foregroundStyle(StrandPalette.textTertiary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer()
-                        Stepper("\(behavior.smartAlarmWindow) min", value: $behavior.smartAlarmWindow, in: 0...60, step: 5)
-                            .fixedSize()
-                    }
-                    .frame(minHeight: 42).padding(.vertical, 4)
+                }
+                if behavior.smartAlarmEnabled {
+                    Text("On WHOOP 5/MG this is experimental — arming is confirmed, but a strap-driven wake-up hasn't been verified yet, so don't rely on it as your only alarm there. WHOOP 4 is the proven path.")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 6)
                 }
             }
             .onChange(of: behavior.smartAlarmEnabled) { _ in model.applySmartAlarm() }
             .onChange(of: behavior.smartAlarmMinutes) { _ in model.applySmartAlarm() }
+        }
+    }
+
+    // MARK: - Illness early-warning
+
+    private var illnessCard: some View {
+        Section2(icon: "waveform.path.ecg", title: "Illness early-warning",
+                 blurb: "Watches your resting HR, HRV, skin temperature and respiration against your own 28-day baseline. On-device and approximate — informational only, not a diagnosis.") {
+            ToggleRow(label: "Watch for early-illness signs",
+                      help: "Needs at least 14 days of history. When two or more signals drift together you get a banner on Control Center and a notification — at most once a day.",
+                      isOn: $behavior.illnessWatch)
+                .onChange(of: behavior.illnessWatch) { _ in
+                    model.reevaluateIllness()
+                    if behavior.illnessWatch { IllnessNotifier.requestAuthorization() }
+                }
         }
     }
 

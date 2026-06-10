@@ -1,6 +1,7 @@
 import SwiftUI
 import StrandDesign
 import WhoopProtocol
+import WhoopStore
 
 /// Live — the connected strap in real time. Built on the shared design system
 /// (ScreenScaffold chrome, StrandPalette, StrandFont) so it lines up pixel-for-pixel
@@ -29,6 +30,7 @@ struct LiveView: View {
                 if let hint = live.pairingHint { pairingHintBanner(hint) }
                 heartRateCard
                 statusGrid
+                workoutSection
                 // Show the strap picker whenever we're not actively streaming, so a user with both a
                 // WHOOP 4 and a 5/MG can switch between them. (It used to hide once `bonded`, which is
                 // sticky across disconnects — so after the first pairing the picker vanished for good.)
@@ -113,6 +115,83 @@ struct LiveView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    // MARK: - Manual workout
+
+    @ViewBuilder private var workoutSection: some View {
+        if let w = model.activeWorkout {
+            activeWorkoutCard(w)
+        } else {
+            if activeConnection {
+                Button { model.startWorkout() } label: {
+                    Label("Start workout", systemImage: "figure.run")
+                        .frame(maxWidth: .infinity).padding(.vertical, 8)
+                }
+                .buttonStyle(.borderedProminent).tint(StrandPalette.accent)
+                .help("Track a workout manually — records heart rate and strain until you end it.")
+            }
+            if let last = model.lastWorkout {
+                workoutSavedRow(last)
+            }
+        }
+    }
+
+    private func activeWorkoutCard(_ w: AppModel.ActiveWorkout) -> some View {
+        NoopCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
+                    Circle().fill(StrandPalette.metricRose).frame(width: 8, height: 8)
+                    Text("RECORDING WORKOUT").font(StrandFont.overline)
+                        .tracking(StrandFont.overlineTracking).foregroundStyle(StrandPalette.metricRose)
+                    Spacer()
+                    // Re-render once a second so the elapsed clock ticks without a manual Timer.
+                    TimelineView(.periodic(from: .now, by: 1)) { _ in
+                        Text(Self.elapsed(since: w.start)).font(StrandFont.headline).monospacedDigit()
+                            .foregroundStyle(StrandPalette.textPrimary)
+                    }
+                }
+                HStack(spacing: NoopMetrics.gap) {
+                    workoutStat("HR", model.bpm.map { "\($0)" } ?? "—")
+                    workoutStat("Avg", w.avgHr > 0 ? "\(w.avgHr)" : "—")
+                    workoutStat("Peak", w.peakHr > 0 ? "\(w.peakHr)" : "—")
+                    workoutStat("Strain", String(format: "%.1f", w.liveStrain))
+                }
+                Button(role: .destructive) { model.endWorkout() } label: {
+                    Label("End workout", systemImage: "stop.circle.fill")
+                        .frame(maxWidth: .infinity).padding(.vertical, 8)
+                }
+                .buttonStyle(.borderedProminent).tint(StrandPalette.metricRose)
+            }
+        }
+    }
+
+    private func workoutStat(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title.uppercased()).font(StrandFont.overline).tracking(StrandFont.overlineTracking)
+                .foregroundStyle(StrandPalette.textSecondary)
+            Text(value).font(StrandFont.headline).monospacedDigit()
+                .foregroundStyle(StrandPalette.textPrimary).lineLimit(1).minimumScaleFactor(0.6)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func workoutSavedRow(_ row: WorkoutRow) -> some View {
+        let mins = Int((row.durationS ?? 0) / 60)
+        let parts = ["\(mins) min", row.avgHr.map { "\($0) avg bpm" },
+                     row.strain.map { String(format: "strain %.1f", $0) }].compactMap { $0 }
+        return HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(StrandPalette.accent)
+            Text("Workout saved · \(parts.joined(separator: " · "))")
+                .font(StrandFont.footnote).foregroundStyle(StrandPalette.textSecondary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 4)
+    }
+
+    private static func elapsed(since start: Date) -> String {
+        let s = max(0, Int(Date().timeIntervalSince(start)))
+        return String(format: "%d:%02d", s / 60, s % 60)
     }
 
     private func pairingHintBanner(_ hint: String) -> some View {

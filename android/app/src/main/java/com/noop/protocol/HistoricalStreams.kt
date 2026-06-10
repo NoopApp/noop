@@ -140,7 +140,16 @@ fun decodeHistorical(frame: ByteArray, family: DeviceFamily = DeviceFamily.WHOOP
     if (frame[4].toInt() and 0xFF != PacketType.HISTORICAL_DATA.rawValue) return null
 
     val version = frame[5].toInt() and 0xFF
-    val layout = histVersionLayout(version) ?: return null
+    // Unmapped firmware version: instead of dropping the whole record (→ no HR/R-R/gravity → no sleep,
+    // and on Android this previously meant ZERO data for a strap on newer firmware — the macOS
+    // issue-#30 fix that never reached Android; the likely cause of #77 on some WHOOP 4 straps), fall
+    // back to the canonical v24 DSP layout. Firmware versions overwhelmingly share it (V12 == V24). We
+    // accept the fallback ONLY if it decodes to physically-real data (validated at the end) so a wrong
+    // layout can never store garbage. Mapped versions are unaffected. Mirrors Swift PostHooks
+    // "historical_data" (PostHooks.swift). (#30 / #77)
+    val mapped = histVersionLayout(version)
+    val usingFallback = mapped == null
+    val layout = mapped ?: HIST_V24
 
     val out = LinkedHashMap<String, Any?>()
     out["hist_version"] = version
@@ -167,6 +176,19 @@ fun decodeHistorical(frame: ByteArray, family: DeviceFamily = DeviceFamily.WHOOP
     layout.gravityXOff?.let { off -> frame.histF32(off)?.let { out["gravity_x"] = it } }
     layout.gravityYOff?.let { off -> frame.histF32(off)?.let { out["gravity_y"] = it } }
     layout.gravityZOff?.let { off -> frame.histF32(off)?.let { out["gravity_z"] = it } }
+
+    // Validate the v24-layout guess for an unmapped version: gravity is the DSP-separated orientation
+    // vector, so |gravity| ≈ 1 g on a real record regardless of motion, and HR is physiological. If the
+    // guess doesn't fit this firmware the decoded values are random — drop the record rather than store
+    // garbage (same outcome as before the fallback). Mapped versions skip this entirely. (#30 / #77)
+    if (usingFallback) {
+        val gx = (out["gravity_x"] as? Double) ?: Double.NaN
+        val gy = (out["gravity_y"] as? Double) ?: Double.NaN
+        val gz = (out["gravity_z"] as? Double) ?: Double.NaN
+        val mag = Math.sqrt(gx * gx + gy * gy + gz * gz)
+        val hr = (out["heart_rate"] as? Int) ?: 0
+        if (!(mag in 0.8..1.2 && hr in 25..230)) return null
+    }
 
     return out
 }

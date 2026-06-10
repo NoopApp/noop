@@ -3,6 +3,16 @@ import Combine
 import WhoopStore
 import WhoopProtocol
 
+/// Per-day sleep figures the WHOOP export carried verbatim (metricSeries rows written by
+/// WhoopImporter under the imported deviceId). SleepView prefers these over its on-device
+/// APPROXIMATE recomputations.
+struct ImportedSleepFigures: Equatable {
+    var performancePct: Double?   // "sleep_performance", 0–100
+    var consistencyPct: Double?   // "sleep_consistency", 0–100
+    var needMin: Double?          // "sleep_need_min", minutes
+    var debtMin: Double?          // "sleep_debt_min", minutes
+}
+
 /// Read model over the on-device WhoopStore. Opens its own handle (WAL + busy-timeout makes the
 /// two-handle BLEManager+Repository pattern safe) and publishes the dashboard caches the screens bind to.
 @MainActor
@@ -18,6 +28,8 @@ final class Repository: ObservableObject {
     @Published var days: [DailyMetric] = []
     /// Cached sleep sessions over the recent window, oldest→newest.
     @Published var sleeps: [CachedSleepSession] = []
+    /// Imported (export-verbatim) sleep figures by day. Empty until a WHOOP import lands.
+    @Published var importedSleep: [String: ImportedSleepFigures] = [:]
     @Published var loaded = false
     /// Monotonic counter bumped on every successful `refresh()`. Intraday-updating views key their
     /// data load on this so they reload when fresh strap data lands — `today?.day` alone is a stable
@@ -81,6 +93,19 @@ final class Repository: ObservableObject {
         let impSleep = (try? await store.sleepSessions(deviceId: deviceId, from: lo, to: hi, limit: 4000)) ?? []
         let compSleep = (try? await store.sleepSessions(deviceId: computedDeviceId, from: lo, to: hi, limit: 4000)) ?? []
 
+        // Export-verbatim sleep figures (long-format metricSeries rows from WhoopImporter).
+        // SleepView prefers these per day over its APPROXIMATE recomputations.
+        let perf = (try? await store.metricSeries(deviceId: deviceId, key: "sleep_performance", from: fromDay, to: toDay)) ?? []
+        let cons = (try? await store.metricSeries(deviceId: deviceId, key: "sleep_consistency", from: fromDay, to: toDay)) ?? []
+        let need = (try? await store.metricSeries(deviceId: deviceId, key: "sleep_need_min", from: fromDay, to: toDay)) ?? []
+        let debt = (try? await store.metricSeries(deviceId: deviceId, key: "sleep_debt_min", from: fromDay, to: toDay)) ?? []
+        var fig: [String: ImportedSleepFigures] = [:]
+        for p in perf { fig[p.day, default: ImportedSleepFigures()].performancePct = p.value }
+        for p in cons { fig[p.day, default: ImportedSleepFigures()].consistencyPct = p.value }
+        for p in need { fig[p.day, default: ImportedSleepFigures()].needMin = p.value }
+        for p in debt { fig[p.day, default: ImportedSleepFigures()].debtMin = p.value }
+
+        self.importedSleep = fig   // assigned BEFORE days/sleeps: one consistent publish per refresh
         self.days = Self.mergeDaily(imported: imported, computed: computed)
         self.sleeps = Self.mergeSleep(imported: impSleep, computed: compSleep)
         self.loaded = true

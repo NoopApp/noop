@@ -118,6 +118,20 @@ extension WhoopStore {
         }
     }
 
+    /// Delete one source's workouts of a given sport whose startTs is in [from, to]
+    /// (makes detected-workout re-derivation idempotent). Returns rows deleted.
+    /// Port of Android WhoopDao.deleteWorkoutsBySport (#78).
+    @discardableResult
+    public func deleteWorkouts(deviceId: String, sport: String, from: Int, to: Int) async throws -> Int {
+        try syncWrite { db in
+            try db.execute(sql: """
+                DELETE FROM workout
+                WHERE deviceId = ? AND sport = ? AND startTs >= ? AND startTs <= ?
+                """, arguments: [deviceId, sport, from, to])
+            return db.changesCount
+        }
+    }
+
     /// Upsert Apple-Health daily aggregates. Natural key (deviceId, day). Returns rows changed.
     @discardableResult
     public func upsertAppleDaily(_ rows: [AppleDaily], deviceId: String) async throws -> Int {

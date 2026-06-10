@@ -343,18 +343,22 @@ public final class BLEManager: NSObject, ObservableObject {
         }
         // WHOOP 5.0/MG uses puffin (CRC16) command framing, not the WHOOP4 frame. The realtime-HR toggle
         // is hardware-confirmed (issue #17 — a 5/MG owner saw live HR over a public build), which proves
-        // the strap does act on puffin-framed commands. We now also send haptics (buzz) on that same
-        // proven transport — experimental: the strap may or may not honor that specific command, but it's
-        // no longer a blind guess. Everything else stays dropped (the offload commands need the held
-        // historical-offload work). WHOOP 4.0 is unaffected.
+        // the strap does act on puffin-framed commands. We now also send haptics (buzz) and the
+        // firmware-alarm family on that same proven transport. Everything else stays dropped.
+        // WHOOP 4.0 is unaffected.
         if selectedModel.deviceFamily == .whoop5 {
-            // Allowlist: live (toggle HR, buzz), the two historical-offload commands, and the clock
-            // pair. SEND_HISTORICAL_DATA triggers the offload; HISTORICAL_DATA_RESULT acks each
-            // HISTORY_END to walk the trim cursor. SET_CLOCK/GET_CLOCK are MANDATORY before history:
-            // an un-clocked WHOOP 5 doesn't save sensor data to flash at all ("RTC timestamp … is
-            // invalid; not saving data to flash"), so offloads complete with zero body frames —
-            // hardware-validated, same 8-byte WHOOP4 payload over puffin framing. (#78 fork)
+            // Allowlist: live (toggle HR, buzz), the firmware-alarm family (set/get/run/disable —
+            // same command numbers as WHOOP4 over puffin framing; the 5/MG REVISION_4/REVISION_2
+            // bodies are built at the call sites and pad4 covers their 20-/2-byte bodies), the two
+            // historical-offload commands, and the clock pair. SEND_HISTORICAL_DATA triggers the
+            // offload; HISTORICAL_DATA_RESULT acks each HISTORY_END to walk the trim cursor.
+            // SET_CLOCK/GET_CLOCK are MANDATORY before history: an un-clocked WHOOP 5 doesn't save
+            // sensor data to flash at all ("RTC timestamp … is invalid; not saving data to flash"),
+            // so offloads complete with zero body frames — hardware-validated, same 8-byte WHOOP4
+            // payload over puffin framing. (#78 fork)
             guard command == .toggleRealtimeHR || command == .runHapticsPattern
+                || command == .setAlarmTime || command == .getAlarmTime
+                || command == .runAlarm || command == .disableAlarm
                 || command == .sendHistoricalData || command == .historicalDataResult
                 || command == .setClock || command == .getClock else {
                 log("send(\(command.label)) skipped — no WHOOP 5/MG framing for this command yet")
@@ -554,9 +558,16 @@ public final class BLEManager: NSObject, ObservableObject {
         backfillTimeout = nil
         backfillFrameQueue.removeAll()
         log("Backfill: session ended — reason=\(reason)")
+        // Honest sync outcome for a cloud-free user (mirrors Android exitBackfilling, ed6a31d):
+        // HISTORY_COMPLETE stamps lastSyncedAt + clears any error; the idle-watchdog timeout surfaces
+        // a non-silent error. A disconnect mid-sync bypasses this path (didDisconnectPeripheral resets
+        // the flags directly) — that's not a sync failure, and the next connect re-offloads.
         if reason == "HISTORY_COMPLETE" {
             state.lastSyncedAt = Date().timeIntervalSince1970
+            state.lastSyncError = nil
             UserDefaults.standard.set(state.lastSyncedAt, forKey: "lastSyncedAt")
+        } else if reason == "timeout" {
+            state.lastSyncError = "Sync interrupted — the strap went quiet. It will retry on the next sync."
         }
         checkStrapLiveness()         // safety-net: strap ahead of us AND our frontier frozen ⇒ stuck?
     }
@@ -745,30 +756,48 @@ public final class BLEManager: NSObject, ObservableObject {
 
     /// Arm the strap's firmware alarm for `date` (UTC).
     ///
-    /// Sequence: SET_CLOCK first to ensure the strap RTC is UTC-correct, then SET_ALARM_TIME.
-    /// The strap will buzz at `date` even if the app is backgrounded or force-quit
-    /// (event STRAP_DRIVEN_ALARM_EXECUTED=57). This is the guaranteed fixed-time fallback path —
-    /// the smart-wake layer (`SmartAlarmController`) fires on top of this if conditions are met,
-    /// but this firmware alarm always fires as the safety net.
+    /// WHOOP 4.0 sequence: SET_CLOCK first to ensure the strap RTC is UTC-correct, then the
+    /// rev-1 SET_ALARM_TIME. WHOOP 5/MG sends the REVISION_4 body alone — the strap maintains
+    /// its RTC (set during the connect handshake / history sync) and the official app's alarm
+    /// path doesn't re-set it (wire observation; mirrors Android WhoopBleClient.armStrapAlarm).
+    /// Either way the strap will buzz at `date` even if the app is backgrounded or force-quit
+    /// (event STRAP_DRIVEN_ALARM_EXECUTED=57). This is the only alarm path: the strap fires at
+    /// the fixed time — NOOP has no light-sleep early-wake layer.
     ///
-    /// On-device verification needed: confirm the strap ACKs SET_ALARM_TIME and that the
-    /// alarm persists across BLE disconnect (cannot be verified in the simulator).
+    /// EXPERIMENTAL / UNCONFIRMED on 5/MG (same posture as the Android client): the byte-identical
+    /// Android rev-4 frame has been ACKed by a real 5/MG when arming, but a strap-driven wake fire
+    /// has NOT been captured on our side (no STRAP_DRIVEN_ALARM_EXECUTED event observed yet) — do
+    /// not present the 5/MG alarm as guaranteed until one is.
     func armStrapAlarm(at date: Date) {
-        // Clamp rather than trap: an out-of-range alarm date (pre-1970 / post-2106) must not crash.
-        let epochSec = UInt32(clamping: Int64(date.timeIntervalSince1970))
-        send(.setClock, payload: BLEManager.setClockPayload())
-        send(.setAlarmTime, payload: WhoopCommand.setAlarmPayload(epochSec: epochSec))
         // Log the wake time in the user's LOCAL zone. `Date` prints in UTC by default, so an alarm
         // for (say) 07:00 in New York logged as "11:00:00 +0000" reads like a timezone bug — but it
         // isn't: SET_ALARM_TIME carries the absolute instant of the chosen local time, and the strap
         // fires at that instant regardless of how its UTC RTC is labelled.
         let localFmt = DateFormatter()
         localFmt.dateFormat = "EEE HH:mm zzz"
+        if selectedModel.deviceFamily == .whoop5 {
+            // 5/MG SET_ALARM_TIME is REVISION_4: [04][id][u32 sec][u16 subsec][12-byte 47/152
+            // pattern, overallLoop 7, 30 s]. No SET_CLOCK preamble (see doc comment above).
+            let wakeMs = Int64((date.timeIntervalSince1970 * 1000).rounded())
+            send(.setAlarmTime, payload: AlarmPayload.setAlarmRev4(wakeEpochMs: wakeMs))
+            log("Alarm: armed 5/MG rev4 for \(localFmt.string(from: date)) — your local wake time")
+            return
+        }
+        // Clamp rather than trap: an out-of-range alarm date (pre-1970 / post-2106) must not crash.
+        let epochSec = UInt32(clamping: Int64(date.timeIntervalSince1970))
+        send(.setClock, payload: BLEManager.setClockPayload())
+        send(.setAlarmTime, payload: WhoopCommand.setAlarmPayload(epochSec: epochSec))
         log("Alarm: armed for \(localFmt.string(from: date)) — your local wake time (sent as UTC epoch \(epochSec))")
     }
 
     /// Disarm the currently-armed firmware alarm.
     func disableStrapAlarm() {
+        if selectedModel.deviceFamily == .whoop5 {
+            // 5/MG DISABLE_ALARM is REVISION_2 [0x02, 0xFF]; the rev-1 [0x01] form below is WHOOP4.
+            send(.disableAlarm, payload: AlarmPayload.disableRev2())
+            log("Alarm: disarmed (5/MG rev2)")
+            return
+        }
         send(.disableAlarm, payload: [0x01])
         log("Alarm: disarmed")
     }
@@ -792,7 +821,12 @@ public final class BLEManager: NSObject, ObservableObject {
     ///
     /// Haptic firing cannot be verified in the simulator (no strap motor). Test on-device only.
     func testAlarmBuzz() {
-        send(.runHapticsPattern, payload: [2, 3, 0, 0, 0])  // patternId=2, 3 loops
+        send(.runHapticsPattern, payload: [2, 3, 0, 0, 0])  // patternId=2, 3 loops (5/MG: send() remaps to the maverick notify buzz)
+        if selectedModel.deviceFamily == .whoop5 {
+            send(.runAlarm, payload: AlarmPayload.runAlarmRev2())   // REVISION_2 [0x02, alarmId]
+            log("Alarm: test buzz fired (5/MG maverick buzz + runAlarm rev2)")
+            return
+        }
         send(.runAlarm, payload: [0x01])
         log("Alarm: test buzz fired (patternId=2, runAlarm)")
     }
@@ -867,6 +901,7 @@ extension BLEManager: CBCentralManagerDelegate {
         Task { @MainActor in await collector?.flush() }
         state.connected = false
         state.encryptedBond = false   // cleared with didBond; next session must re-prove the bond (#69)
+        state.charging = nil          // a stale charging flag must not outlive the link
         didBond = false
         whoop5RealtimeArmed = false
         whoop5SessionStarted = false

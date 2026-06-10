@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DirectionsBike
 import androidx.compose.material.icons.filled.DirectionsRun
@@ -103,6 +104,7 @@ fun WorkoutsScreen(vm: AppViewModel) {
             )
             SummarySection(rows = windowRows, effectiveRange = resolved, groups = groups)
             BreakdownSection(groups)
+            ZonesSection(windowRows)
             SessionsSection(windowRows)
         }
     }
@@ -287,6 +289,66 @@ private fun MiniStat(label: String, value: String, modifier: Modifier = Modifier
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+// MARK: - HR zones (imported per-workout zone split, one card)
+
+@Composable
+private fun ZonesSection(rows: List<WorkoutRow>) {
+    val z = remember(rows) { zoneSummary(rows) } ?: return
+    Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
+        SectionHeader(
+            title = "HR Zones",
+            overline = "Whoop import",
+            trailing = "${z.sessionsWithZones} of ${rows.size} session${if (rows.size == 1) "" else "s"}",
+        )
+        NoopCard {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // Proportional stacked bar — the Hypnogram geometry with zone colors.
+                SegmentBar(
+                    segments = z.minutes.mapIndexed { i, m ->
+                        Palette.hrZoneColor(i + 1) to (m / z.totalMinutes).toFloat()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    height = 24.dp,
+                )
+                CardDivider()
+                // 5-up stat strip, identical rhythm to the sport cards' MiniStat row.
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    z.minutes.forEachIndexed { i, m ->
+                        ZoneStat(i + 1, m, z.totalMinutes, Modifier.weight(1f))
+                    }
+                }
+                Text(
+                    "Share of imported zone time, duration-weighted across sessions — approximate.",
+                    style = NoopType.footnote,
+                    color = Palette.textTertiary,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ZoneStat(zone: Int, minutes: Double, total: Double, modifier: Modifier = Modifier) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(9.dp)
+                    .background(Palette.hrZoneColor(zone), RoundedCornerShape(2.dp)),
+            )
+            Spacer(Modifier.width(5.dp))
+            Overline("Z$zone")
+        }
+        Text(
+            "${(minutes / total * 100).roundToInt()}%",
+            style = NoopType.number(15f),
+            color = Palette.textPrimary,
+            maxLines = 1,
+        )
+        Text(durationLabel(minutes * 60), style = NoopType.footnote, color = Palette.textTertiary, maxLines = 1)
     }
 }
 
@@ -513,6 +575,47 @@ internal fun workoutSourceLabel(deviceId: String, source: String): String {
         id.contains("whoop") || src.contains("whoop") -> "Whoop"
         else -> "Apple"
     }
+}
+
+// MARK: - Zone parsing/aggregation (internal + Compose-free so the unit test can pin them,
+// same pattern as workoutSourceLabel). zonesJSON is a flat one-level numeric object in BOTH
+// stored shapes — "zone1".."zone5" (WhoopCsvImporter.zonesJson) and "z1".."z5" (the macOS
+// importer's rows) — so an anchored regex is safe, and it keeps org.json (an unmocked
+// Android stub in plain-JVM unit tests) out of test-reachable code.
+
+private val ZONE_KEY = Regex("\"z(?:one)?([1-5])\"\\s*:\\s*(-?[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)")
+
+/** Zone percentages (0–100) indexed Z1..Z5, or null when the row has no usable zone data. */
+internal fun parseZonePercents(zonesJSON: String?): List<Double>? {
+    if (zonesJSON.isNullOrBlank()) return null
+    val out = MutableList(5) { 0.0 }
+    var any = false
+    for (m in ZONE_KEY.findAll(zonesJSON)) {
+        val v = m.groupValues[2].toDoubleOrNull() ?: continue
+        out[m.groupValues[1].toInt() - 1] = v.coerceIn(0.0, 100.0)
+        any = true
+    }
+    return if (any && out.sum() > 0.0) out else null
+}
+
+internal data class ZoneSummary(val minutes: List<Double>, val sessionsWithZones: Int) {
+    val totalMinutes: Double get() = minutes.sum()
+}
+
+/** Duration-weighted zone minutes across [rows] — mirrors the macOS WorkoutZones.summary
+ *  (duration-minutes × pct ÷ 100). APPROXIMATE: an on-device aggregate of imported
+ *  per-workout percentages, not a WHOOP-computed figure. */
+internal fun zoneSummary(rows: List<WorkoutRow>): ZoneSummary? {
+    val mins = MutableList(5) { 0.0 }
+    var n = 0
+    for (r in rows) {
+        val p = parseZonePercents(r.zonesJSON) ?: continue
+        val durMin = (r.durationS ?: (r.endTs - r.startTs).toDouble()) / 60.0
+        if (durMin <= 0.0) continue
+        for (i in 0 until 5) mins[i] += durMin * p[i] / 100.0
+        n++
+    }
+    return if (n > 0 && mins.sum() > 0.0) ZoneSummary(mins, n) else null
 }
 
 /**

@@ -90,6 +90,26 @@ public enum RecoveryScorer {
         return "green"
     }
 
+    // MARK: - Cold-start calibration progress
+
+    /// Nights carrying a usable nightly HRV — the signal that seeds the recovery baseline. While
+    /// recovery is still nil and this count is in [1, seed), it is the honest
+    /// "Calibrating — N of <seed> nights" progress the dashboard shows in place of a bare empty
+    /// state; nil once recovery exists or no night has data yet. Matches the baseline's validity
+    /// predicate, not just non-nil: `Baselines.update` only advances the recovery seed (nValid)
+    /// for nights whose value is within the metric config bounds, so an implausible out-of-range
+    /// night must NOT be counted here either — else the displayed N could over-state nValid.
+    /// Never claims "calibrating" at/above the seed gate (a nil recovery there is some other gap).
+    /// Mirrors Android TodayScreen.recoveryCalibrationNights (RecoveryCalibrationTest is the oracle).
+    public static func calibrationNights(nightlyHrv: [Double?],
+                                         hasRecovery: Bool,
+                                         seed: Int = Baselines.minNightsSeed,
+                                         cfg: MetricCfg = Baselines.hrvCfg) -> Int? {
+        guard !hasRecovery else { return nil }
+        let n = nightlyHrv.compactMap { $0 }.filter { $0 >= cfg.minVal && $0 <= cfg.maxVal }.count
+        return (1..<seed).contains(n) ? n : nil
+    }
+
     // MARK: - Recovery score
 
     /// A baseline driver: mean + spread (internal abs-dev units, as in BaselineState).

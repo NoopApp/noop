@@ -2,6 +2,7 @@ import SwiftUI
 import Combine
 import WhoopProtocol
 import WhoopStore
+import StrandAnalytics
 
 /// Data source currently running an import from the Data Sources screen.
 enum DataSourceImportKind {
@@ -35,11 +36,31 @@ final class AppModel: ObservableObject {
     let behavior = BehaviorStore()
     /// On-device WHOOP-style recovery/strain/sleep computation from raw strap streams.
     let intelligence: IntelligenceEngine
+
     /// Opt-in AI coach (bring-your-own-key) — the one networked feature, off until the user enables it.
     let coach: AICoachEngine
 
     /// Timestamps of moments marked via a double-tap (persisted).
     @Published var moments: [Date] = []
+
+    /// An in-progress manually-tracked workout (requested by users who want to start a session
+    /// themselves rather than rely on auto-detection). Holds the start time + the live HR collected
+    /// since; on End the window is scored via `StrainScorer` and saved as a `WorkoutRow` (source
+    /// "manual"), which then shows in the Workouts view. The day's strain already counts this HR (it's
+    /// the same live stream the store persists), so this is a per-session annotation, not a double-count.
+    @Published var activeWorkout: ActiveWorkout?
+    /// The just-ended workout, for a brief inline confirmation on Live (cleared on the next start).
+    @Published var lastWorkout: WorkoutRow?
+
+    /// A manual workout in progress. `samples` accumulate from the smoothed live `bpm`; `liveStrain`
+    /// is recomputed as the window grows so the active card can show strain building in real time.
+    struct ActiveWorkout: Equatable {
+        let start: Date
+        var samples: [HRSample] = []
+        var liveStrain: Double = 0
+        var avgHr: Int = 0
+        var peakHr: Int = 0
+    }
     /// Illness/strain early-warning (recent RHR up + HRV down + skin-temp up vs baseline). nil = clear.
     @Published var healthAlert: String?
     private var lastDoubleTapAt: Date = .distantPast
@@ -88,8 +109,8 @@ final class AppModel: ObservableObject {
         self.live = live
         self.ble = BLEManager(state: live, deviceId: "my-whoop")
         self.repo = Repository(deviceId: "my-whoop")
-        self.intelligence = IntelligenceEngine(repo: repo, profile: profile, deviceId: "my-whoop")
         self.coach = AICoachEngine(repo: repo)
+        self.intelligence = IntelligenceEngine(repo: repo, profile: profile, deviceId: "my-whoop")
         // Smooth HR centrally so it's solid everywhere it's shown.
         live.$heartRate.sink { [weak self] _ in self?.ingestHR() }.store(in: &hrCancellables)
         live.$rr.sink { [weak self] _ in self?.ingestHR() }.store(in: &hrCancellables)
@@ -162,7 +183,58 @@ final class AppModel: ObservableObject {
         if hrWindow.count > 40 { hrWindow.removeFirst(hrWindow.count - 40) }
         let vals = hrWindow.map(\.v).sorted()
         bpm = vals.isEmpty ? nil : Int(vals[vals.count / 2].rounded())
+        captureWorkoutSample()
         evaluateStress()
+    }
+
+    // MARK: - Manual workout tracking
+
+    /// Begin a manually-tracked workout. The active card on Live then shows elapsed time, live HR and
+    /// strain building; End scores + saves it. Confirms with a single buzz.
+    func startWorkout() {
+        guard activeWorkout == nil else { return }
+        lastWorkout = nil
+        activeWorkout = ActiveWorkout(start: Date())
+        buzz(loops: 1)
+    }
+
+    /// Finish the active workout: score the captured HR window and save it as a `WorkoutRow`. A session
+    /// with too few samples (never streamed HR) is discarded quietly. Double-buzz confirms the save.
+    func endWorkout() {
+        guard let w = activeWorkout else { return }
+        activeWorkout = nil
+        let samples = w.samples
+        guard samples.count >= 2 else { lastWorkout = nil; return }
+        let end = Date()
+        let avg = Int((Double(samples.map(\.bpm).reduce(0, +)) / Double(samples.count)).rounded())
+        let peak = samples.map(\.bpm).max() ?? 0
+        let strain = StrainScorer.strain(samples, maxHR: Double(profile.hrMax), sex: profile.sex)
+        let row = WorkoutRow(
+            startTs: Int(w.start.timeIntervalSince1970), endTs: Int(end.timeIntervalSince1970),
+            sport: "Workout", source: "manual", durationS: end.timeIntervalSince(w.start),
+            energyKcal: nil, avgHr: avg, maxHr: peak, strain: strain,
+            distanceM: nil, zonesJSON: nil, notes: nil)
+        lastWorkout = row
+        buzz(loops: 2)
+        Task { [weak self] in
+            guard let self else { return }
+            if let store = await self.repo.storeHandle() {
+                _ = try? await store.upsertWorkouts([row], deviceId: self.deviceId)
+                await self.repo.refresh()
+            }
+        }
+    }
+
+    /// Append the current smoothed `bpm` to the active workout and recompute its running strain. Called
+    /// from `ingestHR` on every fresh sample; a no-op when no workout is running. Recomputing strain
+    /// over the growing window each sample is cheap at the ~1 Hz live-HR cadence.
+    private func captureWorkoutSample() {
+        guard var w = activeWorkout, let hr = bpm else { return }
+        w.samples.append(HRSample(ts: Int(Date().timeIntervalSince1970), bpm: hr))
+        w.peakHr = max(w.peakHr, hr)
+        w.avgHr = Int((Double(w.samples.map(\.bpm).reduce(0, +)) / Double(w.samples.count)).rounded())
+        w.liveStrain = StrainScorer.strain(w.samples, maxHR: Double(profile.hrMax), sex: profile.sex) ?? 0
+        activeWorkout = w
     }
 
     /// Drop the smoothing window and blank the hero number so a resume / re-attach shows "—"
@@ -314,6 +386,7 @@ final class AppModel: ObservableObject {
     /// days ago) for resting HR, HRV, skin-temp deviation and respiration. Two or more anomalies →
     /// a banner. The classic early-illness signature (RHR↑ + HRV↓ + skin-temp↑). On-device only.
     private func evaluateIllness(_ days: [DailyMetric]) {
+        let previous = healthAlert
         guard behavior.illnessWatch, days.count >= 14 else { healthAlert = nil; return }
         let recent = Array(days.suffix(2))
         let base = Array(days.suffix(31).dropLast(3))    // ~28 days ending 3 days ago
@@ -337,6 +410,19 @@ final class AppModel: ObservableObject {
         healthAlert = flags.count >= 2
             ? "Your body looks strained — " + flags.joined(separator: ", ") + ". Consider taking it easy."
             : nil
+        // Banner transition (clear → raised): surface it as a system notification so the
+        // early-warning reaches the user when the window is closed (menu bar keeps us alive).
+        // IllnessNotifier rate-limits to once per local day.
+        if let alert = healthAlert, previous == nil {
+            IllnessNotifier.post(alert)
+        }
+    }
+
+    /// Re-run the illness watch over the cached history. Called when the Automations toggle
+    /// flips — the repo.$days sink only fires on data changes, so a flip would otherwise wait
+    /// for the next refresh.
+    func reevaluateIllness() {
+        evaluateIllness(repo.days)
     }
 
     /// Import a Whoop CSV export (.zip or folder) → on-device store, then refresh the dashboard.

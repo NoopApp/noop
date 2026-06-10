@@ -64,7 +64,8 @@ final class IntelligenceEngine: ObservableObject {
         // Keep each night's small result (daily metrics + sessions), NOT the raw streams — every field
         // except recovery is baseline-independent, so pass 2 only re-scores the cheap recovery
         // composite. The hr/rr/resp/gravity arrays go out of scope each iteration (memory stays bounded).
-        var scoredNights: [(daily: DailyMetric, strain: Double?, cachedSleep: [CachedSleepSession])] = []
+        var scoredNights: [(daily: DailyMetric, strain: Double?, cachedSleep: [CachedSleepSession],
+                            workouts: [ExerciseSession])] = []
         // Nightly values harvested in pass 1, keyed by day, to seed the pass-2 baseline.
         var nightlyHrvByDay: [String: Double?] = [:]
         var nightlyRhrByDay: [String: Double?] = [:]
@@ -88,7 +89,8 @@ final class IntelligenceEngine: ObservableObject {
             }.value
             nightlyHrvByDay[res.daily.day] = res.daily.avgHrv
             nightlyRhrByDay[res.daily.day] = res.daily.restingHr.map(Double.init)
-            scoredNights.append((daily: res.daily, strain: res.strain, cachedSleep: res.cachedSleep))
+            scoredNights.append((daily: res.daily, strain: res.strain, cachedSleep: res.cachedSleep,
+                                 workouts: res.workouts))
             await Task.yield()
         }
 
@@ -109,12 +111,22 @@ final class IntelligenceEngine: ObservableObject {
             hrv: Baselines.foldHistory(hrvSeq, cfg: hrvCfg),
             restingHR: Baselines.foldHistory(rhrSeq, cfg: rhrCfg))
 
+        // Imported workouts in the scored window, used to de-duplicate detected bouts so a user who
+        // BOTH imports real WHOOP workouts AND wears the strap doesn't see the same session twice
+        // (the per-day merge precedence does not cover the workout table). Port of the Android block
+        // in IntelligenceEngine.kt analyzeRecent.
+        let computedId = deviceId + "-noop"
+        let windowStart = now - maxDays * 86_400 - 30 * 3_600
+        let importedWorkouts = (try? await store.workouts(deviceId: deviceId, from: windowStart,
+                                                          to: now, limit: 100_000)) ?? []
+
         // ── Pass 2: re-score ONLY recovery against the now-seeded baseline (cheap, baseline-dependent);
         // every other field was computed once in pass 1. Recovery stays nil until the HRV baseline is
         // usable (≥ minNightsSeed valid nights) — honest cold-start, via RecoveryScorer's usable gate.
         var out: [Computed] = []
         var dailies: [DailyMetric] = []
         var cachedSleep: [CachedSleepSession] = []
+        var workoutRows: [WorkoutRow] = []
         for night in scoredNights {
             let recovery = recomputeRecovery(night.daily, baselines2)
             out.append(Computed(day: night.daily.day, recovery: recovery, strain: night.strain,
@@ -122,15 +134,32 @@ final class IntelligenceEngine: ObservableObject {
                                 rhr: night.daily.restingHr))
             dailies.append(night.daily.withRecovery(recovery))
             cachedSleep.append(contentsOf: night.cachedSleep)
+            // Persist the detected workouts the pipeline already computes (previously discarded).
+            // Skip any bout overlapping a real imported workout so import+wear users don't
+            // double-count. sport = "detected"; energyKcal is the APPROXIMATE Keytel/BMR total.
+            for s in night.workouts {
+                if importedWorkouts.contains(where: { s.start < $0.endTs && $0.startTs < s.end }) { continue }
+                workoutRows.append(WorkoutRow(startTs: s.start, endTs: s.end,
+                                              sport: "detected", source: computedId,
+                                              durationS: s.durationS, energyKcal: s.caloriesKcal,
+                                              avgHr: Int(s.avgHR), maxHr: s.peakHR,
+                                              strain: s.strain, distanceM: nil,
+                                              zonesJSON: nil, notes: nil))
+            }
         }
 
         // Persist the computed scores under a dedicated "-noop" source so the WHOLE dashboard
         // (Today / Recovery / Strain / Sleep / Trends), not just this screen, reads them. The
         // Repository merges these UNDER any imported "my-whoop" rows, so a real WHOOP import
         // always wins; this only fills the days the strap collected but no import covered.
-        let computedId = deviceId + "-noop"
         if !dailies.isEmpty { _ = try? await store.upsertDailyMetrics(dailies, deviceId: computedId) }
         if !cachedSleep.isEmpty { _ = try? await store.upsertSleepSessions(cachedSleep, deviceId: computedId) }
+        // Make re-detection idempotent across runs: clear the prior computed detected workouts in the
+        // scored window (a bout's startTs can drift as more HR arrives, which would otherwise orphan
+        // stale rows under the (deviceId,startTs,sport) key), then re-insert.
+        _ = try? await store.deleteWorkouts(deviceId: computedId, sport: "detected",
+                                            from: windowStart, to: now)
+        if !workoutRows.isEmpty { _ = try? await store.upsertWorkouts(workoutRows, deviceId: computedId) }
 
         results = out
         note = out.isEmpty

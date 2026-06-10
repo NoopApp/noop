@@ -128,6 +128,16 @@ object DemoSeeder {
                     round1((18.0 - fitness * 0.2 + gauss(rng, 0.0, 0.4)).coerceIn(10.0, 24.0))
                 )
             )
+            // Export-verbatim sleep figures (same metricSeries keys the importers write), so
+            // the demo Sleep tiles exercise the prefer-imported path.
+            val demoNeedMin = (totalSleep + gauss(rng, 25.0, 20.0)).coerceIn(420.0, 560.0)
+            series.add(MetricSeriesRow(WHOOP, day, "sleep_performance",
+                round1((totalSleep / demoNeedMin * 100.0).coerceAtMost(100.0))))
+            series.add(MetricSeriesRow(WHOOP, day, "sleep_consistency",
+                round1(gauss(rng, 80.0, 8.0).coerceIn(40.0, 100.0))))
+            series.add(MetricSeriesRow(WHOOP, day, "sleep_need_min", round1(demoNeedMin)))
+            series.add(MetricSeriesRow(WHOOP, day, "sleep_debt_min",
+                round1((demoNeedMin - totalSleep).coerceAtLeast(0.0))))
 
             // --- Apple Health daily aggregate ---
             val steps = gauss(rng, 8500.0, 2600.0).coerceIn(1200.0, 19000.0).toInt()
@@ -164,7 +174,16 @@ object DemoSeeder {
                         strain = round1((strain * gauss(rng, 0.6, 0.1)).coerceIn(4.0, 21.0)),
                         distanceM = if (sport in distanceSports)
                             round1(gauss(rng, 6500.0, 2500.0).coerceAtLeast(500.0)) else null,
-                        zonesJSON = null, notes = null,
+                        // Only WHOOP-sourced rows carry zones (matching real imports — Apple Health
+                        // rows never do), so the demo Workouts screen showcases the HR Zones card.
+                        zonesJSON = if (src == WHOOP) run {
+                            val z = listOf(
+                                gauss(rng, 15.0, 5.0), gauss(rng, 30.0, 8.0), gauss(rng, 28.0, 8.0),
+                                gauss(rng, 15.0, 6.0), gauss(rng, 6.0, 3.0),
+                            ).map { it.coerceIn(0.0, 100.0) }
+                            """{"zone1":${round1(z[0])},"zone2":${round1(z[1])},"zone3":${round1(z[2])},"zone4":${round1(z[3])},"zone5":${round1(z[4])}}"""
+                        } else null,
+                        notes = null,
                     )
                 )
             }

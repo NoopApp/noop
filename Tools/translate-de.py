@@ -53,12 +53,14 @@ DE: dict[str, str] = {
     "%lld days · %lld sleeps stored": "%lld Tage · %lld Schlafphasen gespeichert",
     "%lld frame%@ captured this session.": "%lld Frame%@ in dieser Sitzung erfasst.",
     "%lld min": "%lld Min",
+    "%lld of %lld nights": "%lld von %lld Nächten",
     "%lld overlapping days · %@ %@ correlation": "%lld überlappende Tage · %@ %@ Korrelation",
     "%lld–%lld%@ · step %lld": "%lld–%lld%@ · Schritt %lld",
     "%@ is free and always will be. If it's useful to you, you can chip in to help with development and testing costs. Totally optional.": "%@ ist kostenlos und bleibt es. Wenn es dir nützt, kannst du etwas zu den Entwicklungs- und Testkosten beitragen. Völlig freiwillig.",
     "Age, %lld years": "Alter, %lld Jahre",
     "Auto · %lld bpm (Tanaka)": "Automatisch · %lld bpm (Tanaka)",
     "Battery %lld%%": "Akku %lld%%",
+    "Battery %lld%% · Charging": "Akku %lld%% · Lädt",
     "Choose the buzz pattern for %@": "Vibrationsmuster für %@ wählen",
     "Coach said: %@": "Coach sagte: %@",
     "Copy %@ address": "%@-Adresse kopieren",
@@ -140,6 +142,7 @@ DE: dict[str, str] = {
     "Buzzes your wrist": "Vibriert an deinem Handgelenk",
     "By sport": "Nach Sportart",
     "Calendar": "Kalender",
+    "Calibrating": "Kalibrierung",
     "Calm time": "Ruhezeit",
     "Calories": "Kalorien",
     "Cardiac": "Herz",
@@ -210,6 +213,7 @@ DE: dict[str, str] = {
     "Forget the saved key and disconnect": "Gespeicherten Schlüssel vergessen und trennen",
     "From": "Von",
     "Get in touch": "Kontakt aufnehmen",
+    "Get the latest release": "Neueste Version laden",
     "Got it": "Verstanden",
     "Haptic-paced breathing · watch your HRV respond": "Haptisch getaktetes Atmen · beobachte, wie deine HRV reagiert",
     "Haptics on": "Haptik an",
@@ -222,11 +226,13 @@ DE: dict[str, str] = {
     "Height": "Größe",
     "high": "hoch",
     "History": "Verlauf",
+    "History synced %@": "Verlauf synchronisiert %@",
     "Hours asleep": "Schlafstunden",
     "Hours vs Needed": "Stunden vs. Bedarf",
     "How They Move Together": "Wie sie sich gemeinsam bewegen",
     "How this is computed": "Wie das berechnet wird",
     "How this works": "Wie das funktioniert",
+    "HR Zones": "HF-Zonen",
     "HRV": "HRV",
     "I keep this project anonymous, so crypto is the only way to chip in — no Patreon, no PayPal, no name attached. Quick, global, and private for both of us.": "Ich halte dieses Projekt anonym, daher ist Krypto die einzige Möglichkeit, beizutragen — kein Patreon, kein PayPal, kein Name. Schnell, weltweit und privat für uns beide.",
     "Import your history first. A WHOOP export in Data Sources fills every metric you can explore here in about a minute.": "Importiere zuerst deine Historie. Ein WHOOP-Export unter Datenquellen füllt in etwa einer Minute jede Metrik, die du hier erkunden kannst.",
@@ -247,9 +253,9 @@ DE: dict[str, str] = {
     "Latest reading": "Aktuellster Messwert",
     "Lean body mass": "Magermasse",
     "Lean Mass": "Magermasse",
+    "Learning your baseline — %lld of %lld nights.": "Deine Baseline wird gelernt — %lld von %lld Nächten.",
     "Let the coach use my data": "Dem Coach erlauben, meine Daten zu nutzen",
     "Light": "Leicht",
-    "Light-sleep window": "Leichtschlaf-Fenster",
     "Live": "Live",
     "Live heart rate already works on a WHOOP 5/MG strap. These probes go further and try to coax more out of it. They are guesses, off by default, and only ever touch a 5/MG strap — WHOOP 4.0 is never affected.": "Die Live-Herzfrequenz funktioniert bereits an einem WHOOP 5/MG-Strap. Diese Tests gehen weiter und versuchen, mehr herauszuholen. Es sind Vermutungen, standardmäßig deaktiviert, und betreffen nur einen 5/MG-Strap — WHOOP 4.0 ist nie betroffen.",
     "Live now. Your scores are building.": "Jetzt live. Deine Werte werden aufgebaut.",
@@ -303,6 +309,7 @@ DE: dict[str, str] = {
     "Not enough nights yet.": "Noch nicht genug Nächte.",
     "Not enough overlapping history to correlate your metrics yet.": "Noch nicht genug überlappender Verlauf, um deine Metriken zu korrelieren.",
     "Not enough recent days to chart a trend yet. Import a history or keep wearing your strap.": "Noch nicht genug aktuelle Tage, um einen Trend darzustellen. Importiere eine Historie oder trage deinen Strap weiter.",
+    "Not synced yet": "Noch nicht synchronisiert",
     "Nothing imported yet. On an iPhone: Health app, tap your photo, Export All Health Data, then import the .zip here in Data Sources.": "Noch nichts importiert. Auf einem iPhone: Health-App, tippe auf dein Foto, „Alle Gesundheitsdaten exportieren“, dann importiere die .zip hier unter Datenquellen.",
     "Nothing selected yet.": "Noch nichts ausgewählt.",
     "Notifications": "Mitteilungen",
@@ -312,6 +319,7 @@ DE: dict[str, str] = {
     "On — your recovery, sleep, HRV and workouts are shared with the provider for tailored coaching.": "An — deine Erholung, dein Schlaf, deine HRV und Workouts werden für maßgeschneidertes Coaching mit dem Anbieter geteilt.",
     "On a 5/MG connection NOOP will send a puffin realtime-stream request after the handshake, and log what comes back. If you have a 5/MG strap, turning this on and sharing your strap log helps map the protocol. No effect on WHOOP 4.0.": "Bei einer 5/MG-Verbindung sendet NOOP nach dem Handshake eine Puffin-Echtzeitstream-Anfrage und protokolliert die Antwort. Wenn du einen 5/MG-Strap hast, hilft das Aktivieren und Teilen deines Strap-Protokolls, das Protokoll zu kartieren. Keine Auswirkung auf WHOOP 4.0.",
     "Open-source BLE reverse-engineering work. Thank you.": "Open-Source-BLE-Reverse-Engineering-Arbeit. Danke.",
+    "Opens the GitHub releases page in your browser. NOOP itself makes no network connections — the macOS sandbox has no network entitlement.": "Öffnet die GitHub-Releases-Seite in deinem Browser. NOOP selbst stellt keine Netzwerkverbindungen her — die macOS-Sandbox hat keine Netzwerk-Berechtigung.",
     "Outcome metric": "Ergebnismetrik",
     "Overlay": "Überlagerung",
     "Overlay 2–4 signals": "2–4 Signale überlagern",
@@ -373,6 +381,7 @@ DE: dict[str, str] = {
     "Session live": "Sitzung live",
     "Settings": "Einstellungen",
     "Sex": "Geschlecht",
+    "Share of imported zone time, duration-weighted across sessions — approximate.": "Anteil der importierten Zonenzeit, zeitgewichtet über alle Einheiten — Näherungswert.",
     "Should you push today?": "Solltest du heute Gas geben?",
     "SIGNIFICANT": "SIGNIFIKANT",
     "Silent haptic HIIT — the strap buzzes the transitions": "Stilles haptisches HIIT — der Strap vibriert die Übergänge",
@@ -394,6 +403,7 @@ DE: dict[str, str] = {
     "Strap bonded": "Strap gekoppelt",
     "STRAP LOG": "STRAP-PROTOKOLL",
     "Strap not connected": "Strap nicht verbunden",
+    "Strap sync": "Strap-Sync",
     "Stress": "Stress",
     "Stress · M": "Stress · M",
     "Stress is derived from two autonomic signals.": "Stress wird aus zwei autonomen Signalen abgeleitet.",
@@ -402,6 +412,7 @@ DE: dict[str, str] = {
     "Support": "Support",
     "Support NOOP — donate or get in touch": "NOOP unterstützen — spenden oder Kontakt aufnehmen",
     "Support the build": "Die Entwicklung unterstützen",
+    "Syncing strap history…": "Strap-Verlauf wird synchronisiert…",
     "Test action": "Aktion testen",
     "Test buzz": "Testvibration",
     "The thread of you over time.": "Dein Verlauf über die Zeit.",
@@ -429,7 +440,6 @@ DE: dict[str, str] = {
     "Vital Signs": "Vitalwerte",
     "VO₂ Max": "VO₂max",
     "Wake at": "Aufwachen um",
-    "Wake up to this many minutes early if the Mac stays awake & connected and a light phase is detected.": "Wache bis zu so viele Minuten früher auf, wenn der Mac wach & verbunden bleibt und eine Leichtschlafphase erkannt wird.",
     "We compare today's resting heart rate and HRV to your own 30-day baseline. A higher-than-usual resting HR and a lower-than-usual HRV both push the score up — classic signs the body is activated. The combined shift is mapped onto a 0–3 scale: 0 is calm, 1.5 sits at your baseline, 3 is highly activated.": "Wir vergleichen die heutige Ruheherzfrequenz und HRV mit deiner eigenen 30-Tage-Basislinie. Eine höhere Ruhe-HF als üblich und eine niedrigere HRV als üblich treiben den Wert beide nach oben — klassische Zeichen dafür, dass der Körper aktiviert ist. Die kombinierte Verschiebung wird auf eine Skala von 0–3 abgebildet: 0 ist ruhig, 1,5 liegt auf deiner Basislinie, 3 ist hoch aktiviert.",
     "Weight": "Gewicht",
     "What correlates": "Was korreliert",
@@ -439,6 +449,7 @@ DE: dict[str, str] = {
     "When the system prompt appears, choose Allow so NOOP can find your strap.": "Wenn die Systemabfrage erscheint, wähle „Erlauben“, damit NOOP deinen Strap finden kann.",
     "Which strap?": "Welcher Strap?",
     "Whoop": "Whoop",
+    "Whoop import": "Whoop-Import",
     "WHOOP straps don't appear in macOS System Settings → Bluetooth. They advertise on a custom profile that only apps like NOOP can find — so there's nothing to pair there, and you shouldn't try.": "WHOOP-Straps erscheinen nicht in den macOS-Systemeinstellungen → Bluetooth. Sie senden über ein eigenes Profil, das nur Apps wie NOOP finden können — dort gibt es also nichts zu koppeln, und du solltest es nicht versuchen.",
     "Window": "Fenster",
     "With": "Mit",
@@ -456,7 +467,9 @@ DE: dict[str, str] = {
 
 
 def main() -> int:
-    catalog = json.loads(CATALOG.read_text())
+    # encoding="utf-8" is load-bearing: without it Windows defaults to cp1252 and a run
+    # mojibakes every umlaut in the catalog (empirically: 82 German strings corrupted).
+    catalog = json.loads(CATALOG.read_text(encoding="utf-8"))
     strings = catalog["strings"]
 
     missing: list[str] = []
@@ -470,7 +483,8 @@ def main() -> int:
         locs = entry.setdefault("localizations", {})
         locs["de"] = {"stringUnit": {"state": "translated", "value": de}}
 
-    CATALOG.write_text(json.dumps(catalog, indent=2, ensure_ascii=False) + "\n")
+    CATALOG.write_text(json.dumps(catalog, indent=2, ensure_ascii=False) + "\n",
+                       encoding="utf-8")
 
     translated = sum(
         1 for k, v in strings.items()

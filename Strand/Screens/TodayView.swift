@@ -40,6 +40,27 @@ struct TodayView: View {
     // THE single grid definition — every tile group reuses it so margins line up.
     private let grid = [GridItem(.adaptive(minimum: 168), spacing: NoopMetrics.gap)]
 
+    /// Recovery cold-start: recovery is nil until the HRV baseline crosses the seed gate
+    /// (Baselines.minNightsSeed valid nights). While calibrating, this is the count of nights
+    /// banked so far — it drives an honest "Calibrating — N of 4 nights" on the recovery ring,
+    /// the synthesis card and the Key Metrics tile instead of a bare empty state. It self-clears
+    /// the moment recovery populates, and never claims "calibrating" at/above the seed gate.
+    /// Mirrors Android TodayScreen.recoveryCalibrationNights (7b5f212).
+    private var recoveryCalibration: Int? {
+        RecoveryScorer.calibrationNights(nightlyHrv: repo.days.map(\.avgHrv),
+                                         hasRecovery: repo.today?.recovery != nil)
+    }
+
+    /// Synthesis-card copy while the recovery baseline calibrates; nil otherwise. Built as
+    /// LocalizedStringKey literals so the String Catalog picks up the %lld patterns.
+    private var calibrationStatus: LocalizedStringKey? {
+        recoveryCalibration == nil ? nil : "Calibrating"
+    }
+    private var calibrationDetail: LocalizedStringKey? {
+        guard let n = recoveryCalibration else { return nil }
+        return "Learning your baseline — \(n) of \(Baselines.minNightsSeed) nights."
+    }
+
     var body: some View {
         ScreenScaffold(title: "Control Center", subtitle: "\(dateLine)") {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
@@ -157,13 +178,39 @@ struct TodayView: View {
             SectionHeader("Today’s Synthesis", overline: "At a glance",
                           trailing: greetingWord)
             HStack(alignment: .top, spacing: NoopMetrics.gap) {
-                // Left: the signature ring in a card.
+                // Left: the signature ring in a card. When recovery is nil the ring's own center
+                // label (which would read "0 · DEPLETED") and hover are hidden and an honest
+                // overlay takes over: "Calibrating · N of 4 nights" while the baseline seeds,
+                // else "No Data". Mirrors Android TodayScreen.TodayRecoveryRing (7b5f212).
                 NoopCard {
-                    RecoveryRing(
-                        score: score ?? 0,
-                        supporting: ringSupporting(d),
-                        diameter: 168
-                    )
+                    ZStack {
+                        RecoveryRing(
+                            score: score ?? 0,
+                            supporting: ringSupporting(d),
+                            diameter: 168,
+                            showsLabel: score != nil,
+                            showsHover: score != nil
+                        )
+                        if score == nil {
+                            VStack(spacing: 4) {
+                                if let n = recoveryCalibration {
+                                    Text("Calibrating")
+                                        .font(StrandFont.title2)
+                                        .foregroundStyle(StrandPalette.textTertiary)
+                                    Text("\(n) of \(Baselines.minNightsSeed) nights")
+                                        .font(StrandFont.footnote)
+                                        .foregroundStyle(StrandPalette.textSecondary)
+                                } else {
+                                    Text("No data")
+                                        .font(StrandFont.title2)
+                                        .foregroundStyle(StrandPalette.textTertiary)
+                                    Text(ringSupporting(d))
+                                        .font(StrandFont.footnote)
+                                        .foregroundStyle(StrandPalette.textSecondary)
+                                }
+                            }
+                        }
+                    }
                     .frame(maxWidth: .infinity)
                 }
                 .frame(maxWidth: .infinity, alignment: .center)
@@ -171,8 +218,8 @@ struct TodayView: View {
                 // Right: the plain-English read-out, equal width.
                 InsightCard(
                     category: "Recovery",
-                    status: "\(synthesisWord(score))",
-                    detail: "\(synthesisDetail(d))",
+                    status: calibrationStatus ?? "\(synthesisWord(score))",
+                    detail: calibrationDetail ?? "\(synthesisDetail(d))",
                     statusColor: score.map { StrandPalette.recoveryColor($0) } ?? StrandPalette.textTertiary
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -236,8 +283,10 @@ struct TodayView: View {
             LazyVGrid(columns: grid, alignment: .leading, spacing: NoopMetrics.gap) {
                 StatTile(
                     label: "Recovery",
-                    value: d?.recovery.map { "\(Int($0.rounded()))%" } ?? "—",
-                    caption: d?.recovery.map { StrandPalette.recoveryState($0).capitalized },
+                    value: d?.recovery.map { "\(Int($0.rounded()))%" }
+                        ?? recoveryCalibration.map { "\($0)/\(Baselines.minNightsSeed)" } ?? "—",
+                    caption: d?.recovery.map { StrandPalette.recoveryState($0).capitalized }
+                        ?? recoveryCalibration.map { _ in "Calibrating" },
                     accent: d?.recovery.map { StrandPalette.recoveryColor($0) } ?? StrandPalette.textPrimary,
                     sparkline: sparks["recovery"],
                     sparkColor: StrandPalette.accent
@@ -363,6 +412,8 @@ struct TodayView: View {
                         present: !appleDays.isEmpty,
                         detail: "\(appleDays.count) days · \(workouts.filter { $0.source == "apple-health" }.count) workouts"
                     )
+                    Divider().overlay(StrandPalette.hairline)
+                    strapSyncRow
                 }
             }
         }
@@ -376,6 +427,41 @@ struct TodayView: View {
             Text(present ? detail : "Not connected")
                 .font(StrandFont.captionNumber)
                 .foregroundStyle(present ? StrandPalette.textSecondary : StrandPalette.textTertiary)
+        }
+    }
+
+    /// Honest strap-sync outcome for a cloud-free app (ports the Android Live line, ed6a31d): the
+    /// stalled-offload error when the last one died, else "History synced N ago". Hidden while an
+    /// offload runs — SyncingHistoryNote already says so. TimelineView re-renders the relative label
+    /// each minute so "5 min ago" can't go stale while the window sits open with no strap connected
+    /// (LiveState publishes nothing then).
+    @ViewBuilder
+    private var strapSyncRow: some View {
+        if !live.backfilling {
+            TimelineView(.periodic(from: .now, by: 60)) { context in
+                HStack(alignment: .top, spacing: 10) {
+                    SourceBadge("Strap sync",
+                                tint: live.lastSyncError != nil ? StrandPalette.statusWarning
+                                    : live.lastSyncedAt != nil ? StrandPalette.accent
+                                    : StrandPalette.textTertiary)
+                    Spacer()
+                    if let error = live.lastSyncError {
+                        Text(error)
+                            .font(StrandFont.captionNumber)
+                            .foregroundStyle(StrandPalette.statusWarning)
+                            .multilineTextAlignment(.trailing)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else if let at = live.lastSyncedAt {
+                        Text("History synced \(relativeAgo(at, now: context.date.timeIntervalSince1970))")
+                            .font(StrandFont.captionNumber)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                    } else {
+                        Text("Not synced yet")
+                            .font(StrandFont.captionNumber)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
+                }
+            }
         }
     }
 

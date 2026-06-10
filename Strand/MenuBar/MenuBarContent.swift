@@ -120,6 +120,7 @@ public struct MenuBarContent: View {
             Divider().overlay(StrandPalette.hairline)
             statsRow
             Divider().overlay(StrandPalette.hairline)
+            syncLine
             actions
         }
         .padding(16)
@@ -238,6 +239,28 @@ public struct MenuBarContent: View {
         Rectangle()
             .fill(StrandPalette.hairline)
             .frame(width: 1, height: 26)
+    }
+
+    // MARK: Sync status
+
+    /// Honest sync line (ports the Android Live line, ed6a31d): pulsing pill while an offload runs,
+    /// the stalled-offload error if the last one died, else "History synced N ago". The popover body
+    /// is rebuilt on every open, so the relative label is fresh without a timer. EmptyView when there
+    /// is nothing to say (never synced, no error) — the layout then matches today's exactly.
+    @ViewBuilder
+    private var syncLine: some View {
+        if live.backfilling {
+            StatePill("Syncing strap history…", tone: .accent, pulsing: true)
+        } else if let error = live.lastSyncError {
+            Text(error)
+                .font(StrandFont.footnote)
+                .foregroundStyle(StrandPalette.statusWarning)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if let at = live.lastSyncedAt {
+            Text("History synced \(relativeAgo(at))")
+                .font(StrandFont.footnote)
+                .foregroundStyle(StrandPalette.textTertiary)
+        }
     }
 
     // MARK: Actions

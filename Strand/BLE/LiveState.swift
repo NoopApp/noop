@@ -24,6 +24,11 @@ public final class LiveState: ObservableObject {
     @Published public var heartRate: Int? = nil
     @Published public var rr: [Int] = []
     @Published public var batteryPct: Double? = nil
+    /// Charging flag from the strap's BATTERY_LEVEL events — wire observation: u8 bit0 in the
+    /// event payload (4.0 @26 / 5.0 @30), pushed ~every 8 min on captured links. nil until the
+    /// first event of a session; cleared on disconnect so a stale flag can't outlive the link.
+    /// Flag ONLY — the battery % keeps its family-specific source (#77).
+    @Published public var charging: Bool? = nil
     @Published public var lastFrameType: String? = nil
     @Published public var lastEvent: String? = nil
     /// Wrist-wear state from WRIST_ON/WRIST_OFF events. Defaults true so wear-gated features work
@@ -45,6 +50,12 @@ public final class LiveState: ObservableObject {
     /// Wall time (unix seconds) of the last successfully-completed offload (a sync, even if nothing new
     /// came — i.e. caught up). Drives the sync tile + the staleness nudge.
     @Published public var lastSyncedAt: TimeInterval?
+
+    /// Set when an offload ended abnormally (the idle watchdog fired — the strap went quiet mid-sync),
+    /// so a stalled history download isn't silent. Cleared by the next successful HISTORY_COMPLETE.
+    /// Process-local on purpose (mirrors Android, ed6a31d): the next connect / 15-min tick re-offloads
+    /// anyway, so persisting a stale error across launches would outlive its relevance.
+    @Published public var lastSyncError: String? = nil
 
     /// True while a historical offload session is running, so screens can say "Syncing strap
     /// history…" instead of presenting half-loaded data as final (#77).

@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 // MARK: - Charts (pure Compose Canvas — dark, instrument-grade, no external library)
@@ -267,6 +268,41 @@ fun Hypnogram(
                     height = h,
                 )
             }
+            x += segW
+        }
+    }
+}
+
+// MARK: - SegmentBar
+
+/**
+ * Generic proportional color strip (the Hypnogram geometry with caller-supplied colors).
+ * [segments] is an ordered list of (color, weight); weights are normalized to fill the
+ * width. Zero/NaN weights are skipped. Empty/zero input renders the inset well so rows
+ * keep their height.
+ */
+@Composable
+fun SegmentBar(
+    segments: List<Pair<Color, Float>>,
+    modifier: Modifier,
+    height: Dp = 18.dp,
+) {
+    Canvas(modifier = modifier.fillMaxWidth().height(height)) {
+        val w = size.width
+        val h = size.height
+        if (w <= 0f || h <= 0f) return@Canvas
+        drawRoundedTrack(Palette.surfaceInset)
+        val weights = segments.map { it.second }.map { if (it.isFinite() && it > 0f) it else 0f }
+        val total = weights.sum()
+        if (segments.isEmpty() || total <= 0f) return@Canvas
+        var x = 0f
+        val gap = if (segments.size > 1) 1.5f else 0f
+        segments.forEachIndexed { i, (color, _) ->
+            val frac = weights[i] / total
+            val segW = w * frac
+            if (segW <= 0f) return@forEachIndexed
+            val drawW = (segW - if (i < segments.size - 1) gap else 0f).coerceAtLeast(0f)
+            if (drawW > 0f) drawSegment(color = color, left = x, width = drawW, height = h)
             x += segW
         }
     }

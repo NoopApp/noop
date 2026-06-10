@@ -158,6 +158,20 @@ final class Backfiller {
                 log?("Historical records use firmware layout v\(v), which NOOP doesn't decode yet — no motion data, so sleep can't be computed from the strap. Please report this (issue #30).")
             }
             let decoded = extract(parsed, ref.device, ref.wall)
+            // Diagnostic (#77): the AGGREGATE silent-loss case — frames arrived but produced no rows at
+            // all (CRC fail / unmapped layout / out-of-range timestamp), so this chunk persists nothing
+            // yet still acks below and the strap trims past it. The per-version log above only catches
+            // unmapped layouts; this catches CRC drops too. Observability only — behaviour unchanged
+            // (not acking would wedge the offload on a re-send loop). Surfaces in the user's strap log.
+            if decoded.isEmpty {
+                log?("Backfill: \(frames.count) frame(s) decoded to 0 rows (trim=\(trim)) — dropped (CRC/layout/timestamp); nothing persisted for this chunk.")
+                // #91: dump a hex sample of the rejected frames so an unmapped firmware's record
+                // layout can be mapped from a user's strap log — the count alone can't be decoded.
+                for (i, f) in frames.prefix(3).enumerated() {
+                    let hex = f.prefix(64).map { String(format: "%02x", $0) }.joined()
+                    log?("Backfill: rejected frame[\(i)] \(f.count)B: \(hex)\(f.count > 64 ? "…" : "")")
+                }
+            }
             do { try await store.insert(decoded, deviceId: deviceId) } catch { return }
 
             // RAW: only persisted when the research toggle is ON. Default OFF → decoded-only; the

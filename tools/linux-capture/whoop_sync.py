@@ -57,6 +57,7 @@ import signal
 import sqlite3
 import struct
 import subprocess
+import sys
 import time
 
 import whoop_frame as wf
@@ -315,6 +316,10 @@ class Sync:
         self.type47_count = self.history_start = self.history_end = self.history_complete = 0
         self.committed = 0
         self.last_frame_ms = self.last_offload_ms = 0
+        # progress: anchor = newest record already stored before this run (set in run()); records
+        # stream oldest→newest, so (last_rec_unix - anchor) / (now - anchor) is the backlog fraction.
+        self.sync_start_unix = None
+        self.last_rec_unix = 0
 
     def on_hr(self, _s, data):
         hr = wf.parse_standard_hr(bytes(data))
@@ -330,11 +335,16 @@ class Sync:
             t = self.fam.inner_type(frame)
             if t is None:
                 continue
-            self.chunk.append((now, char, t, self.fam.rec_unix(frame), self.fam.rec_hr(frame), frame.hex()))
+            ru = self.fam.rec_unix(frame)
+            self.chunk.append((now, char, t, ru, self.fam.rec_hr(frame), frame.hex()))
             if self.fam.is_offload(frame):
                 self.last_offload_ms = now
             if t == PACKET_HISTORICAL_DATA:
                 self.type47_count += 1
+                if ru:
+                    self.last_rec_unix = ru
+                    if self.sync_start_unix is None:   # empty device: anchor on the first record
+                        self.sync_start_unix = ru
             elif t == PACKET_METADATA:
                 mt = self.fam.meta_type(frame)
                 if mt == META_HISTORY_START:
@@ -420,10 +430,13 @@ async def _session(client, s, db, fam, args, stop_all):
             if end_data is not None:
                 try:
                     await client.write_gatt_char(fam.cmd_write, fam.build_ack(end_data, seq), response=True)
-                    print(f"  ✓committed+ACK trim={trim} [type47={s.type47_count} END={s.history_end} "
-                          f"COMPLETE={s.history_complete} stored={s.committed}]", flush=True)
+                    # progress is shown by the reporter() task; only the COMPLETE ack gets a line
+                    # so the log marks the end of stream even on a non-TTY (piped/tee) run.
+                    if complete:
+                        print(f"\r\x1b[K  ✓ COMPLETE — committed+ACK final chunk "
+                              f"(type47={s.type47_count} END={s.history_end} stored={s.committed})", flush=True)
                 except Exception as e:
-                    print(f"  ack failed (data persisted; will re-ack on resend): {e}", flush=True)
+                    print(f"\r\x1b[K  ack failed (data persisted; will re-ack on resend): {e}", flush=True)
                 seq += 1
 
     async def stall_kicker():
@@ -450,10 +463,33 @@ async def _session(client, s, db, fam, args, stop_all):
             if stop_all.is_set():
                 outcome["v"] = "idle"; sess_stop.set(); return
 
-    tasks = [asyncio.create_task(t()) for t in (committer, stall_kicker, watchdog)]
+    async def reporter():
+        """Throttled progress: one line with backlog %, current record time, rate and ETA.
+        Updates in place on a TTY; emits a periodic line when piped (tee/background)."""
+        is_tty = sys.stdout.isatty()
+        interval = 2.0 if is_tty else 5.0
+        prev_t, prev_count, prev_rec, rate = time.time(), s.type47_count, s.last_rec_unix, 0.0
+        while not sess_stop.is_set():
+            await asyncio.sleep(interval)
+            now = time.time()
+            dt = max(1e-3, now - prev_t)
+            rate = 0.6 * ((s.type47_count - prev_count) / dt) + 0.4 * rate   # EMA, records/s
+            # data-seconds advanced per wall-second; needs a real prior record, else the cold-start
+            # baseline (prev_rec=0) makes cover astronomical and ETA collapse to 0 on the first tick.
+            cover = (s.last_rec_unix - prev_rec) / dt if prev_rec else 0.0
+            prev_t, prev_count, prev_rec = now, s.type47_count, s.last_rec_unix
+            line = _progress_line(s, int(now), rate, cover, args.model)
+            if is_tty:
+                sys.stdout.write("\r\x1b[K" + line); sys.stdout.flush()
+            else:
+                print(line, flush=True)
+
+    tasks = [asyncio.create_task(t()) for t in (committer, stall_kicker, watchdog, reporter)]
     await sess_stop.wait()
     for t in tasks:
         t.cancel()
+    if sys.stdout.isatty():
+        sys.stdout.write("\n"); sys.stdout.flush()   # leave the in-place progress line intact
     await asyncio.sleep(0.2)
     if s.chunk:
         try:
@@ -483,6 +519,7 @@ async def run(args):
               "layout + optical channels stay raw (NULL).", flush=True)
 
     s = Sync(db, did, fam)
+    s.sync_start_unix = cov[1] or cov[0]   # newest stored record = where this run resumes from
     stop_all = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -545,6 +582,40 @@ async def run(args):
 
 def _fmt(u):
     return datetime.datetime.fromtimestamp(int(u)).strftime("%m-%d %H:%M:%S") if u else "?"
+
+
+def _fmt_eta(secs):
+    if secs is None:
+        return "—"
+    secs = int(max(0, secs))
+    if secs >= 3600:
+        return f"{secs // 3600}h{(secs % 3600) // 60:02d}m"
+    if secs >= 60:
+        return f"{secs // 60}m{secs % 60:02d}s"
+    return f"{secs}s"
+
+
+def _bar(pct, n=10):
+    filled = int(round(pct / 100 * n))
+    return "▕" + "█" * filled + "░" * (n - filled) + "▏"
+
+
+def _progress_line(s, now_unix, rate, cover, model):
+    """Backlog % by record-time + current record clock + record rate + ETA. `cover` is how fast the
+    record clock advances (data-seconds per wall-second); ETA = remaining data-seconds / cover, which
+    naturally accounts for off-wrist gaps in the stream."""
+    label = "5" if model == "whoop5" else "4C"
+    anchor = s.sync_start_unix
+    if not s.last_rec_unix or not anchor:
+        return f"  sync {label}: handshaking… (stored {s.committed:,})"
+    total = max(1, now_unix - anchor)
+    done = max(0, min(total, s.last_rec_unix - anchor))
+    pct = 100.0 if s.history_complete else done / total * 100
+    remaining_data = max(0, now_unix - s.last_rec_unix)
+    eta = _fmt_eta(remaining_data / cover) if cover > 0.05 and not s.history_complete else (
+        "done" if s.history_complete else "—")
+    return (f"  sync {label} {pct:4.0f}% {_bar(pct)} @{_fmt(s.last_rec_unix)}  "
+            f"{rate:4.1f} rec/s  ETA {eta}  stored {s.committed:,}")
 
 
 def _parse_time(s):

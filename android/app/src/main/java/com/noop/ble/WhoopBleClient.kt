@@ -86,6 +86,11 @@ data class LiveState(
     val heartRate: Int? = null,
     val rr: List<Int> = emptyList(),
     val batteryPct: Double? = null,
+    /** Charging flag from BATTERY_LEVEL events — wire observation: u8 bit0 (4.0 @26 / 5.0 @30,
+     *  ~every 8 min on captured links). Flag only; battery % keeps its family source (#77).
+     *  Cleared on disconnect so a stale flag can't outlive the link. Twin of macOS
+     *  LiveState.charging. */
+    val charging: Boolean? = null,
     /** Wrist-wear from WRIST_ON/WRIST_OFF events. Defaults TRUE to match the macOS LiveState (Swift
      *  parity) — assume worn until the strap says otherwise. (Was false, which made the UI show
      *  "Worn: Off" forever when no WRIST_ON event arrived — issue #18.) */
@@ -439,6 +444,7 @@ class WhoopBleClient(
         cursorStore = cursorStore,
         ackTrim = { trim, endData -> ackHistoricalChunk(trim, endData) },
         onChunkCommitted = { batch -> onBackfillChunkCommitted(batch) },
+        log = { s -> log(s) },
     )
 
     /**
@@ -1291,8 +1297,27 @@ class WhoopBleClient(
                     }
 
                     if (!isGesture) {
-                        // Non-gesture events (BLE_BONDED, BATTERY_LEVEL, …) surface unconditionally.
-                        _state.value = _state.value.copy(lastEvent = ev)
+                        // Non-gesture events (BLE_BONDED, BATTERY_LEVEL, …) surface in "Last Event" —
+                        // except the live-HR stream toggle (BLE_REALTIME_HR_ON/OFF), which is internal
+                        // plumbing that fires on every connect and just confuses users (#92).
+                        if (!ev.startsWith("BLE_REALTIME_HR")) {
+                            _state.value = _state.value.copy(lastEvent = ev)
+                        }
+                        // Charging flag — wire observation: BATTERY_LEVEL u8 bit0 (4.0 @26 / 5.0 @30).
+                        // handleFrame also sees replayed HISTORICAL events during a backfill (old ts),
+                        // so gate exactly like the gestures below: live ungated, backfill only if fresh —
+                        // an old replayed charging=1 must not light the pill mid-sync.
+                        if (ev.startsWith("BATTERY_LEVEL")) {
+                            val ts = (parsed.parsed["event_timestamp"] as? Int)?.toLong()
+                            val nowSec = System.currentTimeMillis() / 1000L
+                            val fresh = !backfilling || (ts != null && ts > 0 &&
+                                kotlin.math.abs(nowSec - ts) <= LIVE_GESTURE_WINDOW_SECONDS)
+                            if (fresh) {
+                                (parsed.parsed["battery_charging"] as? Int)?.let {
+                                    _state.value = _state.value.copy(charging = it != 0)
+                                }
+                            }
+                        }
                     } else {
                         // Physical inputs — LIVE ONLY. handleFrame runs for EVERY frame (live AND during a
                         // backfill offload), so gate ONLY while backfilling: a replayed *historical* gesture
@@ -2071,6 +2096,7 @@ class WhoopBleClient(
         _state.value = _state.value.copy(
             connected = false, bonded = false, encryptedBond = false,
             backfilling = false, syncChunksThisSession = 0,
+            charging = null,   // a stale charging flag must not outlive the link
         )
         reset()
 
