@@ -164,7 +164,16 @@ object DemoSeeder {
                         strain = round1((strain * gauss(rng, 0.6, 0.1)).coerceIn(4.0, 21.0)),
                         distanceM = if (sport in distanceSports)
                             round1(gauss(rng, 6500.0, 2500.0).coerceAtLeast(500.0)) else null,
-                        zonesJSON = null, notes = null,
+                        // Only WHOOP-sourced rows carry zones (matching real imports — Apple Health
+                        // rows never do), so the demo Workouts screen showcases the HR Zones card.
+                        zonesJSON = if (src == WHOOP) run {
+                            val z = listOf(
+                                gauss(rng, 15.0, 5.0), gauss(rng, 30.0, 8.0), gauss(rng, 28.0, 8.0),
+                                gauss(rng, 15.0, 6.0), gauss(rng, 6.0, 3.0),
+                            ).map { it.coerceIn(0.0, 100.0) }
+                            """{"zone1":${round1(z[0])},"zone2":${round1(z[1])},"zone3":${round1(z[2])},"zone4":${round1(z[3])},"zone5":${round1(z[4])}}"""
+                        } else null,
+                        notes = null,
                     )
                 )
             }

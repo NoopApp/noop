@@ -45,10 +45,14 @@ struct WorkoutsView: View {
                 let resolved = effectiveRange
                 let windowRows = sessions(for: resolved)
                 let groups = sportGroups(from: windowRows)
+                let zonesSummary = WorkoutZones.summary(from: windowRows)
 
                 rangeBar(rows: windowRows, effectiveRange: resolved)
                 summarySection(rows: windowRows, effectiveRange: resolved, groups: groups)
                 breakdownSection(groups: groups)
+                if let z = zonesSummary {
+                    zonesSection(z, totalSessions: windowRows.count)
+                }
                 sessionsSection(rows: windowRows)
             }
         }
@@ -212,6 +216,62 @@ struct WorkoutsView: View {
                 .foregroundStyle(StrandPalette.textPrimary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - HR zones (imported per-workout zone split, one card)
+
+    private func zonesSection(_ z: WorkoutZones.Summary, totalSessions: Int) -> some View {
+        VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+            SectionHeader("HR Zones",
+                          overline: "Whoop import",
+                          trailing: "\(z.sessionsWithZones) of \(totalSessions) session\(totalSessions == 1 ? "" : "s")")
+            NoopCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    // Proportional stacked bar — same construction as SleepView's stage bar.
+                    GeometryReader { geo in
+                        HStack(spacing: 2) {
+                            ForEach(0..<5, id: \.self) { i in
+                                Rectangle()
+                                    .fill(StrandPalette.hrZoneColor(i + 1))
+                                    .frame(width: max(0, CGFloat(z.minutes[i] / z.totalMinutes) * geo.size.width))
+                            }
+                        }
+                    }
+                    .frame(height: 34)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Heart-rate zone split: " + (1...5).map { "zone \($0) \(Int((z.minutes[$0 - 1] / z.totalMinutes * 100).rounded())) percent" }.joined(separator: ", "))
+                    Divider().overlay(StrandPalette.hairline)
+                    // 5-up stat strip, identical rhythm to the sport cards' miniStat row.
+                    HStack(spacing: 0) {
+                        ForEach(0..<5, id: \.self) { i in
+                            zoneStat(i + 1, minutes: z.minutes[i], total: z.totalMinutes)
+                        }
+                    }
+                    Text("Share of imported zone time, duration-weighted across sessions — approximate.")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                }
+            }
+        }
+    }
+
+    private func zoneStat(_ zone: Int, minutes: Double, total: Double) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 5) {
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(StrandPalette.hrZoneColor(zone))
+                    .frame(width: 9, height: 9)
+                Text("Z\(zone)" as String).strandOverline()
+            }
+            Text("\(Int((minutes / max(total, 0.001) * 100).rounded()))%")
+                .font(StrandFont.number(15))
+                .foregroundStyle(StrandPalette.textPrimary)
+            Text(durationLabel(minutes * 60))
+                .font(StrandFont.footnote)
+                .foregroundStyle(StrandPalette.textTertiary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -514,7 +574,7 @@ private func previewWorkoutRows() -> [WorkoutRow] {
         WorkoutRow(startTs: now - day * 0 - 3600, endTs: now - day * 0,
                    sport: "Running", source: "whoop", durationS: 3600, energyKcal: 712,
                    avgHr: 152, maxHr: 178, strain: 14.2, distanceM: 10_400,
-                   zonesJSON: nil, notes: nil),
+                   zonesJSON: #"{"z1":12.5,"z2":28.0,"z3":33.5,"z4":18.0,"z5":6.0}"#, notes: nil),
         WorkoutRow(startTs: now - day * 1 - 2700, endTs: now - day * 1,
                    sport: "Strength Training", source: "whoop", durationS: 2700, energyKcal: 388,
                    avgHr: 118, maxHr: 156, strain: 9.4, distanceM: nil,
@@ -530,7 +590,8 @@ private func previewWorkoutRows() -> [WorkoutRow] {
         WorkoutRow(startTs: now - day * 4 - 3300, endTs: now - day * 4,
                    sport: "Cycling", source: "whoop", durationS: 3300, energyKcal: 540,
                    avgHr: 134, maxHr: 162, strain: 11.8, distanceM: 24_600,
-                   zonesJSON: nil, notes: nil),
+                   // Android key shape on purpose — exercises the cross-platform parser.
+                   zonesJSON: #"{"zone1":20.0,"zone2":35.0,"zone3":30.0,"zone4":10.0}"#, notes: nil),
         WorkoutRow(startTs: now - day * 6 - 2400, endTs: now - day * 6,
                    sport: "Yoga", source: "whoop", durationS: 2400, energyKcal: 165,
                    avgHr: 92, maxHr: 118, strain: 5.1, distanceM: nil,

@@ -2962,6 +2962,22 @@
         }
       }
     },
+    "HR Zones": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HR Zones"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HF-Zonen"
+          }
+        }
+      }
+    },
     "HRV": {
       "localizations": {
         "en": {
@@ -5554,6 +5570,22 @@
         }
       }
     },
+    "Share of imported zone time, duration-weighted across sessions — approximate.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Share of imported zone time, duration-weighted across sessions — approximate."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anteil der importierten Zonenzeit, zeitgewichtet über alle Einheiten — Näherungswert."
+          }
+        }
+      }
+    },
     "Should you push today?": {
       "localizations": {
         "en": {
@@ -6767,6 +6799,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Whoop"
+          }
+        }
+      }
+    },
+    "Whoop import": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whoop import"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whoop-Import"
           }
         }
       }
