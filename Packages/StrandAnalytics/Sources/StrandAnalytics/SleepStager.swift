@@ -82,6 +82,13 @@ public enum SleepStager {
     public static let hrSleepBaselineMult: Double = 1.05
     /// Skip HR refinement (trust gravity) when fewer than this many HR samples.
     public static let hrRefineMinSamples: Int = 30
+    /// When an AWAKE heart-rate reference exists (median HR over the day's active periods), a
+    /// candidate span's mean HR must sit at least this fraction BELOW it to count as sleep.
+    /// Genuine sleep runs ~10–20% under awake resting, so 5% is conservative; a sedentary
+    /// daytime hour (mean HR ≈ awake resting) fails it — the #90 false positive. Without an
+    /// awake reference (all-still window, a genuine all-night read) the old day-median ×1.05
+    /// gate still applies, so quiet full nights keep detecting. APPROXIMATE, like all staging.
+    public static let hrSleepDropFrac: Double = 0.05
     /// Consecutive sleep epochs required to declare onset.
     public static let onsetPersistEpochs: Int = 3
 
@@ -250,12 +257,29 @@ public enum SleepStager {
         return HRVAnalyzer.median(vals)
     }
 
-    static func confirmSleepWithHR(_ p: Period, hr: [HRSample], baseline: Double?) -> Bool {
-        guard let baseline = baseline else { return true }
+    /// AWAKE heart-rate reference = median bpm over samples falling inside the day's "active"
+    /// runs, or nil when there are too few (an all-still window has no active runs). This is
+    /// what a daytime candidate span must show a clear drop BELOW — the old day-median gate
+    /// only rejected spans ELEVATED above the whole-window median, which a relaxed afternoon
+    /// in a chair passes (#90).
+    static func awakeHR(_ runs: [Period], hr: [HRSample]) -> Double? {
+        let active = hr.filter { s in
+            runs.contains { $0.stage == "active" && s.ts >= $0.start && s.ts <= $0.end }
+        }
+        if active.count < hrRefineMinSamples { return nil }
+        return HRVAnalyzer.median(active.map { Double($0.bpm) })
+    }
+
+    static func confirmSleepWithHR(_ p: Period, hr: [HRSample],
+                                   awake: Double?, baseline: Double?) -> Bool {
         let seg = rowsBetween(hr, start: p.start, end: p.end) { $0.ts }
-        if seg.count < hrRefineMinSamples { return true }
+        if seg.count < hrRefineMinSamples { return true }   // too few samples: trust gravity
         let meanHR = Double(seg.reduce(0) { $0 + $1.bpm }) / Double(seg.count)
-        return meanHR <= baseline * hrSleepBaselineMult
+        // With an awake reference: require a genuine drop below awake resting (the #90 gate).
+        if let awake { return meanHR <= awake * (1.0 - hrSleepDropFrac) }
+        // Fallback (no active runs in the window): the original not-elevated day-median gate.
+        if let baseline { return meanHR <= baseline * hrSleepBaselineMult }
+        return true
     }
 
     // MARK: - detectSleep (public)
@@ -279,13 +303,14 @@ public enum SleepStager {
         runs = mergePeriods(runs)
 
         let baseline = hrBaseline(hrS)
+        let awake = awakeHR(runs, hr: hrS)
         let minSleepS = minSleepMin * 60
 
         var sessions: [SleepSession] = []
         for p in runs {
             if p.stage != "sleep" { continue }
             if (p.end - p.start) <= minSleepS { continue }
-            if !confirmSleepWithHR(p, hr: hrS, baseline: baseline) { continue }
+            if !confirmSleepWithHR(p, hr: hrS, awake: awake, baseline: baseline) { continue }
             let stages = stageSession(start: p.start, end: p.end, grav: grav,
                                       hr: hrS, rr: rrS, resp: respS)
             let eff = efficiency(start: p.start, end: p.end, stages: stages)

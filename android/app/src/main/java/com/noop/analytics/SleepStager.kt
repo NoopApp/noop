@@ -80,6 +80,14 @@ object SleepStager {
     /** Skip HR refinement (trust gravity) when fewer than this many HR samples. */
     const val hrRefineMinSamples: Int = 30
 
+    /** When an AWAKE heart-rate reference exists (median HR over the day's active periods), a
+     *  candidate span's mean HR must sit at least this fraction BELOW it to count as sleep.
+     *  Genuine sleep runs ~10–20% under awake resting, so 5% is conservative; a sedentary
+     *  daytime hour (mean HR ≈ awake resting) fails it — the #90 false positive. Without an
+     *  awake reference (all-still window, a genuine all-night read) the old day-median ×1.05
+     *  gate still applies, so quiet full nights keep detecting. APPROXIMATE, like all staging. */
+    const val hrSleepDropFrac: Double = 0.05
+
     /** Consecutive sleep epochs required to declare onset. */
     const val onsetPersistEpochs: Int = 3
 
@@ -269,12 +277,33 @@ object SleepStager {
         return HrvAnalyzer.median(vals)
     }
 
-    internal fun confirmSleepWithHR(p: Period, hr: List<HrSample>, baseline: Double?): Boolean {
-        if (baseline == null) return true
+    /**
+     * AWAKE heart-rate reference = median bpm over samples falling inside the day's "active"
+     * runs, or null when there are too few (an all-still window has no active runs). This is
+     * what a daytime candidate span must show a clear drop BELOW — the old day-median gate
+     * only rejected spans ELEVATED above the whole-window median, which a relaxed afternoon
+     * in a chair passes (#90).
+     */
+    internal fun awakeHR(runs: List<Period>, hr: List<HrSample>): Double? {
+        val active = hr.filter { s -> runs.any { it.stage == "active" && s.ts in it.start..it.end } }
+        if (active.size < hrRefineMinSamples) return null
+        return HrvAnalyzer.median(active.map { it.bpm.toDouble() })
+    }
+
+    internal fun confirmSleepWithHR(
+        p: Period,
+        hr: List<HrSample>,
+        awake: Double?,
+        baseline: Double?,
+    ): Boolean {
         val seg = rowsBetween(hr, p.start, p.end) { it.ts }
-        if (seg.size < hrRefineMinSamples) return true
+        if (seg.size < hrRefineMinSamples) return true   // too few samples: trust gravity
         val meanHR = seg.sumOf { it.bpm }.toDouble() / seg.size.toDouble()
-        return meanHR <= baseline * hrSleepBaselineMult
+        // With an awake reference: require a genuine drop below awake resting (the #90 gate).
+        if (awake != null) return meanHR <= awake * (1.0 - hrSleepDropFrac)
+        // Fallback (no active runs in the window): the original not-elevated day-median gate.
+        if (baseline != null) return meanHR <= baseline * hrSleepBaselineMult
+        return true
     }
 
     // ── detectSleep (public) ──────────────────────────────────────────────────
@@ -302,13 +331,14 @@ object SleepStager {
         runs = mergePeriods(runs)
 
         val baseline = hrBaseline(hrS)
+        val awake = awakeHR(runs, hrS)
         val minSleepS = (minSleepMin * 60).toLong()
 
         val sessions = ArrayList<DetectedSleep>()
         for (p in runs) {
             if (p.stage != "sleep") continue
             if ((p.end - p.start) <= minSleepS) continue
-            if (!confirmSleepWithHR(p, hrS, baseline)) continue
+            if (!confirmSleepWithHR(p, hrS, awake, baseline)) continue
             val stages = stageSession(start = p.start, end = p.end, grav = grav,
                 hr = hrS, rr = rrS, resp = respS)
             val eff = efficiency(start = p.start, end = p.end, stages = stages)
@@ -908,8 +938,8 @@ object SleepStager {
 
     /**
      * Linear-interpolated percentile of an already-sorted sequence (numpy-style).
-     * Inlined from Swift `StrainScorer.percentile` (not yet ported to Kotlin); same
-     * algorithm so a later StrainScorer port stays consistent.
+     * Inlined from Swift `StrainScorer.percentile`; StrainScorer.kt carries its own
+     * copy — keep the two algorithms identical if either ever changes.
      */
     private fun percentileSorted(sortedValues: List<Double>, pct: Double): Double {
         val n = sortedValues.size

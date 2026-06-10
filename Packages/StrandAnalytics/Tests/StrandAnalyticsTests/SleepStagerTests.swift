@@ -87,6 +87,35 @@ final class SleepStagerTests: XCTestCase {
         XCTAssertTrue(sessions.isEmpty)
     }
 
+    func testDetectSleepRejectsSedentaryDaytimeHourWithoutHRDrop() {
+        // #90 regression: an afternoon hour sitting still in a chair. HR (68) shows NO real
+        // drop below the awake reference (median 70 over the active day), so the span must
+        // be rejected — under the old day-median×1.05 gate it passed (68 ≤ ~73.5).
+        let start = 5_000_000
+        let dayDur = 4 * 60 * 60
+        let chairDur = 65 * 60
+        let dayGrav = activeGravity(start: start, durationS: dayDur)
+        let dayHR = hrStream(start: start, durationS: dayDur, bpm: 70)
+        let chairGrav = stillGravity(start: start + dayDur, durationS: chairDur)
+        let chairHR = hrStream(start: start + dayDur, durationS: chairDur, bpm: 68)
+        let sessions = SleepStager.detectSleep(hr: dayHR + chairHR, gravity: dayGrav + chairGrav)
+        XCTAssertTrue(sessions.isEmpty)
+    }
+
+    func testDetectSleepAcceptsRealNapWithHRDrop() {
+        // Positive control for the #90 gate: same shape, but the still span shows a genuine
+        // HR drop (55 vs awake 70 — well over 5% below), so it still detects.
+        let start = 6_000_000
+        let dayDur = 4 * 60 * 60
+        let napDur = 65 * 60
+        let dayGrav = activeGravity(start: start, durationS: dayDur)
+        let dayHR = hrStream(start: start, durationS: dayDur, bpm: 70)
+        let napGrav = stillGravity(start: start + dayDur, durationS: napDur)
+        let napHR = hrStream(start: start + dayDur, durationS: napDur, bpm: 55)
+        let sessions = SleepStager.detectSleep(hr: dayHR + napHR, gravity: dayGrav + napGrav)
+        XCTAssertEqual(sessions.count, 1)
+    }
+
     // MARK: - Staging output integrity
 
     func testStagesTileSessionExactly() {
