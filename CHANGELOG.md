@@ -17,6 +17,17 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 1.78 — Fewer false daytime sleeps + an Android sync button
+
+- **Fixed (Mac and Android):** a long sedentary daytime stretch no longer gets logged as sleep —
+  daytime periods now need a longer, genuinely low-heart-rate window, while nights and real naps stay
+  unchanged.
+- **New (Android):** a manual "Sync now" button on the Live screen + an honest progress indicator
+  while strap history offloads.
+- **Repo:** contributor guidelines, issue/PR templates, a security policy, and build-check CI added.
+
+---
+
 ## 1.77 — First-run terms acknowledgment + an Explore chart fix
 
 - **New (Mac and Android):** a one-time, plain-English terms acknowledgment on first launch — what

@@ -18,8 +18,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -128,12 +130,27 @@ fun LiveScreen(viewModel: AppViewModel) {
         // "· syncing" pill suffix is easy to miss (#91/#93). Otherwise: a non-silent error if the
         // last offload stalled, else a relative "history synced N ago". (PR #85; sync-visibility v1.70)
         if (live.backfilling) {
-            Text(
-                "Syncing your strap history…",
-                style = NoopType.footnote,
-                color = Palette.textSecondary,
+            // INDETERMINATE on purpose: the strap never tells us how many records remain, so a percent
+            // would be a lie. A small spinner + the live acked-chunk count is the honest "it's working"
+            // signal. The chunk count only appears once the first chunk lands (0 reads as "starting"). (#93)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth(),
-            )
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(13.dp),
+                    strokeWidth = 2.dp,
+                    color = Palette.accent,
+                )
+                Text(
+                    if (live.syncChunksThisSession > 0)
+                        "Syncing your strap history… ${live.syncChunksThisSession} chunks pulled"
+                    else "Syncing your strap history…",
+                    style = NoopType.footnote,
+                    color = Palette.textSecondary,
+                )
+            }
         } else {
             val syncError = live.lastSyncError
             if (syncError != null) {
@@ -411,6 +428,47 @@ fun LiveScreen(viewModel: AppViewModel) {
                 )
                 Text(
                     "End",
+                    style = NoopType.captionNumber,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Clip,
+                )
+            }
+        }
+
+        // Manual "Sync now" — kick a historical offload on demand instead of waiting for the 15-min
+        // periodic timer (#93). Only meaningful once bonded (the offload needs the command channel), and
+        // disabled mid-session so a double-tap can't fight the in-flight offload — viewModel.syncNow()
+        // also no-ops in that case, this is just the matching UI state. While syncing, the button shows
+        // an INDETERMINATE spinner (NEVER a percent — total pending records are unknowable from the
+        // protocol); the "Syncing your strap history… N chunks pulled" line above carries the live count.
+        if (live.bonded) {
+            OutlinedButton(
+                onClick = { viewModel.syncNow() },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !live.backfilling,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Palette.accent),
+            ) {
+                if (live.backfilling) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .size(18.dp)
+                            .padding(end = 4.dp),
+                        strokeWidth = 2.dp,
+                        color = Palette.accent,
+                    )
+                } else {
+                    Icon(
+                        Icons.Filled.Sync,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(18.dp)
+                            .padding(end = 4.dp),
+                    )
+                }
+                Text(
+                    if (live.backfilling) "Syncing…" else "Sync now",
                     style = NoopType.captionNumber,
                     maxLines = 1,
                     softWrap = false,

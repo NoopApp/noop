@@ -52,6 +52,11 @@ final class IntelligenceEngine: ObservableObject {
 
         let maxHR = profile.hrMaxOverride > 0 ? Double(profile.hrMaxOverride) : nil
         let now = Int(Date().timeIntervalSince1970)
+        // Device wall-clock offset (seconds east of UTC) for the sleep detector's daytime
+        // false-sleep guard (#90): the stager places each window's center on the LOCAL clock
+        // so only genuinely-daytime windows face the stricter nap bar. (Computed once; a DST
+        // boundary inside the window is a negligible edge case for an hour-of-day band.)
+        let tzOffset = TimeZone.current.secondsFromGMT()
 
         // ── Pass 1: analyse each offloaded night against the IMPORTED-ONLY baseline. For a BLE-only
         // user `repo.days` (imported) is empty, so the HRV baseline isn't usable yet and recovery is
@@ -106,7 +111,8 @@ final class IntelligenceEngine: ObservableObject {
                 AnalyticsEngine.analyzeDay(day: day, hr: hr, rr: rr, resp: resp, gravity: grav,
                                            steps: steps, dayHr: dayHr, daySteps: daySteps,
                                            skinTemp: skin,
-                                           profile: up, baselines: baselines1, maxHROverride: maxHR)
+                                           profile: up, baselines: baselines1, maxHROverride: maxHR,
+                                           tzOffsetSeconds: tzOffset)
             }.value
             nightlyHrvByDay[res.daily.day] = res.daily.avgHrv
             nightlyRhrByDay[res.daily.day] = res.daily.restingHr.map(Double.init)

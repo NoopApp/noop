@@ -116,10 +116,15 @@ public enum AnalyticsEngine {
                                   skinTemp: [SkinTempSample] = [],
                                   profile: UserProfile,
                                   baselines: ProfileBaselines = ProfileBaselines(),
-                                  maxHROverride: Double? = nil) -> DayResult {
+                                  maxHROverride: Double? = nil,
+                                  // Wall-clock UTC offset (seconds) for the sleep detector's daytime
+                                  // false-sleep guard (#90). Default 0 keeps pure-function callers/tests
+                                  // on UTC; IntelligenceEngine passes the device's real offset.
+                                  tzOffsetSeconds: Int = 0) -> DayResult {
 
         // ── Sleep detection + staging ─────────────────────────────────────────
-        let allSessions = SleepStager.detectSleep(hr: hr, rr: rr, resp: resp, gravity: gravity)
+        let allSessions = SleepStager.detectSleep(hr: hr, rr: rr, resp: resp, gravity: gravity,
+                                                  tzOffsetSeconds: tzOffsetSeconds)
         // Sessions attributed to `day` = those whose end falls on `day` (UTC).
         let matched = allSessions.filter { dayString($0.end) == day }
 

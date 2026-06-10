@@ -76,6 +76,30 @@ public enum SleepStager {
     public static let minSleepMin: Int = 60
     /// Assumed sample interval (seconds) when not inferable.
     public static let defaultIntervalS: Double = 60.0
+
+    // MARK: - Daytime false-sleep guard (#90)
+
+    // A long, still, sedentary daytime stretch (reading, a desk, a sofa) is gravity-
+    // indistinguishable from a real nap, so the gravity spine alone misclassifies it as
+    // sleep. The fix is NOT to drop daytime sleep — real naps are legitimate sessions —
+    // but to hold a window whose CENTER falls in the local daytime band to a stricter bar:
+    // it must be long enough to be a real nap AND show a genuine cardiac dip (a sedentary
+    // stretch keeps a near-baseline HR). Overnight windows are UNCHANGED.
+
+    /// Local hour (inclusive) at which the stricter daytime bar begins.
+    public static let daytimeBandStartHour: Int = 11
+    /// Local hour (exclusive) at which the stricter daytime bar ends. A window whose center
+    /// is in [start, end) local hours is "daytime"; everything else is "overnight".
+    public static let daytimeBandEndHour: Int = 20
+    /// A daytime window must run at least this long (minutes) to count — short still
+    /// daytime stretches are the dominant false-positive and are rejected outright.
+    public static let daytimeMinSleepMin: Int = 90
+    /// A daytime window's resting HR (lowest 5-min rolling mean) must be at or below
+    /// baseline × this to confirm a real cardiac dip. Stricter than the overnight 1.05:
+    /// a true nap dips BELOW the waking-day median, sedentary stillness does not.
+    public static let daytimeRestingHRMult: Double = 0.95
+    /// Seconds in a calendar day (for local-hour-of-day arithmetic).
+    static let secondsPerDay: Int = 86_400
     /// Floor on the rolling-window size in samples.
     public static let minWindowSamples: Int = 3
     /// A run is HR-confirmed only if mean HR ≤ baseline × this.
@@ -258,14 +282,51 @@ public enum SleepStager {
         return meanHR <= baseline * hrSleepBaselineMult
     }
 
+    /// True when the run's CENTER, shifted to LOCAL time by tzOffsetSeconds, lands in the
+    /// daytime band [daytimeBandStartHour, daytimeBandEndHour). The center (not the edges)
+    /// is used so a window straddling a band edge is classified once, by where it mostly is.
+    /// `((x % d) + d) % d` is a floored modulo so a negative local-shifted time still maps
+    /// into [0, secondsPerDay).
+    static func isDaytimeCenter(_ p: Period, tzOffsetSeconds: Int) -> Bool {
+        // Int overflow-safe: starts/ends are unix seconds; midpoint via average of the two.
+        let center = p.start + (p.end - p.start) / 2
+        let local = center + tzOffsetSeconds
+        let secOfDay = ((local % secondsPerDay) + secondsPerDay) % secondsPerDay
+        let hour = secOfDay / 3_600
+        return hour >= daytimeBandStartHour && hour < daytimeBandEndHour
+    }
+
+    /// Stricter bar for a daytime-centered window (#90). A real daytime nap clears it; a
+    /// long sedentary still stretch (the false-positive this guards) does not, because it
+    /// is either too short or never shows a genuine cardiac dip below the day median.
+    /// Overnight windows never reach here. Returns true = keep, false = reject.
+    ///
+    /// `restingHR` is the window's own lowest 5-min rolling-mean HR (the sleep-depth proxy
+    /// detectSleep already computes); `baseline` is the day's median HR. With no usable HR
+    /// evidence (nil baseline OR nil restingHR) a daytime stretch cannot be confirmed as a
+    /// real nap, so it is rejected — sedentary daytime stillness without a measured HR dip
+    /// is far more likely than an unmonitored nap, and this path can never touch the night.
+    static func passesDaytimeGuard(_ p: Period, restingHR: Int?, baseline: Double?) -> Bool {
+        let daytimeMinSleepS = daytimeMinSleepMin * 60
+        if (p.end - p.start) < daytimeMinSleepS { return false }
+        guard let baseline = baseline, let resting = restingHR else { return false }
+        return Double(resting) <= baseline * daytimeRestingHRMult
+    }
+
     // MARK: - detectSleep (public)
 
     /// Detect sleep sessions from biometric streams. Empty/absent gravity → [].
     /// Gravity-only input degrades gracefully (HR/RR/resp refinements skipped).
+    ///
+    /// `tzOffsetSeconds` is the wall-clock UTC offset (TimeZone.current.secondsFromGMT)
+    /// used ONLY to place each window's center on a LOCAL clock for the daytime
+    /// false-sleep guard (#90). It defaults to 0 so the pure function and its tests stay
+    /// UTC; the live call site (IntelligenceEngine) passes the device's real offset.
     public static func detectSleep(hr: [HRSample] = [],
                                    rr: [RRInterval] = [],
                                    resp: [RespSample] = [],
-                                   gravity: [GravitySample]) -> [SleepSession] {
+                                   gravity: [GravitySample],
+                                   tzOffsetSeconds: Int = 0) -> [SleepSession] {
         let grav = gravity.sorted { $0.ts < $1.ts }
         if grav.count < 2 { return [] }
 
@@ -286,10 +347,15 @@ public enum SleepStager {
             if p.stage != "sleep" { continue }
             if (p.end - p.start) <= minSleepS { continue }
             if !confirmSleepWithHR(p, hr: hrS, baseline: baseline) { continue }
+            // Daytime false-sleep guard (#90): a window centered in the local daytime band
+            // must clear a stricter bar (≥daytimeMinSleepMin AND a real resting-HR dip).
+            // Overnight windows skip this entirely. restingHR is computed here (reused below).
+            let resting = sessionRestingHR(start: p.start, end: p.end, hr: hrS)
+            if isDaytimeCenter(p, tzOffsetSeconds: tzOffsetSeconds),
+               !passesDaytimeGuard(p, restingHR: resting, baseline: baseline) { continue }
             let stages = stageSession(start: p.start, end: p.end, grav: grav,
                                       hr: hrS, rr: rrS, resp: respS)
             let eff = efficiency(start: p.start, end: p.end, stages: stages)
-            let resting = sessionRestingHR(start: p.start, end: p.end, hr: hrS)
             let avgHrv = sessionAvgHRV(start: p.start, end: p.end, rr: rrS)
             sessions.append(SleepSession(start: p.start, end: p.end, efficiency: eff,
                                          stages: stages, restingHR: resting, avgHRV: avgHrv))

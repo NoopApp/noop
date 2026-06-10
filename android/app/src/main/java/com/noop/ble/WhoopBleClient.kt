@@ -324,6 +324,16 @@ class WhoopBleClient(
         }
 
         /**
+         * The gate every offload kick passes through: a sync may start ONLY when the link is up
+         * ([connected]), the command channel is usable ([bonded]), and no offload is already running
+         * ([backfilling]). Extracted as a pure predicate so the auto-kick, the 900s periodic timer,
+         * and the manual "Sync now" button (#93) can't drift apart, and so the no-op behaviour is
+         * unit-testable without a live GATT stack. Mirrors the `requestSync` guard in BLEManager.swift.
+         */
+        fun canRequestSync(connected: Boolean, bonded: Boolean, backfilling: Boolean): Boolean =
+            connected && bonded && !backfilling
+
+        /**
          * Newest plausible-unix marker in a GET_DATA_RANGE response = the strap's newest stored
          * record. Mirrors Swift `BLEManager.dataRangeNewestUnix`: scan u32 LE words in the response
          * body (starts at frame[7], after [type,seq,cmd]), keep those in the unix range, return max.
@@ -1960,8 +1970,22 @@ class WhoopBleClient(
      * once-per-connect kick and the 900s periodic timer, which is itself the coarse rate limit).
      */
     private fun requestSync() {
-        if (!_state.value.connected || !_state.value.bonded || backfilling) return
+        val s = _state.value
+        if (!canRequestSync(s.connected, s.bonded, backfilling)) return
         beginBackfill()
+    }
+
+    /**
+     * Public "Sync now" entry point for a user-initiated manual offload (Live screen button, #93).
+     *
+     * Deliberately just forwards to the SAME gated [requestSync] the auto-kick and the 900s periodic
+     * timer use, so a manual sync can never bypass the connected+bonded+not-already-backfilling guard.
+     * It's therefore a safe no-op when the strap isn't ready or a session is already running. Posted to
+     * the main looper because [beginBackfill] arms handler-scoped timers — the UI may call from any
+     * thread, and every other timer/GATT path is pinned to this handler (see connectGatt(..., handler)).
+     */
+    fun syncNow() {
+        handler.post { requestSync() }
     }
 
     /** Periodic-timer callback: re-runs the type-47 offload (the primary metric sync). */

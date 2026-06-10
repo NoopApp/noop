@@ -82,6 +82,14 @@ object IntelligenceEngine {
 
         val computedId = importedDeviceId + "-noop"
 
+        // Device wall-clock offset (seconds east of UTC) for the sleep detector's daytime
+        // false-sleep guard (#90): the stager places each window's center on the LOCAL clock so
+        // only genuinely-daytime windows face the stricter nap bar. getOffset(nowMillis) folds in
+        // the current DST state (a DST boundary inside a single window is a negligible edge case
+        // for an hour-of-day band). Computed once per run.
+        val tzOffsetSeconds =
+            java.util.TimeZone.getDefault().getOffset(nowSeconds * 1_000L) / 1_000L
+
         // ── Pass 1: detect + aggregate each offloaded night, scoring against the
         // imported-only baseline. For a BLE-only user repo.days(importedDeviceId) is
         // empty, so the HRV baseline is NOT usable and res.recovery is null here — but
@@ -152,6 +160,7 @@ object IntelligenceEngine {
                 profile = profile,
                 baselines = baselines1,
                 maxHROverride = maxHROverride,
+                tzOffsetSeconds = tzOffsetSeconds,
             )
 
             // Harvest the baseline-independent nightly aggregates (a day with no detected

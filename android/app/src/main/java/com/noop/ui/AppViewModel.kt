@@ -525,6 +525,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      *  proprietary command is dropped) and also fires the legacy command on WHOOP 4. */
     fun getBattery() = ble.refreshBattery()
 
+    /**
+     * User-initiated "Sync now": kick a historical offload on demand (#93). A thin pass-through to the
+     * BLE client's gated [WhoopBleClient.syncNow], which forwards to the same connected+bonded+
+     * not-already-backfilling guard the auto-kick and 900s periodic timer use — so it's a safe no-op
+     * when the strap isn't ready or a session is already running. Progress is unknowable from the
+     * protocol, so the UI shows an indeterminate indicator + live.syncChunksThisSession, never a percent. */
+    fun syncNow() = ble.syncNow()
+
     // --- Smart alarm (persisted; arms the strap's firmware alarm). Port of macOS BehaviorStore +
     // AppModel.applySmartAlarm. The previous Android UI was a non-persisted mock-up (issue #51).
     // NOTE: the _smartAlarm* state fields are declared ABOVE the init block (next to _illnessWatchEnabled)
