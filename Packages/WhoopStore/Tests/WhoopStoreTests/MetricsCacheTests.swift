@@ -16,7 +16,7 @@ final class MetricsCacheTests: XCTestCase {
     }
 
     func testSchemaVersionBumped() {
-        XCTAssertEqual(WhoopStoreInfo.schemaVersion, 10)
+        XCTAssertEqual(WhoopStoreInfo.schemaVersion, 11)
     }
 
     // MARK: - sleep sessions
@@ -140,6 +140,41 @@ final class MetricsCacheTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(row.spo2Pct), 97.1, accuracy: 0.001)
         XCTAssertEqual(try XCTUnwrap(row.skinTempDevC), -0.1, accuracy: 0.001)
         XCTAssertEqual(try XCTUnwrap(row.respRateBpm), 14.8, accuracy: 0.001)
+    }
+
+    // MARK: - v11 daily-activity columns (steps / activeKcalEst)
+
+    func testV11ColumnsPresent() async throws {
+        let store = try await WhoopStore.inMemory()
+        let cols = try await store.columnNamesForTest(table: "dailyMetric")
+        XCTAssertTrue(cols.contains("steps"), "dailyMetric missing v11 steps column")
+        XCTAssertTrue(cols.contains("activeKcalEst"), "dailyMetric missing v11 activeKcalEst column")
+    }
+
+    func testV11ColumnsRoundTrip() async throws {
+        let store = try await WhoopStore.inMemory()
+        let d = DailyMetric(day: "2026-05-27", totalSleepMin: 410, efficiency: 0.9,
+                            deepMin: 85, remMin: 105, lightMin: 220, disturbances: 2,
+                            restingHr: 51, avgHrv: 64.0, recovery: 0.72, strain: 10.9,
+                            exerciseCount: 1, spo2Pct: 96.0, skinTempDevC: 0.1, respRateBpm: 14.9,
+                            steps: 8_412, activeKcalEst: 2_310.5)
+        try await store.upsertDailyMetrics([d], deviceId: "devA")
+
+        let rows = try await store.dailyMetrics(deviceId: "devA", from: "2026-05-01", to: "2026-05-31")
+        XCTAssertEqual(rows.count, 1)
+        let row = try XCTUnwrap(rows.first)
+        XCTAssertEqual(row.steps, 8_412)
+        XCTAssertEqual(try XCTUnwrap(row.activeKcalEst), 2_310.5, accuracy: 0.001)
+        // Omitting the new params keeps them nil (defaulted init, old call sites unchanged).
+        let bare = DailyMetric(day: "2026-05-28", totalSleepMin: nil, efficiency: nil,
+                               deepMin: nil, remMin: nil, lightMin: nil, disturbances: nil,
+                               restingHr: nil, avgHrv: nil, recovery: nil, strain: nil, exerciseCount: nil)
+        try await store.upsertDailyMetrics([bare], deviceId: "devA")
+        let bareRows = try await store.dailyMetrics(
+            deviceId: "devA", from: "2026-05-28", to: "2026-05-28")
+        let bareRow = try XCTUnwrap(bareRows.first)
+        XCTAssertNil(bareRow.steps)
+        XCTAssertNil(bareRow.activeKcalEst)
     }
 
     // MARK: - read highwater cursor (distinct prefix from upload highwater)

@@ -17,6 +17,19 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 1.75 — Personal vital baselines + Mac analytics parity
+
+- **New (Mac and Android):** the Health Monitor now judges each vital — HRV, resting heart rate,
+  respiratory rate, skin temperature — against **your own learned baseline** (after ~14 nights),
+  not just a one-size-fits-all population range. A personal normal that sits outside the textbook
+  band (e.g. a naturally lower HRV) stops reading as "off" when it's fine for you. Falls back to the
+  typical range until your baseline is established.
+- **New (Mac):** macOS now computes steps, respiratory rate, daily calories and nightly skin
+  temperature on-device, matching Android — and nightly respiration now feeds the recovery score on
+  both platforms (existing recoveries unchanged when respiration isn't available).
+
+---
+
 ## 1.74 — Android reconnect guide + a startup-crash fix
 
 - **Android reconnect guide (parity with Mac 1.73):** if your WHOOP 5.0 / MG can't connect after a

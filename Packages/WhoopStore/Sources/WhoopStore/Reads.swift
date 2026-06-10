@@ -105,6 +105,17 @@ extension WhoopStore {
         }
     }
 
+    public func stepSamples(deviceId: String, from: Int, to: Int, limit: Int) async throws -> [StepSample] {
+        try syncRead { db in
+            try Row.fetchAll(db, sql: """
+                SELECT ts, counter FROM stepSample
+                WHERE deviceId = ? AND ts >= ? AND ts <= ?
+                ORDER BY ts ASC LIMIT ?
+                """, arguments: [deviceId, from, to, limit])
+                .map { StepSample(ts: $0["ts"], counter: $0["counter"]) }
+        }
+    }
+
     public func respSamples(deviceId: String, from: Int, to: Int, limit: Int) async throws -> [RespSample] {
         try syncRead { db in
             try Row.fetchAll(db, sql: """

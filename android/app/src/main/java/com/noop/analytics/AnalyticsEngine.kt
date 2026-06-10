@@ -169,7 +169,7 @@ object AnalyticsEngine {
             recovery = RecoveryScorer.recovery(
                 hrv = hrvVal,
                 rhr = rhrVal.toDouble(),
-                resp = null, // raw resp not aggregated to a nightly scalar here
+                resp = respRateDaily, // term drops + renormalizes when null / no baseline
                 hrvBaseline = hrvBase,
                 rhrBaseline = baselines.restingHR,
                 respBaseline = baselines.resp,
