@@ -256,11 +256,25 @@ struct CompareView: View {
             SectionHeader("Metrics", overline: "Overlay 2–4 signals")
             NoopCard {
                 VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-                    HStack(alignment: .center) {
-                        SegmentedPillControl(CompareRange.allCases, selection: $range) { $0.label }
-                            .accessibilityLabel("Time range")
-                        Spacer()
-                        addMenu
+                    // Wide screens (macOS, iPad) put the range pills and Add menu side-by-side.
+                    // On iPhone the row is wider than the screen, which would balloon the whole
+                    // VStack and cut off chips + captions — fall back to a stacked layout with
+                    // the pills in a horizontal scroller.
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .center) {
+                            SegmentedPillControl(CompareRange.allCases, selection: $range) { $0.label }
+                                .accessibilityLabel("Time range")
+                            Spacer()
+                            addMenu
+                        }
+                        VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                SegmentedPillControl(CompareRange.allCases, selection: $range) { $0.label }
+                                    .accessibilityLabel("Time range")
+                                    .padding(.vertical, 1)
+                            }
+                            addMenu
+                        }
                     }
 
                     if selected.count >= minSelection {
