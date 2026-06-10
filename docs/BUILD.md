@@ -158,6 +158,70 @@ Copy the bundle wherever you like (e.g. `~/Desktop/NOOP.app`) and double-click t
 run macOS prompts for Bluetooth permission — the prompt text comes from
 `NSBluetoothAlwaysUsageDescription` in the Info.plist and explains that data stays on-device.
 
+### 3b. Developer ID signing (distributing to others)
+
+Ad-hoc signing only works on your own machine. To share a build with someone else, you need a
+**Developer ID** certificate from an Apple Developer account ($99/year).
+
+1. Open Xcode → Settings → Accounts → add your Apple ID
+2. Set `DEVELOPMENT_TEAM` in `project.yml` to your 10-character team ID:
+   ```yaml
+   settings:
+     base:
+       DEVELOPMENT_TEAM: AB12CD34EF  # replace with your team ID
+   ```
+3. Re-run `xcodegen generate` to regenerate `Strand.xcodeproj`
+4. Build the release `.app`:
+   ```bash
+   xcodebuild \
+     -project Strand.xcodeproj \
+     -scheme Strand \
+     -configuration Release \
+     -destination 'platform=macOS' \
+     -derivedDataPath build \
+     build
+   ```
+5. Notarise so Gatekeeper accepts it on other Macs:
+   ```bash
+   ditto -c -k --keepParent build/Build/Products/Release/NOOP.app NOOP.zip
+   xcrun notarytool submit NOOP.zip \
+     --apple-id you@example.com \
+     --team-id AB12CD34EF \
+     --password app-specific-password \
+     --wait
+   xcrun stapler staple build/Build/Products/Release/NOOP.app
+   ```
+
+> `DEVELOPMENT_TEAM` is intentionally left empty in the repo so contributors can build without an
+> Apple account. Do not commit your team ID to the public repo.
+
+### 3c. Android release signing
+
+Debug builds use the debug keystore automatically. For a signed release APK:
+
+1. Generate a keystore (once):
+   ```bash
+   keytool -genkey -v \
+     -keystore noop-release.jks \
+     -keyalg RSA -keysize 2048 -validity 10000 \
+     -alias noop-release
+   ```
+2. Create `android/keystore.properties` (git-ignored):
+   ```properties
+   storeFile=../noop-release.jks
+   storePassword=your-store-password
+   keyAlias=noop-release
+   keyPassword=your-key-password
+   ```
+3. Build the release APK:
+   ```bash
+   cd android && ./gradlew assembleFullRelease
+   # Output: app/build/outputs/apk/full/release/app-full-release.apk
+   ```
+
+`build.gradle.kts` picks up `keystore.properties` automatically when present and falls back to the
+debug key when absent — so CI works without any secrets.
+
 ### 4. Pairing & BLE on macOS
 
 NOOP connects over CoreBluetooth (`Strand/BLE/BLEManager.swift`). The central manager is created
