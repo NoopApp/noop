@@ -31,6 +31,11 @@ jobs:
 
       # Baut exakt das NOOPiOS-Target, welches die Mac-Dateien korrekt ausschließt
       # Baut exakt das NOOPiOS-Target und ignoriert kaputte App-Icons
+      #
+      # CODE_SIGN_ENTITLEMENTS="" entfernt App-Group und HealthKit aus dem
+      # ungesignten Build: das ist absichtlich (Compile-Only-Check), aber damit
+      # validiert CI keine Cross-Process-Pfade (WidgetSnapshot, PendingIntents,
+      # Live Activity). Ein grünes CI heißt: kompiliert sauber.
       - name: Build Unsigned iOS App
         run: |
           xcodebuild build \
