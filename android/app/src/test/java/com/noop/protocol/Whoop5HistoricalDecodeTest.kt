@@ -62,4 +62,24 @@ class Whoop5HistoricalDecodeTest {
         // Decoding a WHOOP5 frame as WHOOP4 must yield null (different envelope; type@4 != 47 / CRC differs)
         assertNull(decodeHistorical(bytes(wornV18), DeviceFamily.WHOOP4))
     }
+
+    // Real Android WHOOP 5.0 v18 frame from an ACK-enabled hardware offload (a clock-synced strap
+    // releasing genuine body frames) — independent ground truth for the same offsets. (#78 fork)
+    private val androidAckCaptureV18 =
+        "aa01740001003fb12f1280aaae6f01bea0286ae11a004200000000000000000000b0000084414b38dc80b96c3c717d243dd7638f3ee182773ff6007e00000000000000000026013601a60c5004010c020c00000000000000000000000000000000000000000000010100a27c2521000000bff73ec00000002ce4150a"
+
+    @Test
+    fun decodesAndroidAckCaptureV18() {
+        val p = decodeHistorical(bytes(androidAckCaptureV18), DeviceFamily.WHOOP5)
+        assertNotNull(p)
+        p!!
+        assertEquals(18, p["hist_version"])
+        assertEquals(1781047486, p["unix"])
+        assertEquals(66, p["heart_rate"])
+        assertEquals(3238, p["skin_temp_raw"]) // 32.38 °C on the wrist
+        val gx = p["gravity_x"] as Double
+        val gy = p["gravity_y"] as Double
+        val gz = p["gravity_z"] as Double
+        assertEquals(1.0, sqrt(gx * gx + gy * gy + gz * gz), 0.05)
+    }
 }

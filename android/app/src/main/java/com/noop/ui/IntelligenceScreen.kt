@@ -44,6 +44,7 @@ import kotlin.math.roundToInt
 @Composable
 fun IntelligenceScreen(vm: AppViewModel) {
     val days by vm.recentDays.collectAsStateWithLifecycle()
+    val live by vm.live.collectAsStateWithLifecycle()
 
     // Newest first for the per-day list (macOS ForEach renders most-recent at top).
     val ordered = remember(days) { days.reversed() }
@@ -56,6 +57,8 @@ fun IntelligenceScreen(vm: AppViewModel) {
         ModelBreakdownCard()
 
         if (ordered.isEmpty()) {
+            // While the strap is mid-offload, say so — an empty list reads as final otherwise (#77).
+            if (live.backfilling) SyncingHistoryNote(chunks = live.syncChunksThisSession)
             EmptyNote()
         } else {
             SectionHeader(

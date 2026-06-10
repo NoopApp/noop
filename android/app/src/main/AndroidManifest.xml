@@ -65,6 +65,13 @@
     <uses-permission android:name="android.permission.health.READ_SLEEP" />
     <uses-permission android:name="android.permission.health.READ_OXYGEN_SATURATION" />
     <uses-permission android:name="android.permission.health.READ_RESPIRATORY_RATE" />
+    <!-- Health Connect writeback (optional, opt-in, default OFF): lets NOOP contribute its
+         on-device computed nightly metrics so other apps can read them. Only what NOOP itself
+         computed from the strap is written — imported data is never echoed back. -->
+    <uses-permission android:name="android.permission.health.WRITE_RESTING_HEART_RATE" />
+    <uses-permission android:name="android.permission.health.WRITE_HEART_RATE_VARIABILITY" />
+    <uses-permission android:name="android.permission.health.WRITE_OXYGEN_SATURATION" />
+    <uses-permission android:name="android.permission.health.WRITE_RESPIRATORY_RATE" />
     <uses-permission android:name="android.permission.health.READ_VO2_MAX" />
     <uses-permission android:name="android.permission.health.READ_WEIGHT" />
     <uses-permission android:name="android.permission.health.READ_EXERCISE" />
@@ -137,6 +144,21 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!-- Home-screen widget (today's recovery + live HR + strap battery). exported=true is
+             required so the launcher can deliver APPWIDGET_UPDATE; it renders only from our own
+             SharedPreferences snapshot. -->
+        <receiver
+            android:name="com.noop.widget.NoopWidgetReceiver"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/noop_widget_info" />
+        </receiver>
 
         <!-- Optional native phone-call alerts. The receiver only reacts to ringing/offhook/idle state
              and never reads the incoming-number extra. Delivery is gated by the Notifications screen

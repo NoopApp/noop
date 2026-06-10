@@ -388,4 +388,28 @@ object Calories {
         }
         return totalKcal to (totalKcal * 4.184)
     }
+
+    /**
+     * APPROXIMATE whole-day total energy estimate (kcal) from the full day's HR
+     * samples. Identical per-second model as [estimateBoutCalories]: below the
+     * activeThreshold (resting + 30% HRR) a sample burns the resting BMR rate, above
+     * it the Keytel active rate. Each HR sample = 1 second of data (1 Hz strap). This
+     * is an on-device estimate from heart rate alone — NOT laboratory calorimetry,
+     * NOT Apple/WHOOP cloud parity, NOT medical advice.
+     *
+     * @param hrSamples the whole day's HR samples (one second each).
+     * @param profile weight/height/age/sex for the BMR + active-EE coefficients.
+     * @param hrmax effective HRmax (bpm); null → 220.
+     * @param restingHR resting HR (bpm); null → 60.
+     * @return total estimated kcal for the day (>= 0).
+     */
+    fun estimateDayCalories(
+        hrSamples: List<HrSample>,
+        profile: UserProfile,
+        hrmax: Double?,
+        restingHR: Double?,
+    ): Double {
+        if (hrSamples.isEmpty()) return 0.0
+        return estimateBoutCalories(hrSamples, profile, hrmax, restingHR).first
+    }
 }

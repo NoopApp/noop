@@ -76,7 +76,9 @@ fun WorkoutsScreen(vm: AppViewModel) {
         // Apple Health export + Health Connect are separate sources (since #34) — include both.
         val apple = vm.repo.workouts("apple-health", 0L, now) +
             vm.repo.workouts("health-connect", 0L, now)
-        val merged = (whoop + apple).sortedByDescending { it.startTs }
+        // Imported sessions (Health Connect / Apple Health) carry no HR of their own — derive
+        // avg/max from the strap's samples over each workout's window so they don't show "–" (#77).
+        val merged = vm.repo.fillWorkoutHrFromStrap((whoop + apple).sortedByDescending { it.startTs })
         allRows = merged
         loaded = true
         range = defaultRange(merged)

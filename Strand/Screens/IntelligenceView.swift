@@ -5,6 +5,7 @@ import StrandDesign
 /// using the WHOOP model shape. Makes the app independent of WHOOP's cloud for live-collected days.
 struct IntelligenceView: View {
     @EnvironmentObject var intelligence: IntelligenceEngine
+    @EnvironmentObject var live: LiveState
 
     var body: some View {
         ScreenScaffold(title: "Intelligence",
@@ -28,6 +29,8 @@ struct IntelligenceView: View {
                     }
                 }
             } else if intelligence.results.isEmpty {
+                // While the strap is mid-offload, say so — "no days" reads as final otherwise (#77).
+                if live.backfilling { SyncingHistoryNote(chunks: live.syncChunksThisSession) }
                 DataPendingNote(
                     title: "Building from your strap",
                     message: "This builds from the strap as it syncs. Strain and sleep appear after you have worn it and slept a night. Recovery needs about a week of nights to learn your baseline, or import your WHOOP export to skip the wait.",

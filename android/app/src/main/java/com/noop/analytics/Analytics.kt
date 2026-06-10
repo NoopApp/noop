@@ -122,9 +122,19 @@ object IllnessWatch {
         }
 
         run {
+            // respRateBpm may be a clean cloud value OR a higher-variance on-device RSA estimate
+            // (WHOOP5 BLE-only). The field carries no source flag, so gate conservatively for BOTH:
+            //  - require enough valid baseline nights for a stable baseline mean (RSA history can be sparse),
+            //  - only compare physiologically plausible sleeping-RR values (~8-25 bpm), rejecting RSA outliers,
+            //  - use a wider +2.5 bpm margin so one noisy night (averaged over the 2 recent days) can't fire,
+            //    while a sustained genuine rise (both recent nights up) still does.
+            val respBase = base.mapNotNull { it.respRateBpm }
             val r = rm { it.respRateBpm }
             val b = bm { it.respRateBpm }
-            if (r != null && b != null && r >= b + 1.5) {
+            val plausible = { v: Double -> v in 8.0..25.0 }
+            if (r != null && b != null && respBase.size >= 10 &&
+                plausible(r) && plausible(b) && r >= b + 2.5
+            ) {
                 flags.add("respiration up")
             }
         }

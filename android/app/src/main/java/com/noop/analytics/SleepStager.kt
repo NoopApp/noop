@@ -646,6 +646,144 @@ object SleepStager {
         return Pair(rate, rrv)
     }
 
+    // ── Respiration rate from R-R (RSA) — WHOOP5 on-wire path ────────────────
+
+    /** RSA tachogram resample rate (Hz). 4 Hz is the standard HRV resample grid. */
+    private const val rsaResampleHz: Double = 4.0
+
+    /** Moving-mean detrend window for the RSA tachogram (seconds). */
+    private const val rsaDetrendWindowS: Double = 8.0
+
+    /** Minimum spacing between breath peaks on the tachogram (seconds) → ≤24 bpm. */
+    private const val rsaMinPeakDistanceS: Double = 2.5
+
+    /** Per-window length for the per-window rate estimate (seconds). */
+    private const val rsaWindowS: Double = 300.0
+
+    /** Physiologic breath-interval band (seconds): 0.1–0.4 Hz = 6–24 breaths/min. */
+    private const val rsaMinBreathIntervalS: Double = 2.5  // 24 bpm
+    private const val rsaMaxBreathIntervalS: Double = 10.0 // 6 bpm
+
+    /**
+     * THE canonical plausible sleeping-respiratory-rate band (bpm). The RSA peak-pick above can yield
+     * 6–8 bpm at its noise floor, but every consumer (ReadinessEngine illness/readiness) only acts on
+     * 8–25 — so a sub-8 estimate used to be persisted-then-silently-ignored. respRateFromRR now clamps
+     * its output to this band (NaN outside it), and ReadinessEngine references this same range, so the
+     * stored value can never disagree with what's acted on. (#78) */
+    val respPlausibleRangeBpm: ClosedFloatingPointRange<Double> = 8.0..25.0
+
+    /**
+     * APPROXIMATE respiratory rate (breaths/min) from the R-R interval stream via
+     * respiratory sinus arrhythmia (RSA), for use when no raw resp ADC channel is
+     * available (WHOOP5 v18 wire is RR-only; resp ADC is WHOOP4 / cloud-only).
+     *
+     * This is an ON-DEVICE ESTIMATE, NOT a cloud/clinical respiration measurement.
+     * It recovers the breathing-modulation of beat-to-beat timing, which tracks but
+     * does not equal a chest-band / capnography rate.
+     *
+     * Pipeline (per matched in-bed session [start, end], unix SECONDS):
+     *   1. Restrict RR rows to ts in [start, end]; range-filter the RR values
+     *      (HrvAnalyzer.rangeFilter) to drop dropouts/ectopics.
+     *   2. Reconstruct beat times by cumulatively summing the kept RR intervals
+     *      from the first in-bed beat, yielding an (irregular) tachogram
+     *      t_k = Σ rr, value_k = rr_k (ms).
+     *   3. Resample the tachogram onto a uniform ~4 Hz grid by linear interpolation.
+     *   4. Detrend: subtract a centered moving mean (rsaDetrendWindowS).
+     *   5. Per ~5-min window: findPeaks (min distance rsaMinPeakDistanceS) on the
+     *      detrended grid, keep peak-to-peak intervals in the 6–24 bpm band, rate =
+     *      60 / median(intervals). Take the median across windows.
+     * Returns NaN when too few intervals survive (honest no-data).
+     */
+    internal fun respRateFromRR(rr: List<RrInterval>, start: Long, end: Long): Double {
+        val nan = Double.NaN
+        if (end <= start) return nan
+
+        // 1. In-bed RR rows in chronological order, range-filtered.
+        val inBed = rr.asSequence()
+            .filter { it.ts in start..end }
+            .sortedBy { it.ts }
+            .map { it.rrMs.toDouble() }
+            .toList()
+        val filtered = HrvAnalyzer.rangeFilter(inBed)
+        if (filtered.size < 30) return nan // need enough beats for any RSA estimate
+
+        // 2. Reconstruct beat times (seconds from session start) by cumulative sum.
+        val beatTimes = DoubleArray(filtered.size)
+        var acc = 0.0
+        for (i in filtered.indices) {
+            acc += filtered[i] / 1000.0
+            beatTimes[i] = acc
+        }
+        val totalSpanS = beatTimes[beatTimes.size - 1]
+        if (totalSpanS < rsaWindowS / 2.0) return nan // < ~2.5 min of beats
+
+        // 3. Resample onto a uniform grid by linear interpolation.
+        val dt = 1.0 / rsaResampleHz
+        val nGrid = (totalSpanS / dt).toInt() + 1
+        if (nGrid < 8) return nan
+        val grid = DoubleArray(nGrid)
+        var seg = 0
+        for (g in 0 until nGrid) {
+            val t = g * dt
+            // advance segment so beatTimes[seg] <= t <= beatTimes[seg+1]
+            while (seg < beatTimes.size - 2 && beatTimes[seg + 1] < t) seg += 1
+            val t0 = beatTimes[seg]
+            val t1 = beatTimes[seg + 1]
+            val v0 = filtered[seg]
+            val v1 = filtered[seg + 1]
+            grid[g] = if (t1 <= t0) v0 else {
+                val frac = ((t - t0) / (t1 - t0)).coerceIn(0.0, 1.0)
+                v0 + frac * (v1 - v0)
+            }
+        }
+
+        // 4. Detrend: subtract a centered moving mean (removes slow LF/baseline drift).
+        val halfW = maxOf(1, (rsaDetrendWindowS * rsaResampleHz / 2.0).roundToInt())
+        val detrended = DoubleArray(nGrid)
+        for (i in 0 until nGrid) {
+            val lo = maxOf(0, i - halfW)
+            val hi = minOf(nGrid - 1, i + halfW)
+            var sum = 0.0
+            for (j in lo..hi) sum += grid[j]
+            val mean = sum / (hi - lo + 1).toDouble()
+            detrended[i] = grid[i] - mean
+        }
+        if (standardDeviation(detrended.toList()) <= 1e-9) return nan // flat → no RSA
+
+        // 5. Per ~5-min window peak-pick → 60/median(breath interval); median across.
+        val minDistSamples = maxOf(2, (rsaMinPeakDistanceS * rsaResampleHz).roundToInt())
+        val windowSamples = maxOf(minDistSamples * 3, (rsaWindowS * rsaResampleHz).roundToInt())
+        val perWindowRates = ArrayList<Double>()
+        var w = 0
+        while (w < nGrid) {
+            val wEnd = minOf(nGrid, w + windowSamples)
+            if (wEnd - w >= minDistSamples * 3) {
+                val winSeg = ArrayList<Double>(wEnd - w)
+                for (k in w until wEnd) winSeg.add(detrended[k])
+                // findPeaks with height = 0.0 selects the positive RSA peaks (one per
+                // breath) on the zero-mean detrended tachogram.
+                val peaks = findPeaks(winSeg, distance = minDistSamples, height = 0.0)
+                if (peaks.size >= 3) {
+                    val intervals = ArrayList<Double>(peaks.size - 1)
+                    for (i in 1 until peaks.size) {
+                        val ivS = (peaks[i] - peaks[i - 1]).toDouble() * dt
+                        if (ivS in rsaMinBreathIntervalS..rsaMaxBreathIntervalS) intervals.add(ivS)
+                    }
+                    if (intervals.size >= 2) {
+                        val med = HrvAnalyzer.median(intervals)
+                        if (med > 0.0) perWindowRates.add(60.0 / med)
+                    }
+                }
+            }
+            w += windowSamples
+        }
+        if (perWindowRates.isEmpty()) return nan
+        // Reject estimates outside the canonical consumer band (NaN = "no usable estimate") so the
+        // persisted value never silently disagrees with ReadinessEngine's plausibility gate. (#78)
+        val median = HrvAnalyzer.median(perWindowRates)
+        return if (median in respPlausibleRangeBpm) median else nan
+    }
+
     /**
      * Local-maxima peak finder mirroring scipy.find_peaks(distance, height):
      * a sample is a peak if strictly greater than both neighbours and ≥ height;

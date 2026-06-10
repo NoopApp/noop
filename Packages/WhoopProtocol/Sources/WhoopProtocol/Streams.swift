@@ -77,6 +77,16 @@ public struct GravitySample: Equatable, Codable {
     }
 }
 
+/// WHOOP 5/MG cumulative u16 step / motion counter (step_motion_counter@57). APPROXIMATE — the @57
+/// step semantics are unverified against the official WHOOP app (#78). Mirrors Android StepSample.
+public struct StepSample: Equatable, Codable {
+    public let ts: Int
+    public let counter: Int
+    public init(ts: Int, counter: Int) {
+        self.ts = ts; self.counter = counter
+    }
+}
+
 public struct Streams: Equatable, Codable {
     public var hr: [HRSample]
     public var rr: [RRInterval]
@@ -84,19 +94,22 @@ public struct Streams: Equatable, Codable {
     public var skinTemp: [SkinTempSample]
     public var resp: [RespSample]
     public var gravity: [GravitySample]
+    public var steps: [StepSample]
     public var events: [WhoopEvent]
     public var battery: [BatterySample]
     public init(hr: [HRSample] = [], rr: [RRInterval] = [],
                 spo2: [SpO2Sample] = [], skinTemp: [SkinTempSample] = [],
                 resp: [RespSample] = [], gravity: [GravitySample] = [],
+                steps: [StepSample] = [],
                 events: [WhoopEvent] = [], battery: [BatterySample] = []) {
         self.hr = hr; self.rr = rr
         self.spo2 = spo2; self.skinTemp = skinTemp; self.resp = resp; self.gravity = gravity
+        self.steps = steps
         self.events = events; self.battery = battery
     }
 
     private enum CodingKeys: String, CodingKey {
-        case hr, rr, spo2, skinTemp = "skin_temp", resp, gravity, events, battery
+        case hr, rr, spo2, skinTemp = "skin_temp", resp, gravity, steps, events, battery
     }
 
     // Custom decode so older fixtures (streams_golden.json / historical_golden.json) that
@@ -109,6 +122,7 @@ public struct Streams: Equatable, Codable {
         skinTemp = try c.decodeIfPresent([SkinTempSample].self, forKey: .skinTemp) ?? []
         resp = try c.decodeIfPresent([RespSample].self, forKey: .resp) ?? []
         gravity = try c.decodeIfPresent([GravitySample].self, forKey: .gravity) ?? []
+        steps = try c.decodeIfPresent([StepSample].self, forKey: .steps) ?? []
         events = try c.decodeIfPresent([WhoopEvent].self, forKey: .events) ?? []
         battery = try c.decodeIfPresent([BatterySample].self, forKey: .battery) ?? []
     }

@@ -23,12 +23,22 @@ class PuffinExperiment(private val prefs: SharedPreferences) {
         get() = prefs.getBoolean(KEY, false)
         set(v) = prefs.edit().putBoolean(KEY, v).apply()
 
+    /** True if the user opted in to recording raw 5/MG backfill frames to a shareable JSONL file
+     *  (default false). SEPARATE from [isEnabled]: probes SEND commands at the strap; capture only
+     *  RECORDS what arrives — different risk profiles, so different switches. (#78 fork) */
+    var isCaptureEnabled: Boolean
+        get() = prefs.getBoolean(KEY_CAPTURE, false)
+        set(v) = prefs.edit().putBoolean(KEY_CAPTURE, v).apply()
+
     companion object {
         /** Persisted preferences file. */
         private const val PREFS = "noop_experiments"
 
         /** Shared key name with the macOS build (`PuffinExperiment.defaultsKey`). */
         const val KEY = "noopPuffinExperiments"
+
+        /** 5/MG raw backfill capture (research aid for the puffin biometric decode). */
+        const val KEY_CAPTURE = "noopWhoop5Capture"
 
         fun from(context: Context): PuffinExperiment =
             PuffinExperiment(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE))

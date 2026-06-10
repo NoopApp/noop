@@ -126,6 +126,17 @@ extension WhoopStore {
                     grav += db.changesCount
                 }
             }
+            // WHOOP5 step counter (#78). Persist-only — the count is not surfaced in the return tuple
+            // (no consumer reads it; keeping the 8-field tuple avoids touching any caller/test).
+            if !streams.steps.isEmpty {
+                let stmt = try db.cachedStatement(sql: """
+                    INSERT INTO stepSample (deviceId, ts, counter) VALUES (?, ?, ?)
+                    ON CONFLICT(deviceId, ts) DO NOTHING
+                    """)
+                for s in streams.steps {
+                    try stmt.execute(arguments: [deviceId, s.ts, s.counter])
+                }
+            }
             return (hr, rr, ev, bat, spo2, skin, resp, grav)
         }
     }
@@ -150,6 +161,10 @@ extension WhoopStore {
             let gravity = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM gravitySample") ?? 0
             return (hr, rr, events, battery, spo2, skinTemp, resp, gravity)
         }
+    }
+
+    public func stepCountForTest() async throws -> Int {
+        try syncRead { db in try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM stepSample") ?? 0 }
     }
 
     public func deviceRowForTest(id: String) async throws -> (mac: String?, name: String?)? {

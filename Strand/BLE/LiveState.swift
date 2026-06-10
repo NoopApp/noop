@@ -46,6 +46,13 @@ public final class LiveState: ObservableObject {
     /// came — i.e. caught up). Drives the sync tile + the staleness nudge.
     @Published public var lastSyncedAt: TimeInterval?
 
+    /// True while a historical offload session is running, so screens can say "Syncing strap
+    /// history…" instead of presenting half-loaded data as final (#77).
+    @Published public var backfilling = false
+    /// Chunks acked during the current offload session — an honest progress signal (total pending is
+    /// unknowable from the protocol, so a count, never a percent).
+    @Published public var syncChunksThisSession: Int = 0
+
     /// Optional hook invoked on every battery update (wired by LiveViewModel to the alert monitor).
     /// Kept as a closure so LiveState stays a plain observable snapshot with no alert dependency.
     public var onBatteryUpdate: ((Double) -> Void)?

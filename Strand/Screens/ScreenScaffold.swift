@@ -43,6 +43,25 @@ struct ComingSoon: View {
 /// A reusable "what shows now vs what needs an import" note. Bold title line plus a
 /// body line, with an info/sparkles SF Symbol. Used for empty/pending data states so
 /// every screen explains the live-now path and the import path with timing.
+/// Pulsing "history sync in progress" line (#77). Shown above a screen's empty state while the
+/// strap's historical offload runs, so a half-loaded screen ("No nights here yet") reads as
+/// in-progress rather than final. Shows the honest live signal — chunks pulled so far — never a
+/// percent (total pending is unknowable from the protocol, so a determinate bar would lie).
+struct SyncingHistoryNote: View {
+    let chunks: Int
+
+    var body: some View {
+        HStack(spacing: 10) {
+            StatePill("Syncing strap history…", tone: .accent, pulsing: true)
+            if chunks > 0 {
+                Text("\(chunks) chunks pulled")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textSecondary)
+            }
+        }
+    }
+}
+
 struct DataPendingNote: View {
     let title: LocalizedStringKey
     let message: LocalizedStringKey

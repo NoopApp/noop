@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.Home
@@ -41,8 +42,12 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.Scaffold
@@ -52,7 +57,10 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -72,7 +80,9 @@ import kotlinx.coroutines.launch
 // MARK: - Navigation model
 //
 // The macOS app's sidebar holds many sections; on Android we mirror that with a
-// ModalNavigationDrawer (hamburger in the top bar) rather than a cramped bottom bar.
+// ModalNavigationDrawer (hamburger in the top bar) for the full grouped list, plus a
+// bottom NavigationBar for the four everyday screens (Today/Trends/Live/Sleep) with a
+// "More" sheet that reuses the same groups — both routes reach every destination.
 // Destinations are grouped exactly as the sidebar groups them. Routes whose screens
 // belong to later waves point at a ComingSoon placeholder so the app compiles today.
 
@@ -141,11 +151,16 @@ private val drawerGroups: List<DrawerGroup> = listOf(
     )),
 )
 
+/** The four everyday screens that earn a permanent bottom tab; everything else lives in More. */
+private val bottomTabs = listOf(
+    Destination.Today, Destination.Trends, Destination.Live, Destination.Sleep,
+)
+
 /**
- * App shell: a [ModalNavigationDrawer] (hamburger in a [TopAppBar] titled with the
- * current screen) driving a [NavHost]. A single [AppViewModel] is created here and
- * shared with every screen, so the BLE connection and cached metrics stay app-wide
- * singletons.
+ * App shell: a bottom [NavigationBar] (Today/Trends/Live/Sleep + a "More" sheet) and a
+ * [ModalNavigationDrawer] (hamburger in a [TopAppBar] titled with the current screen),
+ * both driving one [NavHost]. A single [AppViewModel] is created here and shared with
+ * every screen, so the BLE connection and cached metrics stay app-wide singletons.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -157,6 +172,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
     val backStack by nav.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
     val current = Destination.forRoute(currentRoute)
+    var showMoreSheet by remember { mutableStateOf(false) }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -260,6 +276,32 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                     ),
                 )
             },
+            bottomBar = {
+                // One-thumb navigation for the four everyday screens. The drawer stays — same
+                // destinations, grouped — so nothing moved for existing users; the bar is additive.
+                NavigationBar(containerColor = Palette.surfaceRaised) {
+                    bottomTabs.forEach { dest ->
+                        NavigationBarItem(
+                            selected = current == dest,
+                            onClick = {
+                                if (dest.route != currentRoute) nav.navigateTopLevel(dest.route)
+                            },
+                            icon = { Icon(dest.icon, contentDescription = dest.title) },
+                            label = { Text(dest.title, style = NoopType.footnote) },
+                            colors = navBarItemColors(),
+                        )
+                    }
+                    NavigationBarItem(
+                        // Lights up whenever the current screen ISN'T one of the four tabs, so the
+                        // bar never looks like you're nowhere.
+                        selected = bottomTabs.none { it == current },
+                        onClick = { showMoreSheet = true },
+                        icon = { Icon(Icons.Filled.GridView, contentDescription = "More screens") },
+                        label = { Text("More", style = NoopType.footnote) },
+                        colors = navBarItemColors(),
+                    )
+                }
+            },
         ) { inner ->
             NavHost(
                 navController = nav,
@@ -296,8 +338,74 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 composable(Destination.Settings.route) { SettingsScreen(viewModel) }
             }
         }
+
+        // "More" — every destination, grouped exactly like the drawer, one thumb away. The drawer
+        // itself stays for anyone used to the hamburger; both routes lead to the same screens.
+        if (showMoreSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showMoreSheet = false },
+                containerColor = Palette.surfaceRaised,
+                contentColor = Palette.textPrimary,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 12.dp)
+                        .padding(bottom = 24.dp),
+                ) {
+                    drawerGroups.forEachIndexed { index, group ->
+                        if (index > 0) {
+                            HorizontalDivider(
+                                color = Palette.hairline,
+                                modifier = Modifier.padding(vertical = 8.dp),
+                            )
+                        }
+                        Overline(
+                            group.header,
+                            modifier = Modifier.padding(start = 16.dp, top = 4.dp, bottom = 6.dp),
+                            color = Palette.textTertiary,
+                        )
+                        group.items.forEach { dest ->
+                            val selected = backStack?.destination?.hierarchy
+                                ?.any { it.route == dest.route } == true
+                            NavigationDrawerItem(
+                                selected = selected,
+                                onClick = {
+                                    showMoreSheet = false
+                                    if (dest.route != currentRoute) {
+                                        nav.navigateTopLevel(dest.route)
+                                    }
+                                },
+                                icon = { Icon(dest.icon, contentDescription = null) },
+                                label = { Text(dest.title, style = NoopType.body) },
+                                colors = NavigationDrawerItemDefaults.colors(
+                                    selectedContainerColor = Palette.accentMuted,
+                                    unselectedContainerColor = Palette.surfaceRaised,
+                                    selectedIconColor = Palette.accent,
+                                    unselectedIconColor = Palette.textSecondary,
+                                    selectedTextColor = Palette.textPrimary,
+                                    unselectedTextColor = Palette.textSecondary,
+                                ),
+                                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
+
+/** Bottom-bar item colours, matching the drawer's accent-on-raised selection treatment. */
+@Composable
+private fun navBarItemColors() = NavigationBarItemDefaults.colors(
+    selectedIconColor = Palette.accent,
+    selectedTextColor = Palette.textPrimary,
+    indicatorColor = Palette.accentMuted,
+    unselectedIconColor = Palette.textSecondary,
+    unselectedTextColor = Palette.textSecondary,
+)
 
 /** Navigate to a top-level destination with single-top + state save/restore. */
 private fun NavHostController.navigateTopLevel(route: String) {

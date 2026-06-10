@@ -48,17 +48,26 @@ final class IntelligenceEngine: ObservableObject {
         let up = UserProfile(weightKg: profile.weightKg, heightCm: profile.heightCm,
                              age: Double(profile.age), sex: profile.sex)
 
-        // Baselines from the imported nightly history (ascending). foldHistory winsorizes outliers.
-        let hist = repo.days
-        let hrvBase = Baselines.foldHistory(hist.map { $0.avgHrv }, cfg: hrvCfg)
-        let rhrBase = Baselines.foldHistory(hist.map { $0.restingHr.map(Double.init) }, cfg: rhrCfg)
-        let baselines = AnalyticsEngine.ProfileBaselines(hrv: hrvBase, restingHR: rhrBase)
-
         let maxHR = profile.hrMaxOverride > 0 ? Double(profile.hrMaxOverride) : nil
         let now = Int(Date().timeIntervalSince1970)
-        var out: [Computed] = []
-        var dailies: [DailyMetric] = []
-        var cachedSleep: [CachedSleepSession] = []
+
+        // ── Pass 1: analyse each offloaded night against the IMPORTED-ONLY baseline. For a BLE-only
+        // user `repo.days` (imported) is empty, so the HRV baseline isn't usable yet and recovery is
+        // null here — but each night's avgHrv/restingHr are computed baseline-INDEPENDENTLY, so we
+        // harvest them to SEED the baseline and re-score in pass 2. foldHistory winsorizes outliers;
+        // repo.days is published oldest→newest, so the replay order is already chronological. (#78)
+        let hist = repo.days
+        let hrvBase1 = Baselines.foldHistory(hist.map { $0.avgHrv }, cfg: hrvCfg)
+        let rhrBase1 = Baselines.foldHistory(hist.map { $0.restingHr.map(Double.init) }, cfg: rhrCfg)
+        let baselines1 = AnalyticsEngine.ProfileBaselines(hrv: hrvBase1, restingHR: rhrBase1)
+
+        // Keep each night's small result (daily metrics + sessions), NOT the raw streams — every field
+        // except recovery is baseline-independent, so pass 2 only re-scores the cheap recovery
+        // composite. The hr/rr/resp/gravity arrays go out of scope each iteration (memory stays bounded).
+        var scoredNights: [(daily: DailyMetric, strain: Double?, cachedSleep: [CachedSleepSession])] = []
+        // Nightly values harvested in pass 1, keyed by day, to seed the pass-2 baseline.
+        var nightlyHrvByDay: [String: Double?] = [:]
+        var nightlyRhrByDay: [String: Double?] = [:]
 
         for offset in 0..<maxDays {
             let dayStart = now - offset * 86_400
@@ -75,14 +84,44 @@ final class IntelligenceEngine: ObservableObject {
 
             let res = await Task.detached(priority: .utility) {
                 AnalyticsEngine.analyzeDay(day: day, hr: hr, rr: rr, resp: resp, gravity: grav,
-                                           profile: up, baselines: baselines, maxHROverride: maxHR)
+                                           profile: up, baselines: baselines1, maxHROverride: maxHR)
             }.value
-            out.append(Computed(day: day, recovery: res.recovery, strain: res.strain,
-                                sleepMin: res.daily.totalSleepMin, hrv: res.daily.avgHrv,
-                                rhr: res.daily.restingHr))
-            dailies.append(res.daily)
-            cachedSleep.append(contentsOf: res.cachedSleep)
+            nightlyHrvByDay[res.daily.day] = res.daily.avgHrv
+            nightlyRhrByDay[res.daily.day] = res.daily.restingHr.map(Double.init)
+            scoredNights.append((daily: res.daily, strain: res.strain, cachedSleep: res.cachedSleep))
             await Task.yield()
+        }
+
+        // ── Seed the baseline from the UNION of imported nightly history + the values just computed.
+        // THIS is the BLE-only recovery fix: the "-noop" nightly avgHrv/restingHr finally feed the
+        // baseline so a strap-only user crosses Baselines.minNightsSeed and recovery lights up.
+        // IMPORTED values win per day: write them first, then fill ONLY days the import doesn't cover
+        // (Swift has no putIfAbsent — `dict[day] == nil` is true only when the KEY is absent, so a day
+        // imported with a nil avgHrv stays imported, not overwritten by the computed value).
+        var histHrvByDay: [String: Double?] = [:]
+        var histRhrByDay: [String: Double?] = [:]
+        for d in hist { histHrvByDay[d.day] = d.avgHrv; histRhrByDay[d.day] = d.restingHr.map(Double.init) }
+        for (day, v) in nightlyHrvByDay where histHrvByDay[day] == nil { histHrvByDay[day] = v }
+        for (day, v) in nightlyRhrByDay where histRhrByDay[day] == nil { histRhrByDay[day] = v }
+        let hrvSeq = histHrvByDay.keys.sorted().map { histHrvByDay[$0]! }   // chronological [Double?]
+        let rhrSeq = histRhrByDay.keys.sorted().map { histRhrByDay[$0]! }
+        let baselines2 = AnalyticsEngine.ProfileBaselines(
+            hrv: Baselines.foldHistory(hrvSeq, cfg: hrvCfg),
+            restingHR: Baselines.foldHistory(rhrSeq, cfg: rhrCfg))
+
+        // ── Pass 2: re-score ONLY recovery against the now-seeded baseline (cheap, baseline-dependent);
+        // every other field was computed once in pass 1. Recovery stays nil until the HRV baseline is
+        // usable (≥ minNightsSeed valid nights) — honest cold-start, via RecoveryScorer's usable gate.
+        var out: [Computed] = []
+        var dailies: [DailyMetric] = []
+        var cachedSleep: [CachedSleepSession] = []
+        for night in scoredNights {
+            let recovery = recomputeRecovery(night.daily, baselines2)
+            out.append(Computed(day: night.daily.day, recovery: recovery, strain: night.strain,
+                                sleepMin: night.daily.totalSleepMin, hrv: night.daily.avgHrv,
+                                rhr: night.daily.restingHr))
+            dailies.append(night.daily.withRecovery(recovery))
+            cachedSleep.append(contentsOf: night.cachedSleep)
         }
 
         // Persist the computed scores under a dedicated "-noop" source so the WHOLE dashboard
@@ -100,5 +139,27 @@ final class IntelligenceEngine: ObservableObject {
 
         // Reload the dashboard caches so the freshly computed scores show up immediately.
         if !dailies.isEmpty { await repo.refresh() }
+    }
+
+    /// Re-score ONLY the recovery composite for a day against a (re-seeded) baseline. Every other field
+    /// in `daily` is baseline-independent and already final from pass 1. Returns nil until the HRV
+    /// baseline is usable (RecoveryScorer gates on `hrvBaseline.usable`, i.e. ≥ minNightsSeed valid
+    /// nights) — so the honest null-until-4-nights cold-start is free. Mirrors AnalyticsEngine's own
+    /// recovery call + Android IntelligenceEngine.recomputeRecovery. (#78)
+    private func recomputeRecovery(_ daily: DailyMetric, _ baselines: AnalyticsEngine.ProfileBaselines) -> Double? {
+        guard let hrvVal = daily.avgHrv, let rhrVal = daily.restingHr, let hrvBase = baselines.hrv else { return nil }
+        return RecoveryScorer.recovery(hrv: hrvVal, rhr: Double(rhrVal), resp: nil,
+                                       hrvBaseline: hrvBase, rhrBaseline: baselines.restingHR,
+                                       respBaseline: baselines.resp, sleepPerf: daily.efficiency)
+    }
+}
+
+private extension DailyMetric {
+    /// Rebuild the immutable DailyMetric with a substituted recovery (the struct has no `copy()`). (#78)
+    func withRecovery(_ r: Double?) -> DailyMetric {
+        DailyMetric(day: day, totalSleepMin: totalSleepMin, efficiency: efficiency, deepMin: deepMin,
+                    remMin: remMin, lightMin: lightMin, disturbances: disturbances, restingHr: restingHr,
+                    avgHrv: avgHrv, recovery: r, strain: strain, exerciseCount: exerciseCount,
+                    spo2Pct: spo2Pct, skinTempDevC: skinTempDevC, respRateBpm: respRateBpm)
     }
 }

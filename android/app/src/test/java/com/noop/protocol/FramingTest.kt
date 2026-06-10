@@ -346,4 +346,62 @@ class FramingTest {
         assertArrayEquals(frame, out[0])
         assertTrue(Reassembler(DeviceFamily.WHOOP4).feed(frame).isEmpty())
     }
+
+    // MARK: - WHOOP 5/MG command + decode vectors (real-hardware captures, #78 fork)
+
+    @Test
+    fun puffinCommandFrame_historicalCommandsMatchGooseBytes() {
+        // CRC-pinned against frames a real WHOOP 5 acked (Goose-compatible). Our [0x00] default
+        // payload pads identically to an empty payload (pad4), so both forms produce these bytes.
+        val getRange = Framing.puffinCommandFrame(
+            cmd = CommandNumber.GET_DATA_RANGE.rawValue, seq = 1, payload = byteArrayOf(),
+        )
+        val sendHistorical = Framing.puffinCommandFrame(
+            cmd = CommandNumber.SEND_HISTORICAL_DATA.rawValue, seq = 2, payload = byteArrayOf(),
+        )
+        assertEquals("aa0108000001e67123012200dbf3b335", hex(getRange))
+        assertEquals("aa0108000001e6712302160075bedf8c", hex(sendHistorical))
+    }
+
+    @Test
+    fun whoop5_commandResponse_decodesAtPuffinOffsets() {
+        // Synthetic puffin COMMAND_RESPONSE round-trip: GET_DATA_RANGE, resp_seq=7, result=SUCCESS.
+        val frame = Framing.puffinCommandFrame(
+            cmd = CommandNumber.GET_DATA_RANGE.rawValue,
+            seq = 0,
+            payload = byteArrayOf(7, 1),
+            type = PacketType.COMMAND_RESPONSE.rawValue,
+        )
+        val parsed = Framing.parseFrame(frame, DeviceFamily.WHOOP5)
+        assertEquals("COMMAND_RESPONSE", parsed.typeName)
+        assertEquals("GET_DATA_RANGE(34)", parsed.parsed["resp_cmd"])
+        assertEquals(7, parsed.parsed["resp_seq"])
+        assertEquals("SUCCESS(1)", parsed.parsed["result"])
+    }
+
+    @Test
+    fun whoop5_event_decodesAtPlus4AndPreservesPayload() {
+        // Real 5/MG capture: uncatalogued event 0x1D(29) with a 16-byte payload — kept as hex so
+        // protocol research can classify it later.
+        val frame = fromHex("aa011c00010023d130c61d00e61ab7698a390c000e0000000000e8020b000100d2803585")
+        val parsed = Framing.parseFrame(frame, DeviceFamily.WHOOP5)
+        assertEquals("EVENT", parsed.typeName)
+        assertEquals(true, parsed.crcOk)
+        assertEquals("0x1D(29)", parsed.parsed["event"])
+        assertEquals(1773607654, parsed.parsed["event_timestamp"])
+        assertEquals("8a390c000e0000000000e8020b000100", parsed.parsed["event_payload_hex"])
+    }
+
+    @Test
+    fun whoop5_consoleLogs_extractsText() {
+        // Real 5/MG capture: the strap narrating its own history transfer. NUL-trimmed.
+        val frame = fromHex(
+            "aa014400010030b1329f02005319b769a93e340001486973746f726963616c20446174610a20" +
+                "35352c20323538313935393a20424c453a2068697374207472616e7366657220730039d91fe2",
+        )
+        val parsed = Framing.parseFrame(frame, DeviceFamily.WHOOP5)
+        assertEquals("CONSOLE_LOGS", parsed.typeName)
+        assertEquals(true, parsed.crcOk)
+        assertEquals("Historical Data\n 55, 2581959: BLE: hist transfer s", parsed.parsed["console"])
+    }
 }

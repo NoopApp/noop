@@ -180,6 +180,16 @@ object Framing {
     private fun commandLabel(v: Int): String =
         CommandNumber.fromRaw(v)?.let { "${it.name}($v)" } ?: hexLabel(v)
 
+    /** 5/MG COMMAND_RESPONSE result codes. 3=UNSUPPORTED matches our own MG haptics-rejection
+     *  capture (#48); 2=PENDING precedes SUCCESS on GET_DATA_RANGE (hardware-confirmed, #78 fork). */
+    private fun commandResultLabel(v: Int): String = when (v) {
+        0 -> "FAILURE(0)"
+        1 -> "SUCCESS(1)"
+        2 -> "PENDING(2)"
+        3 -> "UNSUPPORTED(3)"
+        else -> hexLabel(v)
+    }
+
     private fun hexLabel(v: Int): String = "0x%02X(%d)".format(v, v)
 
     // MARK: - parse
@@ -230,9 +240,89 @@ object Framing {
         // their per-type 5.0 offsets are confirmed on hardware — we don't invent offsets.
         when (name) {
             "REALTIME_DATA" -> decodeRealtimeWhoop5(frame, parsed)
+            "METADATA" -> decodeMetadataWhoop5(frame, parsed)
+            "EVENT" -> decodeEventWhoop5(frame, parsed)
+            "COMMAND_RESPONSE" -> decodeCommandResponseWhoop5(frame, parsed)
+            "CONSOLE_LOGS" -> decodeConsoleLogsWhoop5(frame, parsed)
             else -> Unit
         }
         return ParsedFrame(ok = true, crcOk = check.crc32Ok, typeName = name, parsed = parsed)
+    }
+
+    /**
+     * EVENT (type 48) for WHOOP 5.0/MG — the 4.0 layout + 4: event@10 (u8, EventNumber),
+     * event_timestamp@12 (u32), opaque payload bytes @16..size-4 (kept as hex for protocol research —
+     * real captures show uncatalogued events, e.g. 0x1D(29) with a 16-byte payload). For
+     * BATTERY_LEVEL the 4.0 payload decode shifts with it: soc%=u16@21/10, mV=u16@25, charging@30
+     * bit0 (mirrors Swift Interpreter's whoop5 event decode; all gated, fail closed). (#78 fork)
+     */
+    private fun decodeEventWhoop5(frame: ByteArray, parsed: MutableMap<String, Any?>) {
+        val evVal = frame.u8(10) ?: return
+        parsed["event"] = eventLabel(evVal)
+        frame.u32(12)?.let { parsed["event_timestamp"] = it.toInt() }
+        val payEnd = frame.size - 4
+        if (payEnd > 16) {
+            parsed["event_payload_hex"] = frame.copyOfRange(16, payEnd)
+                .joinToString("") { "%02x".format(it) }
+        }
+        if (EventNumber.fromRaw(evVal) == EventNumber.BATTERY_LEVEL) {
+            frame.u16(21)?.let { raw -> if (raw <= 1100) parsed["battery_pct"] = raw.toDouble() / 10.0 }
+            frame.u16(25)?.let { mv -> if (mv in 3000..4300) parsed["battery_mV"] = mv }
+            frame.u8(30)?.let { ch -> if (ch <= 1) parsed["battery_charging"] = ch and 1 }
+        }
+    }
+
+    /**
+     * COMMAND_RESPONSE (puffin type 36 alias) for WHOOP 5.0/MG: resp_cmd@10 (u8, CommandNumber),
+     * resp_seq@11 (u8), result@12 (u8 → FAILURE/SUCCESS/PENDING/UNSUPPORTED). GET_DATA_RANGE
+     * typically answers PENDING then SUCCESS; the result codes are hardware-confirmed (#78 fork,
+     * and 3=UNSUPPORTED matches our own MG haptics rejection, #48). GET_BATTERY_LEVEL carries a
+     * direct percent at @13 (gated ≤100, fail closed; Swift parity — unused until the 5/MG
+     * allowlist grows).
+     */
+    private fun decodeCommandResponseWhoop5(frame: ByteArray, parsed: MutableMap<String, Any?>) {
+        val cmd = frame.u8(10) ?: return
+        parsed["resp_cmd"] = commandLabel(cmd)
+        frame.u8(11)?.let { parsed["resp_seq"] = it }
+        frame.u8(12)?.let { parsed["result"] = commandResultLabel(it) }
+        if (CommandNumber.fromRaw(cmd) == CommandNumber.GET_BATTERY_LEVEL) {
+            frame.u8(13)?.let { pct -> if (pct <= 100) parsed["battery_pct"] = pct.toDouble() }
+        }
+    }
+
+    /**
+     * CONSOLE_LOGS (type 50) for WHOOP 5.0/MG: 13-byte record header after the inner type byte,
+     * then UTF-8 console text @21..size-4 with an optional NUL terminator. The strap's own
+     * diagnostics channel — it narrates history syncs ("BLE: PullStats: Data: N, Events: N…",
+     * "RTC timestamp … is invalid; not saving data to flash"), which is how the clock-before-history
+     * requirement was discovered. Capped at 2 KB (matches the Swift PostHooks console hardening).
+     * (#78 fork, real-frame verified)
+     */
+    private fun decodeConsoleLogsWhoop5(frame: ByteArray, parsed: MutableMap<String, Any?>) {
+        val payEnd = frame.size - 4
+        if (payEnd <= 21) return
+        val text = frame.copyOfRange(21, payEnd)
+            .toString(Charsets.UTF_8)
+            .trimEnd('\u0000')
+        if (text.isNotEmpty()) parsed["console"] = text.take(2048)
+    }
+
+    /**
+     * METADATA (PUFFIN_METADATA, type 56) for WHOOP 5.0/MG — the 4.0 METADATA layout + 4 (the inner
+     * record starts at byte 8 vs 4): meta_type@10 (u8), and for a HISTORY_END additionally unix@11
+     * (u32), subsec@15 (u16), trim_cursor@21 (u32). Without this, parseWhoop5 left every 5/MG METADATA
+     * frame field-less, so classifyHistoricalMeta could never recognise HISTORY_END/COMPLETE → the
+     * Backfiller never acked/trimmed → 5/MG offload never completed. Offsets verified against real
+     * WHOOP 5 HISTORY_END frames (Swift decodeWhoop5Metadata, Interpreter.swift:407). (#78)
+     */
+    private fun decodeMetadataWhoop5(frame: ByteArray, parsed: MutableMap<String, Any?>) {
+        val mt = frame.u8(10) ?: return
+        parsed["meta_type"] = metaLabel(mt)
+        // Only a HISTORY_END carries unix/subsec/trim; the u-reads null out on the shorter
+        // START/COMPLETE frames, so classifyHistoricalMeta keys those off meta_type alone.
+        frame.u32(11)?.let { parsed["unix"] = it.toInt() }
+        frame.u16(15)?.let { parsed["subsec"] = it }
+        frame.u32(21)?.let { parsed["trim_cursor"] = it.toInt() }
     }
 
     /**

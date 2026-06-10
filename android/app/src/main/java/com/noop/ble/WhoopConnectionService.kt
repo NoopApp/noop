@@ -16,12 +16,16 @@ import androidx.core.content.ContextCompat
 import com.noop.NoopApplication
 import com.noop.R
 import com.noop.ui.MainActivity
+import com.noop.widget.WidgetSnapshot
+import com.noop.widget.WidgetSnapshotStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -53,6 +57,7 @@ class WhoopConnectionService : Service() {
     private var notifyJob: Job? = null
 
     private val ble get() = (application as NoopApplication).ble
+    private val repo get() = (application as NoopApplication).repository
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -69,15 +74,51 @@ class WhoopConnectionService : Service() {
         // Must call startForeground promptly after startForegroundService(). If it fails (e.g. the
         // API 34 connectedDevice type needs BLUETOOTH_CONNECT and the user denied it) we stop cleanly
         // rather than crash — the connection itself keeps working in the foreground regardless.
-        if (!startForegroundCompat(buildNotification(ble.state.value))) {
+        if (!startForegroundCompat(buildNotification(ble.state.value, null))) {
             stopSelf()
             return START_NOT_STICKY
         }
 
-        // Keep the ongoing notification in step with the live connection state (single collector).
+        // Keep the ongoing notification in step with the live connection state AND today's recovery
+        // (the 15-min IntelligenceEngine recompute), so it re-posts when either changes — a glanceable
+        // poor-man's Live Activity (#42). daysMergedFlow is the same merged store the dashboard reads.
         notifyJob?.cancel()
         notifyJob = scope.launch {
-            ble.state.collectLatest { state -> postNotification(state) }
+            combine(
+                ble.state,
+                // Defence-in-depth: a Room/disk error in this flow would otherwise propagate uncaught
+                // out of scope.launch and kill the process — the FGS exists to protect the connection,
+                // not to take it down. (Audited during #82, which proved unrelated/unreproducible —
+                // this guard is belt-and-braces, not a diagnosed fix.) After catch{emit} the inner
+                // flow completes; combine keeps running on ble.state with days frozen.
+                repo.daysMergedFlow("my-whoop").catch { emit(emptyList()) },
+            ) { state, days ->
+                val todayKey = java.time.LocalDate.now().toString()
+                state to days.lastOrNull { it.day == todayKey }?.recovery
+            }.catch { /* belt-and-braces: a frozen notification beats a dead process */ }
+                // conflate + collect, NOT collectLatest (#82): the widget push suspends in Glance
+                // machinery longer than the live-HR emission interval, so collectLatest cancelled
+                // every push mid-flight and the widget starved on stale data the moment HR started
+                // streaming. Conflation still processes only the latest value — just without the axe.
+                .conflate()
+                .collect { (state, recovery) ->
+                postNotification(state, recovery)
+                // Feed the home-screen widget from the same stream — this service is its heartbeat
+                // while the app UI is closed. Throttled + no-op without a placed widget (the store
+                // checks both); runCatching so a Glance hiccup never tears down the connection.
+                runCatching {
+                    WidgetSnapshotStore.push(
+                        this@WhoopConnectionService,
+                        WidgetSnapshot(
+                            recoveryPct = recovery?.roundToInt(),
+                            heartRate = state.heartRate,
+                            batteryPct = state.batteryPct?.roundToInt(),
+                            connected = state.connected,
+                            updatedAtMs = System.currentTimeMillis(),
+                        ),
+                    )
+                }
+            }
         }
 
         // START_NOT_STICKY: the FGS's job is to keep this process *alive* (which it does while
@@ -99,16 +140,16 @@ class WhoopConnectionService : Service() {
         ServiceCompat.startForeground(this, NOTIF_ID, notification, type)
     }.isSuccess
 
-    private fun postNotification(state: LiveState) {
+    private fun postNotification(state: LiveState, recoveryPct: Double? = null) {
         // Defensive: a notify() throw (OEM quirk, revoked POST_NOTIFICATIONS on some ROMs) must not
         // crash the collector and tear down the connection we exist to keep alive.
         runCatching {
             val mgr = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            mgr.notify(NOTIF_ID, buildNotification(state))
+            mgr.notify(NOTIF_ID, buildNotification(state, recoveryPct))
         }
     }
 
-    private fun buildNotification(state: LiveState): Notification {
+    private fun buildNotification(state: LiveState, recoveryPct: Double?): Notification {
         val title = when {
             !state.connected -> "Reconnecting to your WHOOP…"
             state.heartRate != null -> "${state.heartRate} bpm"
@@ -116,6 +157,7 @@ class WhoopConnectionService : Service() {
         }
         val detail = buildList {
             add(if (state.connected) "Streaming in the background" else "Keeping the link open")
+            recoveryPct?.let { add("Recovery ${it.roundToInt()}%") }
             state.batteryPct?.let { add("Strap ${it.roundToInt()}%") }
         }.joinToString("  ·  ")
 

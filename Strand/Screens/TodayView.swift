@@ -24,6 +24,7 @@ import Foundation
 
 struct TodayView: View {
     @EnvironmentObject var repo: Repository
+    @EnvironmentObject var live: LiveState
 
     // 14-day sparkline series, keyed by metric key. Loaded once in .task.
     @State private var sparks: [String: [Double]] = [:]
@@ -44,6 +45,8 @@ struct TodayView: View {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                 HealthAlertBanner()
                 if repo.today?.recovery == nil {
+                    // While the strap is mid-offload, say so — empty tiles read as final otherwise (#77).
+                    if live.backfilling { SyncingHistoryNote(chunks: live.syncChunksThisSession) }
                     DataPendingNote(
                         title: "Live now. Your scores are building.",
                         message: "Your live heart rate is working from the strap, and recovery, strain and sleep build from it over your next few nights of wear, sharpening as it learns your baseline. Want your full history instantly? Import your WHOOP export in Data Sources and it backfills in about a minute."

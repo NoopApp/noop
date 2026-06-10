@@ -109,6 +109,31 @@ fun DataPendingNote(title: String, body: String, modifier: Modifier = Modifier) 
     }
 }
 
+// MARK: - SyncingHistoryNote — pulsing "history sync in progress" line (#77)
+//
+// Shown above a screen's empty state while the strap's historical offload runs, so a half-loaded
+// screen ("No nights here yet") reads as in-progress rather than final. Shows the honest live
+// signal — chunks pulled so far — never a percent (total pending is unknowable from the protocol,
+// so a determinate bar would lie).
+
+@Composable
+fun SyncingHistoryNote(chunks: Int, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        StatePill("Syncing strap history…", tone = StrandTone.Accent, pulsing = true)
+        if (chunks > 0) {
+            Text(
+                "$chunks chunks pulled",
+                style = NoopType.footnote,
+                color = Palette.textSecondary,
+            )
+        }
+    }
+}
+
 // MARK: - Overline label (ALL-CAPS, semibold, +0.8 tracking, secondary)
 
 @Composable

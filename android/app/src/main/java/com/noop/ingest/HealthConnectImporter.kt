@@ -237,6 +237,38 @@ object HealthConnectImporter {
                 // Count exercises per local day on the start day for the WHOOP daily backfill.
                 bucket(dayOf(r.startTime)).exerciseCount += 1
             }
+
+            // Fill per-workout HR (#77): an ExerciseSessionRecord carries no summary HR, so avg/max
+            // were stored null and every imported workout showed "–". Intersect each session's window
+            // with its HeartRateRecord samples — a targeted per-session read, bounded by workout count
+            // (the day-aggregate HeartRateRecord pass above streams the full range and must not be
+            // buffered). readAll swallows a per-session failure, so one bad session can't fail the
+            // import. ≥60 samples (~1 min) required so a few strays can't fabricate an average.
+            for (i in workouts.indices) {
+                val w = workouts[i]
+                if (w.endTs <= w.startTs) continue
+                var sum = 0L
+                var n = 0L
+                var max = 0L
+                readAll(
+                    client, HeartRateRecord::class,
+                    TimeRangeFilter.between(
+                        Instant.ofEpochSecond(w.startTs), Instant.ofEpochSecond(w.endTs)
+                    ),
+                ) { hr ->
+                    for (s in hr.samples) {
+                        sum += s.beatsPerMinute
+                        n += 1
+                        if (s.beatsPerMinute > max) max = s.beatsPerMinute
+                    }
+                }
+                if (n >= 60) {
+                    workouts[i] = w.copy(
+                        avgHr = round(sum.toDouble() / n).toInt(),
+                        maxHr = max.toInt(),
+                    )
+                }
+            }
         } catch (e: Exception) {
             return ImportSummary.failure(SOURCE, "Health Connect read failed: ${e.message}")
         }

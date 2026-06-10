@@ -182,6 +182,7 @@ fun SettingsScreen(vm: AppViewModel) {
     // SharedPreferences isn't reactive, so the Switch drives a local mutableState that the store reads.
     val puffinExperiment = remember { PuffinExperiment.from(context) }
     var puffinExperiments by remember { mutableStateOf(puffinExperiment.isEnabled) }
+    var puffinCapture by remember { mutableStateOf(puffinExperiment.isCaptureEnabled) }
 
     // "Keep connected in the background" — drives WhoopConnectionService (foreground service). Default
     // on. SharedPreferences isn't reactive, so the Switch mirrors into a local state.
@@ -490,6 +491,46 @@ fun SettingsScreen(vm: AppViewModel) {
                     style = NoopType.caption,
                     color = Palette.textTertiary,
                 )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    Text(
+                        "Record 5/MG raw capture (research)",
+                        style = NoopType.subhead,
+                        color = Palette.textPrimary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Switch(
+                        checked = puffinCapture,
+                        onCheckedChange = {
+                            puffinCapture = it
+                            puffinExperiment.isCaptureEnabled = it
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Palette.surfaceBase,
+                            checkedTrackColor = Palette.accent,
+                            uncheckedThumbColor = Palette.textSecondary,
+                            uncheckedTrackColor = Palette.surfaceInset,
+                            uncheckedBorderColor = Palette.hairline,
+                        ),
+                        modifier = Modifier.semantics {
+                            contentDescription = "Record 5/MG raw capture"
+                        },
+                    )
+                }
+                Text(
+                    "Records the raw frames of each 5/MG history sync to a file on this phone, so you can share them and help NOOP learn to decode 5/MG sleep, recovery and strain. The file contains raw biometric frames (heart rate, R-R, skin temperature, motion) and the strap's own diagnostic text. Nothing leaves the phone unless you share it. Off by default.",
+                    style = NoopType.caption,
+                    color = Palette.textTertiary,
+                )
+                OutlinedButton(
+                    onClick = { LogExport.shareWhoop5Capture(context) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Palette.textSecondary),
+                ) { Text("Share 5/MG capture (for the decode effort)", style = NoopType.captionNumber) }
             }
         }
 

@@ -69,6 +69,7 @@ fun LiveScreen(viewModel: AppViewModel) {
             // encryptedBond → green "Bonded"; the 5/MG live-HR shortcut (bonded but no genuine encrypted
             // bond) → amber "Live HR (not fully paired)" so users know the encrypted channel isn't up (#69).
             val (label, tone) = when {
+                live.encryptedBond && live.backfilling -> "Bonded · syncing" to StrandTone.Accent
                 live.encryptedBond -> "Bonded" to StrandTone.Positive
                 live.bonded -> "Live HR (not fully paired)" to StrandTone.Warning
                 live.connected -> "Connected" to StrandTone.Warning
@@ -85,6 +86,29 @@ fun LiveScreen(viewModel: AppViewModel) {
                 color = Palette.textSecondary,
                 modifier = Modifier.fillMaxWidth(),
             )
+        }
+
+        // Honest sync outcome for a cloud-free app: a non-silent error if the last offload stalled,
+        // else a relative "history synced N ago". Hidden while actively syncing (the pill says so). (PR #85)
+        if (!live.backfilling) {
+            val syncError = live.lastSyncError
+            if (syncError != null) {
+                Text(
+                    syncError,
+                    style = NoopType.footnote,
+                    color = Palette.statusWarning,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            } else {
+                live.lastSyncAt?.let { at ->
+                    Text(
+                        "History synced ${relativeAgo(at)}",
+                        style = NoopType.footnote,
+                        color = Palette.textTertiary,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
         }
 
         // Big HR card.
@@ -264,4 +288,18 @@ private fun batteryColor(pct: Double?): Color = when {
     pct < 15 -> Palette.statusCritical
     pct < 30 -> Palette.statusWarning
     else -> Palette.accent
+}
+
+/**
+ * Coarse relative-time label for the "History synced N ago" sync-status line. Pure + unit-tested
+ * (RelativeAgoTest); [nowSec] is injectable for determinism. Buckets to just-now / min / h / d. (PR #85)
+ */
+internal fun relativeAgo(epochSec: Long, nowSec: Long = System.currentTimeMillis() / 1000L): String {
+    val d = (nowSec - epochSec).coerceAtLeast(0)
+    return when {
+        d < 60L -> "just now"
+        d < 3600L -> "${d / 60L} min ago"
+        d < 86_400L -> "${d / 3600L} h ago"
+        else -> "${d / 86_400L} d ago"
+    }
 }

@@ -140,4 +140,63 @@ class AnalyticsTest {
         )
         assertNull(IllnessWatch.evaluate(baseline + recent))
     }
+
+    @Test
+    fun illness_noisyRsaRespSingleOffNightDoesNotFire() {
+        // Baseline resp ~15 bpm with realistic RSA night-to-night noise (alternating 14/16, sd>0),
+        // stable RHR/HRV/skin-temp so resp is the ONLY candidate flag. Recent two days: one quiet
+        // night at baseline and one +3 bpm RSA spike -> recent 2-day mean ~16.5, only ~+1.5 over
+        // baseline ~15, below the +2.5 margin -> resp must NOT flag, so evaluate() returns null.
+        val baseline = (0 until 31).map {
+            day(
+                "2026-01-%02d".format(it + 1),
+                restingHr = 50, avgHrv = 60.0, skinTempDevC = 0.0,
+                respRateBpm = if (it % 2 == 0) 14.0 else 16.0,
+            )
+        }
+        val recent = listOf(
+            day("2026-02-01", restingHr = 50, avgHrv = 60.0, skinTempDevC = 0.0, respRateBpm = 15.0),
+            day("2026-02-02", restingHr = 50, avgHrv = 60.0, skinTempDevC = 0.0, respRateBpm = 18.0),
+        )
+        assertNull(IllnessWatch.evaluate(baseline + recent))
+    }
+
+    @Test
+    fun illness_sustainedRespRiseStillFires() {
+        // Same ~15 bpm plausible baseline, but BOTH recent nights are genuinely elevated (~18.5),
+        // ~+3.5 over baseline (>= +2.5 margin) -> resp flags. Paired with an elevated RHR so two
+        // flags fire and a banner is produced; assert it mentions respiration.
+        val baseline = (0 until 31).map {
+            day(
+                "2026-01-%02d".format(it + 1),
+                restingHr = 50, avgHrv = 60.0, skinTempDevC = 0.0,
+                respRateBpm = if (it % 2 == 0) 14.0 else 16.0,
+            )
+        }
+        val recent = listOf(
+            day("2026-02-01", restingHr = 58, avgHrv = 60.0, skinTempDevC = 0.0, respRateBpm = 18.0),
+            day("2026-02-02", restingHr = 58, avgHrv = 60.0, skinTempDevC = 0.0, respRateBpm = 19.0),
+        )
+        val msg = IllnessWatch.evaluate(baseline + recent)
+        assertNotNull(msg)
+        assertTrue(msg!!.contains("respiration"))
+    }
+
+    @Test
+    fun illness_implausibleRespOutlierDoesNotFire() {
+        // Degenerate RSA windows can yield implausible resp values. A baseline ~15 with recent
+        // nights pinned at ~35 bpm (outside the 8-25 sanity band) must NOT fire the resp flag.
+        val baseline = (0 until 31).map {
+            day(
+                "2026-01-%02d".format(it + 1),
+                restingHr = 50, avgHrv = 60.0, skinTempDevC = 0.0,
+                respRateBpm = if (it % 2 == 0) 14.0 else 16.0,
+            )
+        }
+        val recent = listOf(
+            day("2026-02-01", restingHr = 50, avgHrv = 60.0, skinTempDevC = 0.0, respRateBpm = 35.0),
+            day("2026-02-02", restingHr = 50, avgHrv = 60.0, skinTempDevC = 0.0, respRateBpm = 35.0),
+        )
+        assertNull(IllnessWatch.evaluate(baseline + recent))
+    }
 }

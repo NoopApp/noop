@@ -69,6 +69,7 @@ import kotlin.math.roundToInt
 @Composable
 fun SleepScreen(vm: AppViewModel) {
     val days by vm.recentDays.collectAsStateWithLifecycle()
+    val live by vm.live.collectAsStateWithLifecycle()
 
     // The latest sleep session (for onset/wake clock + stored efficiency). Loaded once
     // from the repo; the my-whoop daily metrics drive everything else and arrive via the
@@ -88,6 +89,8 @@ fun SleepScreen(vm: AppViewModel) {
 
     ScreenScaffold(title = "Sleep", subtitle = "Last night, read in two seconds.") {
         if (model == null) {
+            // While the strap is mid-offload, say so — "No nights" reads as final otherwise (#77).
+            if (live.backfilling) SyncingHistoryNote(chunks = live.syncChunksThisSession)
             SleepEmptyState()
         } else {
             Hero(model)

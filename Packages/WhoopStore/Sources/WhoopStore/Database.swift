@@ -214,6 +214,18 @@ extension WhoopStore {
             try db.create(index: "idx_metricSeries_device_key_day",
                           on: "metricSeries", columns: ["deviceId", "key", "day"])
         }
+
+        // v10 (#78): WHOOP5 step_motion_counter persistence (macOS parity with Android's MIGRATION_2_3).
+        // Additive only — the strap trims acked history and won't re-send it, so a destructive rebuild
+        // would lose it; this preserves every existing row. No `synced` column (unused; see StreamStore).
+        migrator.registerMigration("v10") { db in
+            try db.create(table: "stepSample") { t in
+                t.column("deviceId", .text).notNull()
+                t.column("ts", .integer).notNull()
+                t.column("counter", .integer).notNull()
+                t.primaryKey(["deviceId", "ts"])
+            }
+        }
         return migrator
     }
 }

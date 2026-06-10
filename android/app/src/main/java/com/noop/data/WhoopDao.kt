@@ -53,6 +53,9 @@ interface WhoopDao {
     suspend fun insertSkinTemp(rows: List<SkinTempSample>): List<Long>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertSteps(rows: List<StepSample>): List<Long>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertResp(rows: List<RespSample>): List<Long>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
@@ -96,6 +99,14 @@ interface WhoopDao {
     )
     suspend fun hrBuckets(deviceId: String, from: Long, to: Long, bucketSeconds: Long): List<HrBucket>
 
+    /** Aggregate HR over a window (one indexed (deviceId,ts) range scan — no row materialisation,
+     *  no [hrSamples] LIMIT truncation). Backs the imported-workout HR fallback (#77). */
+    @Query(
+        "SELECT COUNT(*) AS n, AVG(bpm) AS avg, MAX(bpm) AS max FROM hrSample " +
+            "WHERE deviceId = :deviceId AND ts >= :from AND ts <= :to"
+    )
+    suspend fun hrWindowStats(deviceId: String, from: Long, to: Long): HrWindowStats
+
     @Query(
         "SELECT * FROM rrInterval WHERE deviceId = :deviceId AND ts >= :from AND ts <= :to " +
             "ORDER BY ts ASC, rrMs ASC LIMIT :limit"
@@ -125,6 +136,12 @@ interface WhoopDao {
             "ORDER BY ts ASC LIMIT :limit"
     )
     suspend fun skinTempSamples(deviceId: String, from: Long, to: Long, limit: Int): List<SkinTempSample>
+
+    @Query(
+        "SELECT * FROM stepSample WHERE deviceId = :deviceId AND ts >= :from AND ts <= :to " +
+            "ORDER BY ts ASC LIMIT :limit"
+    )
+    suspend fun stepSamples(deviceId: String, from: Long, to: Long, limit: Int): List<StepSample>
 
     @Query(
         "SELECT * FROM respSample WHERE deviceId = :deviceId AND ts >= :from AND ts <= :to " +
@@ -227,6 +244,11 @@ interface WhoopDao {
     )
     suspend fun appleDaily(deviceId: String, from: String, to: String): List<AppleDaily>
 
+    /** Delete a computed source's workouts of a given [sport] whose startTs is in [from, to]
+     *  (makes detected-workout re-derivation idempotent). (#78) */
+    @Query("DELETE FROM workout WHERE deviceId = :deviceId AND sport = :sport AND startTs >= :from AND startTs <= :to")
+    suspend fun deleteWorkoutsBySport(deviceId: String, sport: String, from: Long, to: Long)
+
     // MARK: - Frontier / stats (Reads.swift)
 
     /** Max HR sample ts for a device, or null if none — the biometric data frontier. */
@@ -239,6 +261,7 @@ interface WhoopDao {
     @Query("SELECT COUNT(*) FROM battery") suspend fun countBattery(): Int
     @Query("SELECT COUNT(*) FROM spo2Sample") suspend fun countSpo2(): Int
     @Query("SELECT COUNT(*) FROM skinTempSample") suspend fun countSkinTemp(): Int
+    @Query("SELECT COUNT(*) FROM stepSample") suspend fun countSteps(): Int
     @Query("SELECT COUNT(*) FROM respSample") suspend fun countResp(): Int
     @Query("SELECT COUNT(*) FROM gravitySample") suspend fun countGravity(): Int
 

@@ -99,6 +99,18 @@ class ReadinessEngineTest {
     }
 
     @Test
+    fun respRate_implausibleOutlierProducesNoSignal() {
+        // A physiologically implausible RSA value (outside the 8-25 bpm sanity band) must produce
+        // NO resp signal, even though it is far above baseline — this rejects degenerate RSA outputs
+        // so they can't drive readiness toward STRAINED/RUNDOWN. (respRateRiseFlags above confirms a
+        // genuine in-band elevation still flags after the threshold raise.)
+        val r = ReadinessEngine.evaluate(
+            baseline(todayHrv = 60.0, todayRhr = 52, todayStrain = 10.0, todayResp = 40.0)
+        )
+        assertTrue(r.signals.none { it.key == "respRate" })
+    }
+
+    @Test
     fun explicitTodayWithoutMatchingRowIsInsufficient() {
         // Stale historical import: newest row is 2024-03-29, but the device's real calendar day is later.
         // An explicit `today` with no matching row must read INSUFFICIENT — NOT synthesize off the newest

@@ -53,6 +53,11 @@ public func extractHistoricalStreams(_ parsed: [ParsedFrame],
             if let raw = p["skin_temp_raw"]?.intValue {
                 out.skinTemp.append(SkinTempSample(ts: ts, raw: raw))
             }
+            // step_motion_counter@57 is the WHOOP5 cumulative u16 counter — decoded but, until now,
+            // dropped on macOS (Android persists it). APPROXIMATE; semantics unverified vs the app (#78).
+            if let c = p["step_motion_counter"]?.intValue {
+                out.steps.append(StepSample(ts: ts, counter: c))
+            }
             if let raw = p["resp_rate_raw"]?.intValue {
                 out.resp.append(RespSample(ts: ts, raw: raw))
             }

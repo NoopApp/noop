@@ -56,6 +56,15 @@ data class HrBucket(
     val avgBpm: Double,
 )
 
+/** Aggregate HR over a time window — sample count + avg/max bpm. Query result of
+ *  [WhoopDao.hrWindowStats], not a table. Used to derive a workout's HR from strap samples when
+ *  the imported session carries none (#77). avg/max are null when n == 0. */
+data class HrWindowStats(
+    val n: Long,
+    val avg: Double?,
+    val max: Int?,
+)
+
 /** R-R interval. Swift `rrInterval` (v1). PK (deviceId, ts, rrMs) — multiple R-R per ts. */
 @Entity(tableName = "rrInterval", primaryKeys = ["deviceId", "ts", "rrMs"])
 data class RrInterval(
@@ -113,6 +122,22 @@ data class SkinTempSample(
     val synced: Int = 0,
 )
 
+/**
+ * Step / motion counter sample (WHOOP5 type-47 step_motion_counter@57). PK (deviceId, ts).
+ * `counter` is the device's CUMULATIVE u16 running step counter (0..65535, wraps). It is NOT a
+ * per-sample delta — the daily step total is derived in AnalyticsEngine by summing positive
+ * consecutive deltas (with u16 wraparound handling). Mirrors SkinTempSample exactly (IGNORE-dedupe
+ * by natural key). APPROXIMATE: @57's step semantics are an on-device estimate, unverified against
+ * the official WHOOP app (see HistoricalStreams.decodeWhoop5Historical comments). (#78)
+ */
+@Entity(tableName = "stepSample", primaryKeys = ["deviceId", "ts"])
+data class StepSample(
+    val deviceId: String,
+    val ts: Long,
+    val counter: Int,
+    val synced: Int = 0,
+)
+
 /** Respiration raw-ADC sample (type-47). Swift `respSample` (v3). PK (deviceId, ts). */
 @Entity(tableName = "respSample", primaryKeys = ["deviceId", "ts"])
 data class RespSample(
@@ -159,6 +184,13 @@ data class DailyMetric(
     val spo2Pct: Double? = null,        // mean SpO2 (%) during sleep
     val skinTempDevC: Double? = null,   // skin-temperature deviation (°C) from baseline
     val respRateBpm: Double? = null,    // mean respiration rate (breaths/min) during sleep
+    // On-device derived daily step total from the WHOOP5 step_motion_counter@57 (sum of positive
+    // consecutive u16-counter deltas over the day). APPROXIMATE — not cloud/clinical parity. (#78)
+    val steps: Int? = null,
+    // On-device APPROXIMATE whole-day active+resting energy estimate (kcal), computed from HR alone
+    // by AnalyticsEngine (Keytel active + Harris–Benedict BMR). Null when the day has no scored HR
+    // window. NOT cloud/clinical parity — a heart-rate estimate. (#78)
+    val activeKcalEst: Double? = null,
 )
 
 /**

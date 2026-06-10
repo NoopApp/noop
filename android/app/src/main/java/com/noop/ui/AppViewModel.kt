@@ -10,9 +10,15 @@ import com.noop.analytics.UserProfile
 import com.noop.ble.LiveState
 import com.noop.ble.WhoopConnectionService
 import com.noop.ble.WhoopModel
+import androidx.health.connect.client.HealthConnectClient
 import com.noop.data.DailyMetric
 import com.noop.data.WhoopRepository
+import com.noop.ingest.HealthConnectImporter
+import com.noop.ingest.HealthConnectWriter
 import com.noop.protocol.CommandNumber
+import com.noop.widget.WidgetSnapshot
+import com.noop.widget.WidgetSnapshotStore
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -21,6 +27,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 
 /**
  * The single app-wide view model. Holds the BLE client and the Room-backed
@@ -126,6 +134,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val todayKey = java.time.LocalDate.now().toString()   // ISO yyyy-MM-dd, local
                 _today.value = days.lastOrNull { it.day == todayKey }
                 _healthAlert.value = IllnessWatch.evaluate(days)
+                // Keep the home-screen widget fresh while the app is open — covers users who turned
+                // the background service off (the service is the widget's heartbeat otherwise).
+                // Throttled + no-op without a placed widget; never let a Glance hiccup kill the collector.
+                runCatching {
+                    val live = ble.state.value
+                    WidgetSnapshotStore.push(
+                        appContext,
+                        WidgetSnapshot(
+                            recoveryPct = _today.value?.recovery?.roundToInt(),
+                            heartRate = live.heartRate,
+                            batteryPct = live.batteryPct?.roundToInt(),
+                            connected = live.connected,
+                            updatedAtMs = System.currentTimeMillis(),
+                        ),
+                    )
+                }
             }
         }
 
@@ -146,6 +170,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                             .takeIf { it > 0 }?.toDouble(),
                     )
                 }
+                // Opt-in writeback: push the freshly computed nights into Health Connect so other
+                // apps see them. Idempotent (clientRecordId per metric+day), so re-running every
+                // cycle just upserts. Never let an HC hiccup (perm revoked mid-flight, provider
+                // update) break the analysis loop.
+                if (_hcWriteback.value) {
+                    runCatching { HealthConnectWriter.write(appContext, repository) }
+                }
                 delay(ANALYZE_INTERVAL_MS) // 15 min, matches the offload cadence
             }
         }
@@ -162,9 +193,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * BLE client itself no-ops if already connected or the runtime permission isn't granted yet.
      */
     private fun autoReconnectOnLaunch() {
-        if (!NoopPrefs.backgroundConnection(appContext)) return
         val saved = NoopPrefs.lastDevice(appContext) ?: return
+        // Restore the model selection whenever a strap is remembered — deliberately NOT gated on the
+        // background-connection pref, so an opted-out 5/MG user's picker and scan family still
+        // survive restarts. Only the reconnect itself respects the pref. (#78 fork)
         _selectedModel.value = saved.second
+        if (!NoopPrefs.backgroundConnection(appContext)) return
         ble.reconnectToAddress(saved.first, saved.second)
     }
 
@@ -254,6 +288,86 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun setDebugLogging(enabled: Boolean) {
         NoopPrefs.setDebugLogging(appContext, enabled)
         ble.debugLogcat = enabled
+    }
+
+    // --- Health Connect periodic auto-sync (Samsung Health → Health Connect → NOOP) ---
+    private val _hcAutoSync = MutableStateFlow(NoopPrefs.hcAutoSync(appContext))
+    val hcAutoSync: StateFlow<Boolean> = _hcAutoSync.asStateFlow()
+    private val _hcSyncHours = MutableStateFlow(NoopPrefs.hcSyncHours(appContext))
+    val hcSyncHours: StateFlow<Int> = _hcSyncHours.asStateFlow()
+    private val _hcLastSync = MutableStateFlow(NoopPrefs.hcLastSync(appContext))
+    val hcLastSync: StateFlow<Long> = _hcLastSync.asStateFlow()
+    private val _hcWriteback = MutableStateFlow(NoopPrefs.hcWriteback(appContext))
+    val hcWriteback: StateFlow<Boolean> = _hcWriteback.asStateFlow()
+
+    init {
+        // On app open, catch up the Health Connect sync if it's overdue. This on-open import is the
+        // ONLY auto-sync path: we deliberately skip a true-background worker — it needs a sensitive
+        // background-health permission and is unreliable on Android 14+, and opening the app regularly
+        // is enough for a personal health app.
+        syncHealthConnectIfStale()
+    }
+
+    /** Flip auto-sync. Persists and, on enable, kicks an immediate import; thereafter it catches up on
+     *  app open via [syncHealthConnectIfStale]. */
+    fun setHcAutoSync(enabled: Boolean) {
+        _hcAutoSync.value = enabled
+        NoopPrefs.setHcAutoSync(appContext, enabled)
+        if (enabled) syncHealthConnectIfStale(force = true)
+    }
+
+    /** Change the sync interval (hours). Takes effect on the next on-open catch-up sync. */
+    fun setHcSyncHours(hours: Int) {
+        _hcSyncHours.value = hours
+        NoopPrefs.setHcSyncHours(appContext, hours)
+    }
+
+    /** Flip Health Connect writeback (computed metrics → HC). Persists; the UI requests the write
+     *  permissions and kicks the first write via [writebackHealthConnectNow]. While on, every 15-min
+     *  recompute re-writes (idempotent — clientRecordId upserts). Default OFF. */
+    fun setHcWriteback(enabled: Boolean) {
+        _hcWriteback.value = enabled
+        NoopPrefs.setHcWriteback(appContext, enabled)
+    }
+
+    /** One immediate writeback (permissions assumed granted — the UI gates on that). */
+    fun writebackHealthConnectNow() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching { HealthConnectWriter.write(appContext, repository) }
+            }
+        }
+    }
+
+    /**
+     * Foreground catch-up import: when auto-sync is on and the last sync is older than the chosen
+     * interval (or [force]), pull from Health Connect now. Health Connect background reads are
+     * restricted, so opening the app is the guaranteed sync point. No-ops silently if Health Connect
+     * is unavailable or its read permissions aren't granted (the UI requests them when enabling).
+     */
+    fun syncHealthConnectIfStale(force: Boolean = false) {
+        if (!_hcAutoSync.value) return
+        val intervalMs = _hcSyncHours.value.toLong() * 60 * 60 * 1000
+        val last = _hcLastSync.value
+        val now = System.currentTimeMillis()
+        if (!force && last != 0L && now - last < intervalMs) return
+        viewModelScope.launch {
+            val ran = withContext(Dispatchers.IO) {
+                if (HealthConnectImporter.sdkStatus(appContext) != HealthConnectClient.SDK_AVAILABLE) {
+                    return@withContext false
+                }
+                val granted = runCatching {
+                    HealthConnectImporter.client(appContext).permissionController.getGrantedPermissions()
+                }.getOrDefault(emptySet())
+                if (!granted.containsAll(HealthConnectImporter.PERMISSIONS)) return@withContext false
+                runCatching { HealthConnectImporter.import(appContext, repository) }.isSuccess
+            }
+            if (ran) {
+                val t = System.currentTimeMillis()
+                NoopPrefs.setHcLastSync(appContext, t)
+                _hcLastSync.value = t
+            }
+        }
     }
 
     /** How many screens currently want the live HR stream (Live, Health Monitor, …). The stream stays
