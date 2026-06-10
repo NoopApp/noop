@@ -110,6 +110,36 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Whether the illness early-warning runs (banner + notification). */
     val illnessWatchEnabled: StateFlow<Boolean> = _illnessWatchEnabled.asStateFlow()
 
+    // Also declared BEFORE the init blocks (same JVM declaration-order rule as above): the
+    // ble.state collector in init runs synchronously in the constructor on Main.immediate, and
+    // the process-owned client's LiveState is STICKY — `bonded` stays true while the background
+    // service holds the strap and `heartRate` keeps its last value. A relaunch into a warm
+    // process therefore takes the bonded branch (reads _smartAlarmEnabled) and the heartRate
+    // path (ingestHr → captureWorkoutSample reads _activeWorkout) on the FIRST emission, before
+    // any field declared after init exists — crashing the constructor on every warm-process
+    // launch: crash once, clean start on the cold retry (#84). The Health Connect quartet moves
+    // for the same reason: its init collector only survives today because a delay() suspends
+    // before the first _hcWriteback read — one refactor away from the same crash.
+    private val _smartAlarmEnabled = MutableStateFlow(NoopPrefs.smartAlarmEnabled(appContext))
+    val smartAlarmEnabled: StateFlow<Boolean> = _smartAlarmEnabled.asStateFlow()
+    private val _smartAlarmMinutes = MutableStateFlow(NoopPrefs.smartAlarmMinutes(appContext))
+    val smartAlarmMinutes: StateFlow<Int> = _smartAlarmMinutes.asStateFlow()
+
+    private val _activeWorkout = MutableStateFlow<ActiveWorkout?>(null)
+    val activeWorkout: StateFlow<ActiveWorkout?> = _activeWorkout.asStateFlow()
+    private val _lastWorkout = MutableStateFlow<WorkoutRow?>(null)
+    val lastWorkout: StateFlow<WorkoutRow?> = _lastWorkout.asStateFlow()
+
+    // Health Connect periodic auto-sync state (Samsung Health → Health Connect → NOOP).
+    private val _hcAutoSync = MutableStateFlow(NoopPrefs.hcAutoSync(appContext))
+    val hcAutoSync: StateFlow<Boolean> = _hcAutoSync.asStateFlow()
+    private val _hcSyncHours = MutableStateFlow(NoopPrefs.hcSyncHours(appContext))
+    val hcSyncHours: StateFlow<Int> = _hcSyncHours.asStateFlow()
+    private val _hcLastSync = MutableStateFlow(NoopPrefs.hcLastSync(appContext))
+    val hcLastSync: StateFlow<Long> = _hcLastSync.asStateFlow()
+    private val _hcWriteback = MutableStateFlow(NoopPrefs.hcWriteback(appContext))
+    val hcWriteback: StateFlow<Boolean> = _hcWriteback.asStateFlow()
+
     // MARK: - Today's cached metrics
 
     private val _today = MutableStateFlow<DailyMetric?>(null)
@@ -269,10 +299,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val peakHr: Int = 0,
     )
 
-    private val _activeWorkout = MutableStateFlow<ActiveWorkout?>(null)
-    val activeWorkout: StateFlow<ActiveWorkout?> = _activeWorkout.asStateFlow()
-    private val _lastWorkout = MutableStateFlow<WorkoutRow?>(null)
-    val lastWorkout: StateFlow<WorkoutRow?> = _lastWorkout.asStateFlow()
+    // _activeWorkout/_lastWorkout state lives next to _illnessWatchEnabled above
+    // (declaration-order constraint — read by the init collector's first emission, #84).
 
     private val locationTracker by lazy { LocationTracker(appContext) }
     private var gpsJob: Job? = null
@@ -411,14 +439,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // --- Health Connect periodic auto-sync (Samsung Health → Health Connect → NOOP) ---
-    private val _hcAutoSync = MutableStateFlow(NoopPrefs.hcAutoSync(appContext))
-    val hcAutoSync: StateFlow<Boolean> = _hcAutoSync.asStateFlow()
-    private val _hcSyncHours = MutableStateFlow(NoopPrefs.hcSyncHours(appContext))
-    val hcSyncHours: StateFlow<Int> = _hcSyncHours.asStateFlow()
-    private val _hcLastSync = MutableStateFlow(NoopPrefs.hcLastSync(appContext))
-    val hcLastSync: StateFlow<Long> = _hcLastSync.asStateFlow()
-    private val _hcWriteback = MutableStateFlow(NoopPrefs.hcWriteback(appContext))
-    val hcWriteback: StateFlow<Boolean> = _hcWriteback.asStateFlow()
+    // State lives next to _illnessWatchEnabled above (declaration-order constraint, #84);
+    // the toggles/setters stay here with the rest of the HC sync logic.
 
     init {
         // On app open, catch up the Health Connect sync if it's overdue. This on-open import is the
@@ -517,10 +539,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // --- Smart alarm (persisted; arms the strap's firmware alarm). Port of macOS BehaviorStore +
     // AppModel.applySmartAlarm. The previous Android UI was a non-persisted mock-up (issue #51). ---
-    private val _smartAlarmEnabled = MutableStateFlow(NoopPrefs.smartAlarmEnabled(appContext))
-    val smartAlarmEnabled: StateFlow<Boolean> = _smartAlarmEnabled.asStateFlow()
-    private val _smartAlarmMinutes = MutableStateFlow(NoopPrefs.smartAlarmMinutes(appContext))
-    val smartAlarmMinutes: StateFlow<Int> = _smartAlarmMinutes.asStateFlow()
+    // _smartAlarmEnabled/_smartAlarmMinutes state lives next to _illnessWatchEnabled above
+    // (declaration-order constraint — the init collector's bonded branch reads it on the very
+    // first synchronous emission of a warm, still-bonded process, #84); setters stay here.
 
     fun setSmartAlarmEnabled(enabled: Boolean) {
         _smartAlarmEnabled.value = enabled
