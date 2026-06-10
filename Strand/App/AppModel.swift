@@ -404,7 +404,16 @@ final class AppModel: ObservableObject {
         if let r = rm({ $0.skinTempDevC }), r >= 0.6 {
             flags.append("skin temp +\(String(format: "%.1f", r))°C")
         }
-        if let r = rm({ $0.respRateBpm }), let b = bm({ $0.respRateBpm }), r >= b + 1.5 {
+        // respRateBpm may be a clean cloud value OR a higher-variance on-device RSA estimate
+        // (WHOOP5 BLE-only). The field carries no source flag, so gate conservatively for BOTH:
+        //  - require enough valid baseline nights for a stable baseline mean (RSA history can be sparse),
+        //  - only compare physiologically plausible sleeping-RR values (~8–25 bpm), rejecting RSA outliers,
+        //  - use a wider +2.5 bpm margin so one noisy night (averaged over the 2 recent days) can't fire,
+        //    while a sustained genuine rise (both recent nights up) still does. Mirrors Android IllnessWatch.
+        let respBase = base.compactMap { $0.respRateBpm }
+        let plausible = { (v: Double) in (8.0...25.0).contains(v) }
+        if let r = rm({ $0.respRateBpm }), let b = bm({ $0.respRateBpm }),
+           respBase.count >= 10, plausible(r), plausible(b), r >= b + 2.5 {
             flags.append("respiration up")
         }
         healthAlert = flags.count >= 2

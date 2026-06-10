@@ -78,6 +78,7 @@ object IntelligenceEngine {
         val hrvCfg = Baselines.metricCfg["hrv"] ?: return emptyList()
         val rhrCfg = Baselines.metricCfg["resting_hr"] ?: return emptyList()
         val skinCfg = Baselines.metricCfg["skin_temp"] ?: return emptyList()
+        val respCfg = Baselines.metricCfg["resp"] ?: return emptyList()
 
         val computedId = importedDeviceId + "-noop"
 
@@ -106,6 +107,9 @@ object IntelligenceEngine {
         // Wear-gated nightly skin-temp means (on-device only — imported rows carry the deviation, not
         // the raw mean, so the skin-temp baseline is seeded purely from these). (PR #85)
         val nightlySkinByDay = LinkedHashMap<String, Double?>()
+        // On-device RSA respiration estimates, unioned with imported respRateBpm below to seed the
+        // resp baseline the recovery composite's wResp=0.05 term scores against.
+        val nightlyRespByDay = LinkedHashMap<String, Double?>()
 
         for (offset in 0 until maxDays) {
             val dayStart = nowSeconds - offset * SECONDS_PER_DAY
@@ -156,6 +160,7 @@ object IntelligenceEngine {
             nightlyHrvByDay[day] = res.daily.avgHrv
             nightlyRhrByDay[day] = res.daily.restingHr?.toDouble()
             nightlySkinByDay[day] = res.nightlySkinTempC
+            nightlyRespByDay[day] = res.daily.respRateBpm
             scoredNights.add(res)
         }
 
@@ -168,23 +173,33 @@ object IntelligenceEngine {
         // Chronological (oldest-first) replay: a day present in both takes the computed value.
         val histHrvByDay = LinkedHashMap<String, Double?>()
         val histRhrByDay = LinkedHashMap<String, Double?>()
+        val histRespByDay = LinkedHashMap<String, Double?>()
         for (d in hist) {
             histHrvByDay[d.day] = d.avgHrv
             histRhrByDay[d.day] = d.restingHr?.toDouble()
+            histRespByDay[d.day] = d.respRateBpm
         }
         // Imported (cloud) nightly values WIN per day (putIfAbsent): the on-device estimate
         // only fills days the import doesn't cover, so an import user's baseline is unchanged.
         for ((day, v) in nightlyHrvByDay) histHrvByDay.putIfAbsent(day, v)
         for ((day, v) in nightlyRhrByDay) histRhrByDay.putIfAbsent(day, v)
+        for ((day, v) in nightlyRespByDay) histRespByDay.putIfAbsent(day, v)
         val hrvSeq = histHrvByDay.entries.sortedBy { it.key }.map { it.value }
         val rhrSeq = histRhrByDay.entries.sortedBy { it.key }.map { it.value }
+        val respSeq = histRespByDay.entries.sortedBy { it.key }.map { it.value }
         val hrvBase2 = Baselines.foldHistory(hrvSeq, hrvCfg)
         val rhrBase2 = Baselines.foldHistory(rhrSeq, rhrCfg)
+        // Resp baseline mixes imported (cloud) values with on-device RSA estimates — acceptable: the
+        // z-score is scale-tolerant, foldHistory winsorizes, and respRateBpm already carries no source
+        // flag anywhere else (the illness gate treats it the same way).
+        val respBase2 = Baselines.foldHistory(respSeq, respCfg)
         // Skin-temp baseline is on-device-only (imported rows carry skinTempDevC, not the raw mean),
         // so fold purely over the pass-1 nightly means in chronological order. (PR #85)
         val skinSeq = nightlySkinByDay.entries.sortedBy { it.key }.map { it.value }
         val skinBase2 = Baselines.foldHistory(skinSeq, skinCfg)
-        val baselines2 = ProfileBaselines(hrv = hrvBase2, restingHR = rhrBase2, skinTemp = skinBase2)
+        val baselines2 = ProfileBaselines(
+            hrv = hrvBase2, restingHR = rhrBase2, resp = respBase2, skinTemp = skinBase2,
+        )
 
         // Imported workouts in the scored window, used to de-duplicate detected bouts so a
         // user who BOTH imports real WHOOP workouts AND wears the strap doesn't see the same
@@ -283,7 +298,7 @@ object IntelligenceEngine {
         return RecoveryScorer.recovery(
             hrv = hrvVal,
             rhr = rhrVal.toDouble(),
-            resp = null,
+            resp = daily.respRateBpm, // term drops + renormalizes when null / no usable baseline
             hrvBaseline = hrvBase,
             rhrBaseline = baselines.restingHR,
             respBaseline = baselines.resp,

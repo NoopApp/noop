@@ -350,4 +350,18 @@ public enum Calories {
         }
         return (totalKcal, totalKcal * 4.184)
     }
+
+    /// APPROXIMATE whole-day total energy estimate (kcal) from the full day's HR samples.
+    /// Identical per-second model as `estimateBoutCalories`: below the activeThreshold
+    /// (resting + 30% HRR) a sample burns the resting BMR rate, above it the Keytel active
+    /// rate. Each HR sample = 1 second of data (1 Hz strap). This is an on-device estimate
+    /// from heart rate alone — NOT laboratory calorimetry, NOT Apple/WHOOP cloud parity,
+    /// NOT medical advice. Returns total estimated kcal for the day (>= 0).
+    public static func estimateDayCalories(_ hrSamples: [HRSample],
+                                           profile: UserProfile,
+                                           hrmax: Double?,
+                                           restingHR: Double?) -> Double {
+        if hrSamples.isEmpty { return 0.0 }
+        return estimateBoutCalories(hrSamples, profile: profile, hrmax: hrmax, restingHR: restingHR).0
+    }
 }

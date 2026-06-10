@@ -79,6 +79,26 @@ final class RecoveryScorerTests: XCTestCase {
         XCTAssertEqual(withResp, withoutResp, accuracy: 1e-6)
     }
 
+    func testRespAboveBaselineLowersAndBelowRaisesRecovery() {
+        // Pins the resp-into-recovery wiring direction (mirrors the Android BaselineSeedingTest
+        // addition): with HRV/RHR pinned at baseline, a nightly respiratory rate above the resp
+        // baseline must LOWER recovery and one below it must RAISE it. A nil resp renormalizes
+        // to the no-resp score (testRespTermDropAndRenormalize already pins that).
+        func score(_ resp: Double?) -> Double {
+            RecoveryScorer.recovery(
+                hrv: 50, rhr: 55, resp: resp,
+                hrvBaseline: baseline(mean: 50, sigma: 6),
+                rhrBaseline: baseline(mean: 55, sigma: 3),
+                respBaseline: baseline(mean: 14.5, sigma: 1),
+                sleepPerf: 0.9)!
+        }
+        let neutral = score(nil)
+        let elevated = score(17.5)
+        let lowered = score(12.0)
+        XCTAssertLessThan(elevated, neutral, "resp above baseline must lower recovery")
+        XCTAssertGreaterThan(lowered, neutral, "resp below baseline must raise recovery")
+    }
+
     func testBandThresholds() {
         XCTAssertEqual(RecoveryScorer.band(20), "red")
         XCTAssertEqual(RecoveryScorer.band(33.9), "red")
