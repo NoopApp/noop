@@ -14,6 +14,21 @@ CATALOG = Path("Strand/Resources/Localizable.xcstrings")
 # English key -> German value. Keys must match the catalog exactly.
 DE: dict[str, str] = {
     # Symbols / pure placeholders — identical in German.
+    "Add workout": "Training hinzufügen",
+    "Avg HR (optional)": "Ø HF (optional)",
+    "Calories (optional)": "Kalorien (optional)",
+    "Cancel": "Abbrechen",
+    "Delete workout": "Training löschen",
+    "Detected": "Erkannt",
+    "Dismiss from the log": "Aus dem Log ausblenden",
+    "Duration": "Dauer",
+    "Edit workout": "Training bearbeiten",
+    "Label this activity": "Aktivität benennen",
+    "Manual": "Manuell",
+    "Save": "Speichern",
+    "Sport": "Sportart",
+    "Start time": "Startzeit",
+    "Strain isn't estimated for retroactive entries — there is no captured heart-rate window to base it on.": "Für nachträgliche Einträge wird keine Belastung geschätzt — es gibt kein aufgezeichnetes Herzfrequenz-Fenster als Grundlage.",
     "—": "—",
     "·": "·",
     "· %@": "· %@",

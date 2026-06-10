@@ -193,6 +193,12 @@ class WhoopRepository(private val dao: WhoopDao) {
     suspend fun deleteComputedWorkouts(deviceId: String, sport: String, from: Long, to: Long) =
         dao.deleteWorkoutsBySport(deviceId, sport, from, to)
 
+    /** Delete ONE workout by natural key (deviceId, startTs, sport) — the sport-scoped range
+     *  delete with a degenerate [startTs, startTs] window. Backs manual-workout delete, the
+     *  edit flow's PK change, and the re-label flow's removal of the detected original. */
+    suspend fun deleteWorkout(deviceId: String, sport: String, startTs: Long) =
+        dao.deleteWorkoutsBySport(deviceId, sport, startTs, startTs)
+
     suspend fun respSamples(deviceId: String, from: Long, to: Long, limit: Int = DEFAULT_LIMIT) =
         dao.respSamples(deviceId, from, to, limit)
 

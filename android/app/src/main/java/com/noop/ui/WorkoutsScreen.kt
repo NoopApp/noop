@@ -1,6 +1,8 @@
 package com.noop.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,7 +14,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.DirectionsBike
 import androidx.compose.material.icons.filled.DirectionsRun
 import androidx.compose.material.icons.filled.DirectionsWalk
@@ -25,8 +31,14 @@ import androidx.compose.material.icons.filled.SportsGymnastics
 import androidx.compose.material.icons.filled.SportsMartialArts
 import androidx.compose.material.icons.filled.SportsSoccer
 import androidx.compose.material.icons.filled.SportsTennis
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -35,13 +47,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.noop.data.WorkoutRow
 import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -69,23 +86,38 @@ fun WorkoutsScreen(vm: AppViewModel) {
     var allRows by remember { mutableStateOf<List<WorkoutRow>>(emptyList()) }
     var loaded by remember { mutableStateOf(false) }
     var range by remember { mutableStateOf(WorkoutRange.All) }
+    // Bumped after every write (add/edit/delete/re-label/dismiss) so the list reloads.
+    var reloadKey by remember { mutableStateOf(0) }
+    var selected by remember { mutableStateOf<WorkoutRow?>(null) }
+    var editing by remember { mutableStateOf<WorkoutRow?>(null) }
+    var adding by remember { mutableStateOf(false) }
+    val ctx = LocalContext.current
 
-    // Load both sources once. Whole history (epoch → now) per source, newest first.
-    LaunchedEffect(Unit) {
+    // Load all sources. Whole history (epoch → now) per source, newest first.
+    LaunchedEffect(reloadKey) {
         val now = System.currentTimeMillis() / 1000
         val whoop = vm.repo.workouts("my-whoop", 0L, now)
+        // Detected bouts the analytics pipeline persists under "<id>-noop" — previously
+        // invisible. Dismissals are a read-time filter: the IntelligenceEngine wipes and
+        // re-derives detected rows every run, so deleting one would just resurrect it.
+        val spans = parseDismissedSpans(NoopPrefs.dismissedDetected(ctx))
+        val detected = vm.repo.workouts(vm.repo.computedDeviceId("my-whoop"), 0L, now)
+            .filterNot { isDismissedDetected(it, spans) }
         // Apple Health export + Health Connect are separate sources (since #34) — include both.
         val apple = vm.repo.workouts("apple-health", 0L, now) +
             vm.repo.workouts("health-connect", 0L, now)
         // Imported sessions (Health Connect / Apple Health) carry no HR of their own — derive
         // avg/max from the strap's samples over each workout's window so they don't show "–" (#77).
-        val merged = vm.repo.fillWorkoutHrFromStrap((whoop + apple).sortedByDescending { it.startTs })
+        val merged = vm.repo.fillWorkoutHrFromStrap((whoop + detected + apple).sortedByDescending { it.startTs })
         allRows = merged
         loaded = true
-        range = defaultRange(merged)
+        if (reloadKey == 0) range = defaultRange(merged)   // keep the user's range across reloads
     }
 
     ScreenScaffold(title = "Workouts", subtitle = "Every session, threaded together.") {
+        // Retroactive logging is always reachable — including the empty state, where it is
+        // the account-free user's only way to get a first workout in.
+        AddWorkoutButton { adding = true }
         if (allRows.isEmpty()) {
             EmptyWorkouts(loaded)
         } else {
@@ -105,7 +137,50 @@ fun WorkoutsScreen(vm: AppViewModel) {
             SummarySection(rows = windowRows, effectiveRange = resolved, groups = groups)
             BreakdownSection(groups)
             ZonesSection(windowRows)
-            SessionsSection(windowRows)
+            SessionsSection(windowRows, onSelect = { selected = it })
+        }
+    }
+
+    selected?.let { row ->
+        WorkoutActionsDialog(
+            row = row,
+            onEdit = { editing = row; selected = null },
+            onDelete = { vm.deleteWorkout(row) { reloadKey++ }; selected = null },
+            onRelabel = { sport -> vm.relabelDetected(row, sport) { reloadKey++ }; selected = null },
+            onDismissBout = { vm.dismissDetected(row) { reloadKey++ }; selected = null },
+            onClose = { selected = null },
+        )
+    }
+    if (adding || editing != null) {
+        AddEditWorkoutDialog(
+            initial = editing,
+            onSave = { row ->
+                vm.saveManualWorkout(row, replacing = editing) { reloadKey++ }
+                adding = false; editing = null
+            },
+            onCancel = { adding = false; editing = null },
+        )
+    }
+}
+
+// MARK: - Add-workout entry point (chip-style, matches RefreshModelsButton's idiom)
+
+@Composable
+private fun AddWorkoutButton(onClick: () -> Unit) {
+    val shape = RoundedCornerShape(50)
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        Row(
+            modifier = Modifier
+                .clip(shape)
+                .background(Palette.surfaceInset)
+                .border(1.dp, Palette.hairline, shape)
+                .clickable(onClick = onClick)
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(Icons.Filled.Add, contentDescription = null, tint = Palette.accent, modifier = Modifier.size(14.dp))
+            Text("Add workout", style = NoopType.caption, color = Palette.accent)
         }
     }
 }
@@ -355,7 +430,7 @@ private fun ZoneStat(zone: Int, minutes: Double, total: Double, modifier: Modifi
 // MARK: - All sessions (one NoopCard, uniform fixed-height rows)
 
 @Composable
-private fun SessionsSection(rows: List<WorkoutRow>) {
+private fun SessionsSection(rows: List<WorkoutRow>, onSelect: (WorkoutRow) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
         SectionHeader(title = "All Sessions", overline = "Log", trailing = "${rows.size} total")
         NoopCard(padding = 0.dp) {
@@ -366,6 +441,7 @@ private fun SessionsSection(rows: List<WorkoutRow>) {
                     SessionRow(
                         row = row,
                         background = if (idx % 2 == 1) Palette.surfaceInset.copy(alpha = 0.4f) else Color.Transparent,
+                        onSelect = onSelect,
                     )
                     if (idx != rows.lastIndex) FullDivider(alpha = 0.5f)
                 }
@@ -407,11 +483,12 @@ private fun ColHeader(text: String, modifier: Modifier, align: TextAlign) {
 }
 
 @Composable
-private fun SessionRow(row: WorkoutRow, background: Color) {
+private fun SessionRow(row: WorkoutRow, background: Color, onSelect: (WorkoutRow) -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(background)
+            .clickable { onSelect(row) }
             .height(48.dp)
             .padding(horizontal = Metrics.cardPadding),
         verticalAlignment = Alignment.CenterVertically,
@@ -421,17 +498,17 @@ private fun SessionRow(row: WorkoutRow, background: Color) {
             Text(dateLabel(row.startTs), style = NoopType.subhead, color = Palette.textPrimary, maxLines = 1)
             Text(timeLabel(row.startTs), style = NoopType.footnote, color = Palette.textTertiary, maxLines = 1)
         }
-        // Sport.
+        // Sport ("detected" renders as "Activity" — the machine token never shows raw).
         Row(modifier = Modifier.weight(1.6f), verticalAlignment = Alignment.CenterVertically) {
             Icon(
-                sportIcon(row.sport),
+                sportIcon(displaySport(row.sport)),
                 contentDescription = null,
                 tint = Palette.textSecondary,
                 modifier = Modifier.size(14.dp),
             )
             Spacer(Modifier.width(7.dp))
             Text(
-                row.sport,
+                displaySport(row.sport),
                 style = NoopType.subhead,
                 color = Palette.textPrimary,
                 maxLines = 1,
@@ -538,9 +615,10 @@ private data class SportGroup(
     val avgTimePerSessionMin: Double get() = if (count > 0) (totalTimeS / count) / 60.0 else 0.0
 }
 
-/** Sessions grouped by sport, ordered by count (desc), then total time. */
+/** Sessions grouped by sport, ordered by count (desc), then total time. Detected bouts
+ *  group under their display name ("Activity"), never the raw "detected" token. */
 private fun sportGroups(rows: List<WorkoutRow>): List<SportGroup> =
-    rows.groupBy { it.sport }
+    rows.groupBy { displaySport(it.sport) }
         .map { (sport, list) ->
             SportGroup(
                 sport = sport,
@@ -571,6 +649,11 @@ internal fun workoutSourceLabel(deviceId: String, source: String): String {
     val id = deviceId.lowercase()
     val src = source.lowercase()
     return when {
+        // "-noop" BEFORE the whoop check: the computed id ("my-whoop-noop") contains "whoop",
+        // so the old order labelled the engine's detected bouts "Whoop".
+        id.endsWith("-noop") || src.endsWith("-noop") -> "Detected"
+        // v1.67 live-tracked + retro-logged rows: deviceId "my-whoop", source "manual".
+        src == "manual" -> "Manual"
         id == "health-connect" || src.contains("health-connect") -> "HC"
         id.contains("whoop") || src.contains("whoop") -> "Whoop"
         else -> "Apple"
@@ -625,6 +708,8 @@ internal fun zoneSummary(rows: List<WorkoutRow>): ZoneSummary? {
  */
 private val WorkoutRow.sourceBadge: Pair<String, Color>
     get() = when (workoutSourceLabel(deviceId, source)) {
+        "Detected" -> "Detected" to Palette.metricAmber
+        "Manual" -> "Manual" to Palette.metricRose
         "HC" -> "HC" to Palette.metricPurple
         "Whoop" -> "Whoop" to Palette.accent
         else -> "Apple" to Palette.metricCyan
@@ -672,3 +757,240 @@ private fun sportIcon(sport: String): ImageVector {
         else -> Icons.Filled.FitnessCenter
     }
 }
+
+// MARK: - Row actions (manual: edit/delete · detected: re-label/dismiss · imported: read-only)
+
+@Composable
+private fun WorkoutActionsDialog(
+    row: WorkoutRow,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+    onRelabel: (String) -> Unit,
+    onDismissBout: () -> Unit,
+    onClose: () -> Unit,
+) {
+    var pickingSport by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onClose,
+        containerColor = Palette.surfaceOverlay,
+        title = {
+            Text(
+                "${displaySport(row.sport)} · ${dateLabel(row.startTs)}",
+                style = NoopType.headline, color = Palette.textPrimary,
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                when {
+                    pickingSport -> {
+                        Text("What was this activity?", style = NoopType.subhead, color = Palette.textSecondary)
+                        Spacer(Modifier.height(4.dp))
+                        // The re-labelled copy becomes a first-class manual workout and the
+                        // engine's dedupe stops re-deriving a detected bout over this span.
+                        Column {
+                            MANUAL_SPORTS.forEach { sport ->
+                                Text(
+                                    sport, style = NoopType.body, color = Palette.textPrimary,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onRelabel(sport) }
+                                        .padding(vertical = 6.dp),
+                                )
+                            }
+                        }
+                    }
+                    isManualWorkout(row) -> {
+                        ActionRow("Edit workout", Palette.textPrimary, onEdit)
+                        ActionRow("Delete workout", Palette.statusCritical, onDelete)
+                    }
+                    isDetectedWorkout(row) -> {
+                        Text(
+                            "NOOP detected this bout from your heart rate — duration and calories are approximate.",
+                            style = NoopType.footnote, color = Palette.textTertiary,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        ActionRow("Label this activity…", Palette.textPrimary) { pickingSport = true }
+                        ActionRow("Dismiss from the log", Palette.statusCritical, onDismissBout)
+                    }
+                    else -> {
+                        Text(
+                            "Imported workouts are read-only — they mirror the source you imported them from.",
+                            style = NoopType.footnote, color = Palette.textTertiary,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onClose) {
+                Text("Close", style = NoopType.subhead, color = Palette.textSecondary)
+            }
+        },
+    )
+}
+
+@Composable
+private fun ActionRow(label: String, color: Color, onClick: () -> Unit) {
+    Text(
+        label, style = NoopType.body, color = color,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp, horizontal = 4.dp),
+    )
+}
+
+// MARK: - Add / edit a manual workout (retroactive; strain stays null — no captured HR window)
+
+@Composable
+private fun AddEditWorkoutDialog(
+    initial: WorkoutRow?,
+    onSave: (WorkoutRow) -> Unit,
+    onCancel: () -> Unit,
+) {
+    val zone = remember { ZoneId.systemDefault() }
+    val initialStart = initial?.let { Instant.ofEpochSecond(it.startTs).atZone(zone) }
+    var date by remember { mutableStateOf(initialStart?.toLocalDate() ?: LocalDate.now(zone)) }
+    var timeMinutes by remember {
+        mutableStateOf(initialStart?.let { it.hour * 60 + it.minute } ?: (LocalTime.now(zone).hour * 60))
+    }
+    var durationText by remember {
+        mutableStateOf(initial?.durationS?.let { (it / 60).roundToInt().toString() } ?: "45")
+    }
+    var sport by remember { mutableStateOf(initial?.sport ?: "Running") }
+    var sportMenu by remember { mutableStateOf(false) }
+    var hrText by remember { mutableStateOf(initial?.avgHr?.toString() ?: "") }
+    var kcalText by remember { mutableStateOf(initial?.energyKcal?.let { it.roundToInt().toString() } ?: "") }
+
+    val today = LocalDate.now(zone)
+    val startSec = date.atTime(timeMinutes / 60, timeMinutes % 60).atZone(zone).toEpochSecond()
+    val built = buildManualWorkout(
+        startSec = startSec,
+        durationMin = durationText.toIntOrNull() ?: 0,
+        sport = sport,
+        avgHr = hrText.trim().toIntOrNull(),          // blank → null (optional field)
+        energyKcal = kcalText.trim().toDoubleOrNull(), // blank → null (optional field)
+    )
+    val dateFmtLocal = remember { DateTimeFormatter.ofPattern("EEE d MMM", Locale.US) }
+
+    AlertDialog(
+        onDismissRequest = onCancel,
+        containerColor = Palette.surfaceOverlay,
+        title = {
+            Text(
+                if (initial == null) "Add workout" else "Edit workout",
+                style = NoopType.headline, color = Palette.textPrimary,
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // Date: ◀ day ▶ stepper, clamped to today (retro entries only — no future workouts).
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Date", style = NoopType.body, color = Palette.textPrimary)
+                    Spacer(Modifier.weight(1f))
+                    Icon(
+                        Icons.Filled.ChevronLeft, contentDescription = "Previous day",
+                        tint = Palette.accent,
+                        modifier = Modifier.size(22.dp).clickable { date = date.minusDays(1) },
+                    )
+                    Text(
+                        date.format(dateFmtLocal), style = NoopType.number(15f),
+                        color = Palette.textPrimary,
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    )
+                    Icon(
+                        Icons.Filled.ChevronRight, contentDescription = "Next day",
+                        tint = if (date < today) Palette.accent else Palette.textTertiary,
+                        modifier = Modifier.size(22.dp).clickable { if (date < today) date = date.plusDays(1) },
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Start time", style = NoopType.body, color = Palette.textPrimary)
+                    Spacer(Modifier.weight(1f))
+                    TimeChip(minutes = timeMinutes, accessibilityLabel = "Workout start time",
+                        onPicked = { timeMinutes = it })
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Sport", style = NoopType.body, color = Palette.textPrimary)
+                    Spacer(Modifier.weight(1f))
+                    Box {
+                        Text(
+                            sport, style = NoopType.number(15f), color = Palette.accent,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(Palette.surfaceInset)
+                                .border(1.dp, Palette.hairline, RoundedCornerShape(50))
+                                .clickable { sportMenu = true }
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                        )
+                        DropdownMenu(expanded = sportMenu, onDismissRequest = { sportMenu = false }) {
+                            MANUAL_SPORTS.forEach { s ->
+                                DropdownMenuItem(
+                                    text = { Text(s, style = NoopType.body) },
+                                    onClick = { sport = s; sportMenu = false },
+                                )
+                            }
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    value = durationText,
+                    onValueChange = { durationText = it.filter(Char::isDigit).take(4) },
+                    label = { Text("Duration (min)", style = NoopType.footnote, color = Palette.textSecondary) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    colors = workoutFieldColors(),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = hrText,
+                    onValueChange = { hrText = it.filter(Char::isDigit).take(3) },
+                    label = { Text("Avg HR (optional)", style = NoopType.footnote, color = Palette.textSecondary) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    colors = workoutFieldColors(),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = kcalText,
+                    onValueChange = { kcalText = it.filter(Char::isDigit).take(5) },
+                    label = { Text("Calories (optional)", style = NoopType.footnote, color = Palette.textSecondary) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    colors = workoutFieldColors(),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { built?.let(onSave) }, enabled = built != null) {
+                Text("Save", style = NoopType.headline,
+                    color = if (built != null) Palette.accent else Palette.textTertiary)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) {
+                Text("Cancel", style = NoopType.subhead, color = Palette.textSecondary)
+            }
+        },
+    )
+}
+
+@Composable
+private fun workoutFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = Palette.textPrimary,
+    unfocusedTextColor = Palette.textPrimary,
+    disabledTextColor = Palette.textTertiary,
+    cursorColor = Palette.accent,
+    focusedBorderColor = Palette.accent,
+    unfocusedBorderColor = Palette.hairline,
+    disabledBorderColor = Palette.hairline,
+    focusedContainerColor = Palette.surfaceInset,
+    unfocusedContainerColor = Palette.surfaceInset,
+    disabledContainerColor = Palette.surfaceInset,
+)

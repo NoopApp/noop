@@ -207,6 +207,20 @@ object NoopPrefs {
         of(context).edit().putBoolean(KEY_ILLNESS_WATCH, enabled).apply()
     }
 
+    /** Detected bouts the user dismissed, as "startTs:endTs" spans. Read-time filter — the
+     *  IntelligenceEngine re-derives detected rows every run, so deletion alone resurrects them. */
+    const val KEY_DISMISSED_DETECTED = "noop.dismissedDetectedSpans"
+
+    fun dismissedDetected(context: Context): Set<String> =
+        of(context).getStringSet(KEY_DISMISSED_DETECTED, emptySet()) ?: emptySet()
+
+    fun addDismissedDetected(context: Context, startTs: Long, endTs: Long) {
+        // Copy before mutating: the Set returned by getStringSet must never be modified in place.
+        val cur = HashSet(dismissedDetected(context))
+        cur.add("$startTs:$endTs")
+        of(context).edit().putStringSet(KEY_DISMISSED_DETECTED, cur).apply()
+    }
+
     /** Last local day (ISO yyyy-MM-dd) an illness notification was posted — the once-a-day gate,
      *  persisted so the app-open and background-service call sites can't double-post. */
     const val KEY_ILLNESS_LAST_NOTIFIED_DAY = "noop.illnessLastNotifiedDay"

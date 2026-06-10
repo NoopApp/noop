@@ -34,4 +34,21 @@ class WorkoutSourceLabelTest {
     fun unknownSource_fallsBackToApple() {
         assertEquals("Apple", workoutSourceLabel("", ""))
     }
+
+    @Test
+    fun detectedComputedSource_isLabelledDetected_notWhoop() {
+        // Regression: "my-whoop-noop" contains "whoop" — the old order labelled engine bouts "Whoop".
+        assertEquals("Detected", workoutSourceLabel("my-whoop-noop", "my-whoop-noop"))
+    }
+
+    @Test
+    fun manualSession_isLabelledManual_notWhoop() {
+        // v1.67 live-tracked + retro-logged rows: deviceId "my-whoop", source "manual".
+        assertEquals("Manual", workoutSourceLabel("my-whoop", "manual"))
+    }
+
+    @Test
+    fun noopSuffix_winsOverWhoopAndHc() {
+        assertEquals("Detected", workoutSourceLabel("health-connect-noop", "x-noop"))
+    }
 }

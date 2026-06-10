@@ -23,6 +23,14 @@ struct WorkoutsView: View {
     @State private var allRows: [WorkoutRow]
     @State private var loaded: Bool
     @State private var range: Range = .all
+    @State private var showAddSheet = false
+    @State private var editTarget: EditTarget?
+
+    /// Identifiable wrapper for .sheet(item:) — WorkoutRow itself isn't Identifiable.
+    private struct EditTarget: Identifiable {
+        let row: WorkoutRow
+        var id: String { "\(row.startTs)-\(row.sport)" }
+    }
 
     init(previewRows: [WorkoutRow]? = nil) {
         _allRows = State(initialValue: previewRows ?? [])
@@ -31,6 +39,15 @@ struct WorkoutsView: View {
 
     var body: some View {
         ScreenScaffold(title: "Workouts", subtitle: "Every session, threaded together.") {
+            // Retroactive logging is always reachable — including the empty state, where it is
+            // the account-free user's only way to get a first workout in.
+            HStack {
+                Spacer()
+                Button { showAddSheet = true } label: {
+                    Label("Add workout", systemImage: "plus").padding(.horizontal, 4)
+                }
+                .buttonStyle(.bordered)
+            }
             if allRows.isEmpty {
                 ComingSoon(what: loaded
                     ? "No workouts yet. They come from your WHOOP and Apple Health history. Import in Data Sources to bring them in."
@@ -58,15 +75,29 @@ struct WorkoutsView: View {
         }
         .task {
             guard !loaded else { return }
-            let r = await repo.workoutRows()
-            allRows = r
-            loaded = true
-            range = defaultRange(for: r)
+            await reload()
+            range = defaultRange(for: allRows)
         }
         .onAppear {
             // Preview-seeded rows skip `.task`; still choose a range that has data.
             if loaded { range = defaultRange(for: allRows) }
         }
+        .sheet(isPresented: $showAddSheet) {
+            ManualWorkoutSheet(editing: nil) { Task { await reload() } }
+        }
+        .sheet(item: $editTarget) { target in
+            ManualWorkoutSheet(editing: target.row) { Task { await reload() } }
+        }
+    }
+
+    /// Reload the list after any write (the .task gate `guard !loaded` never re-runs).
+    /// Dismissed detected spans are a read-time filter — the engine re-derives detected
+    /// rows every run, so a plain delete would resurrect them.
+    private func reload() async {
+        let spans = WorkoutSource.parseDismissedSpans(
+            UserDefaults.standard.stringArray(forKey: "workouts.dismissedDetected") ?? [])
+        allRows = (await repo.workoutRows()).filter { !WorkoutSource.isDismissed($0, spans: spans) }
+        loaded = true
     }
 
     // MARK: - Range control
@@ -333,13 +364,13 @@ struct WorkoutsView: View {
             }
             .frame(width: ColWidth.date, alignment: .leading)
 
-            // Sport
+            // Sport ("detected" renders as "Activity" — the machine token never shows raw).
             HStack(spacing: 7) {
-                Image(systemName: sportIcon(row.sport))
+                Image(systemName: sportIcon(WorkoutSource.displaySport(row.sport)))
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(StrandPalette.textSecondary)
                     .frame(width: 16)
-                Text(row.sport)
+                Text(WorkoutSource.displaySport(row.sport))
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textPrimary)
                     .lineLimit(1)
@@ -363,6 +394,28 @@ struct WorkoutsView: View {
         }
         .padding(.horizontal, NoopMetrics.cardPadding)
         .frame(height: RowMetrics.rowHeight)
+        .contentShape(Rectangle())
+        .contextMenu {
+            if WorkoutSource.classify(row.source) == .manual {
+                Button("Edit workout") { editTarget = EditTarget(row: row) }
+                Button("Delete workout", role: .destructive) {
+                    Task { await repo.deleteWorkout(row); await reload() }
+                }
+            }
+            if WorkoutSource.classify(row.source) == .detected {
+                Menu("Label this activity") {
+                    ForEach(ManualWorkoutSheet.sports, id: \.self) { s in
+                        Button(s) { Task { await repo.relabelDetected(row, sport: s); await reload() } }
+                    }
+                }
+                Button("Dismiss from the log", role: .destructive) {
+                    var spans = UserDefaults.standard.stringArray(forKey: "workouts.dismissedDetected") ?? []
+                    spans.append("\(row.startTs):\(row.endTs)")
+                    UserDefaults.standard.set(spans, forKey: "workouts.dismissedDetected")
+                    Task { await reload() }
+                }
+            }
+        }
     }
 
     private func cell(_ text: String, width: CGFloat, color: Color? = nil) -> some View {
@@ -373,11 +426,18 @@ struct WorkoutsView: View {
     }
 
     /// Source badge built from the locked SourceBadge component (no custom capsule).
+    /// Honest 4-way origin — the old binary Whoop/Apple split mislabelled "manual" rows as
+    /// "Apple" and would have labelled the engine's "-noop" bouts "Whoop".
     private func sourceBadge(_ source: String) -> some View {
-        let isWhoop = source.lowercased().contains("whoop")
-        return SourceBadge(isWhoop ? "Whoop" : "Apple",
-                           tint: isWhoop ? StrandPalette.accent : StrandPalette.metricCyan)
-            .accessibilityLabel(isWhoop ? "Source Whoop" : "Source Apple Health")
+        let label: LocalizedStringKey
+        let tint: Color
+        switch WorkoutSource.classify(source) {
+        case .whoop:    label = "Whoop";    tint = StrandPalette.accent
+        case .apple:    label = "Apple";    tint = StrandPalette.metricCyan
+        case .detected: label = "Detected"; tint = StrandPalette.metricAmber
+        case .manual:   label = "Manual";   tint = StrandPalette.metricRose
+        }
+        return SourceBadge(label, tint: tint).accessibilityLabel(Text(label))
     }
 
     // MARK: - Grid columns
@@ -401,16 +461,18 @@ struct WorkoutsView: View {
         var avgTimePerSessionMin: Double { count > 0 ? (totalTimeS / Double(count)) / 60.0 : 0 }
     }
 
-    /// Sessions grouped by sport, ordered by count (desc), then total time.
+    /// Sessions grouped by sport, ordered by count (desc), then total time. Detected bouts
+    /// group under their display name ("Activity"), never the raw "detected" token.
     /// Takes the already-windowed rows so `body` builds the groups exactly once.
     private func sportGroups(from rows: [WorkoutRow]) -> [SportGroup] {
         var bySport: [String: (count: Int, time: Double, kcal: Double)] = [:]
         for r in rows {
-            var acc = bySport[r.sport] ?? (0, 0, 0)
+            let key = WorkoutSource.displaySport(r.sport)
+            var acc = bySport[key] ?? (0, 0, 0)
             acc.count += 1
             acc.time += r.durationS ?? 0
             acc.kcal += r.energyKcal ?? 0
-            bySport[r.sport] = acc
+            bySport[key] = acc
         }
         return bySport
             .map { SportGroup(sport: $0.key, count: $0.value.count,

@@ -182,14 +182,55 @@ final class Repository: ObservableObject {
             to: Self.dayString(now.addingTimeInterval(86_400)))) ?? []
     }
 
-    /// All workouts (Whoop + Apple Health), newest first.
+    /// All workouts (Whoop + Apple Health + on-device detected bouts), newest first.
     func workoutRows(days: Int = 4000) async -> [WorkoutRow] {
         guard let store = await ensureStore() else { return [] }
         let now = Int(Date().timeIntervalSince1970)
         let lo = now - days * 86_400, hi = now + 86_400
         var rows = (try? await store.workouts(deviceId: deviceId, from: lo, to: hi, limit: 5000)) ?? []
         rows += (try? await store.workouts(deviceId: "apple-health", from: lo, to: hi, limit: 5000)) ?? []
+        // Detected bouts the analytics pipeline persists under the computed "-noop" source —
+        // surfaced with an honest "Detected" badge (the source classification keeps them from
+        // ever masquerading as WHOOP data).
+        rows += (try? await store.workouts(deviceId: computedDeviceId, from: lo, to: hi, limit: 5000)) ?? []
         return rows.sorted { $0.startTs > $1.startTs }
+    }
+
+    /// Persist a retroactive/edited manual workout under the strap source (deviceId "my-whoop",
+    /// source "manual" — where v1.67's live sessions live). `replacing` handles an edit whose
+    /// natural key (startTs/sport) changed: delete the old row, then upsert the new one.
+    func saveManualWorkout(_ row: WorkoutRow, replacing old: WorkoutRow? = nil) async {
+        guard let store = await ensureStore() else { return }
+        if let old {
+            _ = try? await store.deleteWorkouts(deviceId: deviceId, sport: old.sport,
+                                                from: old.startTs, to: old.startTs)
+        }
+        _ = try? await store.upsertWorkouts([row], deviceId: deviceId)
+    }
+
+    /// Re-label a detected bout: copy it to a manual "my-whoop" row with the chosen sport, then
+    /// delete the detected original. Survives analyzeRecent: the engine wipes + re-derives only
+    /// sport="detected" rows under "-noop" and skips re-derived bouts overlapping a "my-whoop"
+    /// row — which this copy now is.
+    func relabelDetected(_ row: WorkoutRow, sport: String) async {
+        guard let store = await ensureStore() else { return }
+        let manual = WorkoutRow(startTs: row.startTs, endTs: row.endTs, sport: sport, source: "manual",
+                                durationS: row.durationS, energyKcal: row.energyKcal,
+                                avgHr: row.avgHr, maxHr: row.maxHr, strain: row.strain,
+                                distanceM: row.distanceM, zonesJSON: row.zonesJSON, notes: row.notes)
+        _ = try? await store.upsertWorkouts([manual], deviceId: deviceId)
+        _ = try? await store.deleteWorkouts(deviceId: computedDeviceId, sport: "detected",
+                                            from: row.startTs, to: row.startTs)
+    }
+
+    /// Delete ONE workout by natural key. The read model has no deviceId, so reconstruct it from
+    /// the source: detected rows live under the computed id; everything the screen can delete
+    /// (manual) lives under the strap id.
+    func deleteWorkout(_ row: WorkoutRow) async {
+        guard let store = await ensureStore() else { return }
+        let id = WorkoutSource.classify(row.source) == .detected ? computedDeviceId : deviceId
+        _ = try? await store.deleteWorkouts(deviceId: id, sport: row.sport,
+                                            from: row.startTs, to: row.startTs)
     }
 
     /// Apple Health daily aggregates (steps/energy/vo2/hr).

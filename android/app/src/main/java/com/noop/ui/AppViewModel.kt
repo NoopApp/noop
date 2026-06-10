@@ -293,6 +293,48 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { runCatching { repository.upsertWorkouts(listOf(row)) } }
     }
 
+    /** Persist a retroactive/edited manual workout. [replacing] != null is an edit; the PK
+     *  (deviceId, startTs, sport) may have changed, so delete the old row first, then upsert.
+     *  [onDone] runs on completion so the Workouts screen can bump its reload key. */
+    fun saveManualWorkout(row: WorkoutRow, replacing: WorkoutRow? = null, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            runCatching {
+                replacing?.let { repository.deleteWorkout(it.deviceId, it.sport, it.startTs) }
+                repository.upsertWorkouts(listOf(row))
+            }
+            onDone()
+        }
+    }
+
+    /** Re-label a detected bout: copy it to a manual "my-whoop" row with the chosen sport, then
+     *  delete the detected original (the engine would wipe it next run anyway; deleting now
+     *  avoids a transient duplicate in the list). The copy survives analyzeRecent because the
+     *  re-derived bout overlaps a "my-whoop" row and is skipped by the existing dedupe. */
+    fun relabelDetected(detected: WorkoutRow, sport: String, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            runCatching {
+                repository.upsertWorkouts(listOf(relabeledWorkout(detected, sport)))
+                repository.deleteWorkout(detected.deviceId, detected.sport, detected.startTs)
+            }
+            onDone()
+        }
+    }
+
+    /** Delete ONE workout by natural key (manual rows; detected rows use [dismissDetected]). */
+    fun deleteWorkout(row: WorkoutRow, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            runCatching { repository.deleteWorkout(row.deviceId, row.sport, row.startTs) }
+            onDone()
+        }
+    }
+
+    /** Hide a detected bout without deleting it (the engine re-derives detected rows every
+     *  run, so a plain delete would resurrect it): record its span in prefs. */
+    fun dismissDetected(row: WorkoutRow, onDone: () -> Unit = {}) {
+        NoopPrefs.addDismissedDetected(appContext, row.startTs, row.endTs)
+        onDone()
+    }
+
     /** Append the current smoothed bpm to the active workout and recompute its running strain. Called
      *  from ingestHr on every fresh sample; a no-op when no workout is running. */
     private fun captureWorkoutSample(bpm: Int) {
