@@ -62,6 +62,12 @@ private struct HeartRateSection: View {
     @EnvironmentObject var live: LiveState
     @EnvironmentObject var profile: ProfileStore
 
+    /// Rolling buffer of recently-streamed live HR (newest last), so the hero graph builds a real
+    /// continuous time-series instead of collapsing to a 2-point flat line when the strap streams HR
+    /// but little/no R-R (the #105 case — Live HR works, but the Health graph showed only 2 samples).
+    /// Capped to ~3 min @ ~1 Hz; resets when the view is recreated, which is fine for a live trace.
+    @State private var hrHistory: [Double] = []
+
     /// HR to display: reported value when >0, else derived from the latest R-R
     /// interval (the strap streams R-R even when its HR field reads 0).
     private var displayHR: Int? {
@@ -91,6 +97,10 @@ private struct HeartRateSection: View {
     /// A short HR series for the hero sparkline, derived from streamed R-R intervals
     /// (newest last). Falls back to a flat line at the current HR when R-R is sparse.
     private func hrSeries(_ hr: Int?) -> [Double] {
+        // Prefer the accumulated live HR time-series — that's what a "live" graph should show, and it
+        // keeps growing even when the strap streams HR but sparse R-R (#105). Fall back to R-R-derived
+        // beats, then a flat line at the current HR.
+        if hrHistory.count > 1 { return hrHistory }
         let beats = live.rr.suffix(60).compactMap { rr -> Double? in
             rr > 0 ? 60_000.0 / Double(rr) : nil
         }
@@ -127,6 +137,12 @@ private struct HeartRateSection: View {
                     ("State", hasLiveHR ? "STREAMING" : "IDLE"),
                 ])
             }
+        }
+        .onChange(of: displayHR) { newHR in
+            // Append each new live HR reading so the hero graph grows a continuous time-series (#105).
+            guard let v = newHR else { return }
+            hrHistory.append(Double(v))
+            if hrHistory.count > 180 { hrHistory.removeFirst(hrHistory.count - 180) }
         }
     }
 

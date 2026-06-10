@@ -17,6 +17,19 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 1.76 — Robust Apple Health import, marginal-radio HR mode, live HR graph
+
+- **Improved (Mac and Android):** a very large Apple Health export no longer fails to import because
+  of a single malformed byte — NOOP skips the bad spans and imports everything else, reporting how
+  many it skipped. Multi-year exports that errored out before should come in fine now.
+- **New (Mac):** if your Bluetooth radio can't sustain WHOOP 4's full realtime stream (older Macs /
+  OpenCore), NOOP now falls back to a low-bandwidth standard heart-rate mode, so live HR keeps working
+  instead of looping on a dropped connection.
+- **Fixed (Mac):** the Health tab's live heart-rate graph now builds a continuous trace over time
+  instead of getting stuck on two points.
+
+---
+
 ## 1.75 — Personal vital baselines + Mac analytics parity
 
 - **New (Mac and Android):** the Health Monitor now judges each vital — HRV, resting heart rate,

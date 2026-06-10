@@ -3,6 +3,65 @@ import CoreBluetooth
 import WhoopProtocol
 import WhoopStore
 
+/// Detects a marginal Bluetooth radio that can't sustain the WHOOP 4 R10/R11 raw realtime stream
+/// (#80). On a flaky radio (2016 Mac / OpenCore) the link dies the *instant* NOOP arms that
+/// high-bandwidth burst, then the auto-rescan reconnects, re-arms, and dies again — an endless loop.
+///
+/// The tell is a CONNECTION TIMEOUT that lands shortly after we armed realtime: arm → die → rescan →
+/// arm → die. We don't trip on a single drop (links die for benign reasons), but on >= `tripThreshold`
+/// CONSECUTIVE arm-then-quick-timeout cycles. Once tripped, the caller skips arming R10/R11 on the next
+/// connect and relies on the independent low-bandwidth 0x2A37 standard HR profile, which NOOP already
+/// subscribes — live HR survives on a radio that otherwise couldn't, and even if 0x2A37 stays silent the
+/// arm/die loop stops. Pure + value-typed so the decision is unit-testable without a CoreBluetooth seam.
+struct MarginalRadioDetector {
+    /// How many consecutive arm-then-quick-timeout cycles before we fall back to standard-HR-only.
+    /// 2 (not 1): one drop is noise; two in a row right after arming is the radio buckling under the burst.
+    let tripThreshold: Int
+    /// A timeout only counts as "right after arming" if it lands within this window. A drop minutes into a
+    /// healthy session is unrelated to the arm burst and must NOT be blamed on it (that would mis-trip a
+    /// good radio whose link merely flaps later).
+    let quickTimeoutWindow: TimeInterval
+
+    private(set) var consecutiveArmTimeouts = 0
+    /// True once we've tripped: the next connect should skip the R10/R11 arm and run standard-HR-only.
+    private(set) var tripped = false
+
+    init(tripThreshold: Int = 2, quickTimeoutWindow: TimeInterval = 20) {
+        self.tripThreshold = tripThreshold
+        self.quickTimeoutWindow = quickTimeoutWindow
+    }
+
+    /// A connection ended. `wasArmed` = we had armed R10/R11 this connection; `secondsSinceArm` = how long
+    /// after arming the link ended (nil if we never armed); `timedOut` = the drop looks like a connection
+    /// timeout (vs. an intentional disconnect, a bond reset, etc.). Returns true if THIS event tripped the
+    /// fallback (a freshly-crossed threshold), so the caller can log/surface it exactly once.
+    mutating func connectionEnded(wasArmed: Bool, secondsSinceArm: TimeInterval?, timedOut: Bool) -> Bool {
+        // Only a timeout that lands within the window after we actually armed the burst is evidence the
+        // radio choked on the arm. Anything else (clean session that later flapped, non-timeout error,
+        // never armed) breaks the streak — a single healthy spell should clear prior suspicion.
+        let armCausedTimeout = wasArmed && timedOut
+            && (secondsSinceArm.map { $0 <= quickTimeoutWindow } ?? false)
+        guard armCausedTimeout else {
+            consecutiveArmTimeouts = 0
+            return false
+        }
+        consecutiveArmTimeouts += 1
+        if !tripped && consecutiveArmTimeouts >= tripThreshold {
+            tripped = true
+            return true        // freshly tripped — caller logs/surfaces once
+        }
+        return false
+    }
+
+    /// Clear all suspicion: a clean session is flowing, or the user explicitly re-requested the full
+    /// stream (Live re-open / manual Start HR). Lets a transient radio hiccup recover instead of
+    /// permanently pinning the user to standard-HR mode.
+    mutating func reset() {
+        consecutiveArmTimeouts = 0
+        tripped = false
+    }
+}
+
 /// CoreBluetooth engine for the WHOOP 4.0: scan-by-service → connect → discover →
 /// BOND (one confirmed write) → subscribe → reassemble char-05 frames → FrameRouter.
 /// Cannot run in the simulator; verified manually on-device (Task C6).
@@ -75,6 +134,17 @@ public final class BLEManager: NSObject, ObservableObject {
     private var lastDataAt = Date()
     /// True while the Live screen wants the (heavy) realtime stream; keep-alive re-arms it.
     private var wantsRealtime = false
+    /// #80 marginal-radio fallback: tracks consecutive arm-then-quick-timeout cycles. When it trips,
+    /// `standardHRFallback` goes true and the next connect skips arming R10/R11 (relies on 0x2A37).
+    private var marginalRadio = MarginalRadioDetector()
+    /// When true, SKIP arming the R10/R11 raw realtime stream on connect — the radio couldn't sustain
+    /// it (see MarginalRadioDetector). Live HR then comes only from the already-subscribed low-bandwidth
+    /// 0x2A37 standard-HR profile. Per-session: set by the detector, cleared on a clean reconnect (a
+    /// connection that actually carried data) or when the user re-opens Live / taps Start HR.
+    private var standardHRFallback = false
+    /// Wall time we last armed the R10/R11 realtime burst this connection, to measure how soon a drop
+    /// follows the arm (the marginal-radio tell). nil until armed; cleared on disconnect.
+    private var realtimeArmedAt: Date?
     /// Last-offload-attempt time (unix seconds), persisted so the rate limiter survives relaunch
     /// (matches WHOOP's DATA_SYNC_WORKER_LAST_WORK_TIME watermark).
     static let backfillLastAtKey = "backfillLastAt"
@@ -251,6 +321,11 @@ public final class BLEManager: NSObject, ObservableObject {
 
     public func disconnect() {
         intentionalDisconnect = true
+        // A user-initiated teardown is a clean slate: clear any #80 marginal-radio fallback so the next
+        // (manual) reconnect attempts the full R10/R11 stream again rather than inheriting old suspicion.
+        marginalRadio.reset()
+        standardHRFallback = false
+        state.standardHRMode = nil
         if let p = peripheral {
             central.cancelPeripheralConnection(p)
         }
@@ -594,9 +669,16 @@ public final class BLEManager: NSObject, ObservableObject {
     /// on disappear so it does not permanently compete with historical offload.
     public func startRealtime() {
         wantsRealtime = true
+        // The user explicitly (re-)asked for the full stream by opening Live / tapping Start HR — give the
+        // heavy R10/R11 burst another chance even if a prior marginal-radio fallback had tripped. If the
+        // radio still can't take it, the detector will simply trip again. (#80)
+        marginalRadio.reset()
+        standardHRFallback = false
+        state.standardHRMode = nil
         enableLiveNotifications(reason: "start realtime")
         send(.sendR10R11Realtime, payload: [0x01])
         send(.toggleRealtimeHR, payload: [0x01])
+        realtimeArmedAt = Date()       // start the arm→drop stopwatch for the marginal-radio detector
     }
     /// Stop the Live-tab realtime streams. The lightweight 0x2A37 HR keeps recording if firmware emits it.
     public func stopRealtime() {
@@ -630,7 +712,9 @@ public final class BLEManager: NSObject, ObservableObject {
         // skip them for 5/MG (it keeps the experimental strap log clean — re-subscribe + the 120s
         // bounce above are what keep a 5/MG link healthy).
         guard selectedModel.deviceFamily == .whoop4 else { return }
-        if wantsRealtime {
+        // Never re-arm the heavy R10/R11 burst once the marginal-radio fallback has tripped (#80) — that
+        // would just re-trigger the drop the keep-alive is meant to prevent. 0x2A37 keeps the HR flowing.
+        if wantsRealtime && !standardHRFallback {
             send(.sendR10R11Realtime, payload: [0x01])
             send(.toggleRealtimeHR, payload: [0x01])
         }   // re-arm so it can't lapse
@@ -882,6 +966,18 @@ extension BLEManager: CBCentralManagerDelegate {
                                didDisconnectPeripheral peripheral: CBPeripheral,
                                error: Error?) {
         Task { @MainActor in await collector?.flush() }
+        // #80 marginal-radio detection: judge this drop BEFORE the state resets below clobber the
+        // arm timestamp. A drop that is unintentional, error-bearing, and lands shortly after we armed
+        // the R10/R11 burst is the marginal-radio tell. Feed the detector; if it trips, the NEXT connect
+        // skips the heavy arm (the flag is intentionally NOT reset on disconnect so it survives rescan).
+        let timedOut = !intentionalDisconnect && error != nil
+        let sinceArm = realtimeArmedAt.map { Date().timeIntervalSince($0) }
+        if marginalRadio.connectionEnded(wasArmed: realtimeArmedAt != nil,
+                                         secondsSinceArm: sinceArm,
+                                         timedOut: timedOut) {
+            standardHRFallback = true
+            log("Marginal radio (#80): \(marginalRadio.consecutiveArmTimeouts) arm-then-timeout cycles — next connect uses standard-HR mode (0x2A37 only)")
+        }
         state.connected = false
         state.encryptedBond = false   // cleared with didBond; next session must re-prove the bond (#69)
         state.charging = nil          // a stale charging flag must not outlive the link
@@ -890,6 +986,7 @@ extension BLEManager: CBCentralManagerDelegate {
         whoop5SessionStarted = false
         clockRequested = false
         connectHandshakeDone = false
+        realtimeArmedAt = nil   // cleared after the marginal-radio detector above read it (#80)
         // Reset backfill state so the next connect starts a fresh offload (incl. the syncing pill —
         // a dropped link mid-offload must not leave "Syncing strap history…" stuck on, #77).
         backfillStarted = false
@@ -1192,11 +1289,22 @@ extension BLEManager: CBPeripheralDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.requestSync(.connect) }
         startBackfillTimer()   // re-offload the type-47 store every backfillIntervalSeconds
         startKeepAlive()       // always-ping: re-arm realtime, poll battery, watchdog the link
-        enableLiveNotifications(reason: "post-bond")
+        enableLiveNotifications(reason: "post-bond")   // includes 0x2A37 standard HR — the fallback path
         if wantsRealtime {
-            log("Realtime HR: arming after bond")
-            send(.sendR10R11Realtime, payload: [0x01])
-            send(.toggleRealtimeHR, payload: [0x01])
+            if standardHRFallback {
+                // #80: this radio repeatedly dropped the link the instant we armed the R10/R11 burst.
+                // Skip the heavy stream entirely; live HR rides the already-subscribed low-bandwidth
+                // 0x2A37 standard profile (subscribed by enableLiveNotifications above). SAFE either way:
+                // if 0x2A37 emits the user gets live HR on a radio that otherwise died; if it doesn't, at
+                // least the arm→die loop stops.
+                log("Realtime HR: standard-HR mode (low bandwidth) — skipping R10/R11 arm (#80)")
+                state.standardHRMode = "Standard HR mode (low bandwidth) — your Bluetooth radio couldn't sustain the full stream; live heart rate via the standard profile."
+            } else {
+                log("Realtime HR: arming after bond")
+                send(.sendR10R11Realtime, payload: [0x01])
+                send(.toggleRealtimeHR, payload: [0x01])
+                realtimeArmedAt = Date()   // start the arm→drop stopwatch for the marginal-radio detector
+            }
         }
     }
 
