@@ -183,9 +183,18 @@ public struct TrendChart: View {
                 .contentShape(Rectangle())
                 .onContinuousHover(coordinateSpace: .local) { phase in
                     guard showsHover else { return }
-                    switch phase {
-                    case .active(let location): hoverX = location.x
-                    case .ended: hoverX = nil
+                    // Update the hover position in a NON-animating transaction. Otherwise entering or
+                    // leaving the chart flips hoverX inside an animated context, the body re-evaluates,
+                    // and SwiftUI Charts re-runs the line's draw-on animation — flickering the curve to a
+                    // flat baseline and back as the cursor crosses the plot edge (#104). The crosshair's
+                    // own fade is the overlay's .animation(value: hoverX) above and is unaffected by this.
+                    var tx = Transaction()
+                    tx.disablesAnimations = true
+                    withTransaction(tx) {
+                        switch phase {
+                        case .active(let location): hoverX = location.x
+                        case .ended: hoverX = nil
+                        }
                     }
                 }
             }

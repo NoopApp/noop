@@ -112,6 +112,9 @@ object NoopPrefs {
     const val NAME = "noop_prefs"
     const val KEY_ONBOARDED = "noop.onboarded"
     const val KEY_LAST_SEEN_CHANGELOG = "noop.lastSeenChangelogVersion"
+    /** Terms-of-use version the user last accepted. Empty until the first-run gate is accepted; a
+     *  material terms change bumps [Terms.CURRENT_VERSION] and re-prompts. Mirrors macOS @AppStorage. */
+    const val KEY_ACCEPTED_TERMS_VERSION = "noop.acceptedTermsVersion"
 
     /** "Keep connected in the background" — drives [com.noop.ble.WhoopConnectionService]. Default on. */
     const val KEY_BACKGROUND_CONNECTION = "noop.backgroundConnection"
@@ -260,6 +263,19 @@ fun NoopRoot() {
     }
     var lastSeenChangelog by remember {
         mutableStateOf(prefs.getString(NoopPrefs.KEY_LAST_SEEN_CHANGELOG, "") ?: "")
+    }
+
+    // Terms acknowledgment gate — over EVERYTHING (before onboarding/pairing/Bluetooth) until the
+    // current terms version is accepted; re-appears if the terms materially change. (clickwrap)
+    var acceptedTerms by remember {
+        mutableStateOf(prefs.getString(NoopPrefs.KEY_ACCEPTED_TERMS_VERSION, "") ?: "")
+    }
+    if (acceptedTerms != Terms.CURRENT_VERSION) {
+        TermsGateScreen(onAccept = {
+            prefs.edit().putString(NoopPrefs.KEY_ACCEPTED_TERMS_VERSION, Terms.CURRENT_VERSION).apply()
+            acceptedTerms = Terms.CURRENT_VERSION
+        })
+        return
     }
 
     if (!onboarded) {

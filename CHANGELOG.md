@@ -17,6 +17,17 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 1.77 — First-run terms acknowledgment + an Explore chart fix
+
+- **New (Mac and Android):** a one-time, plain-English terms acknowledgment on first launch — what
+  NOOP is, that it's independent of WHOOP and that using it may breach WHOOP's Terms of Service, that
+  it's not a medical device, and that you use it at your own risk. You accept once; full terms in
+  `TERMS.md`.
+- **Fixed (Mac):** the Explore metric charts no longer flicker to a straight line when the cursor
+  crosses into or out of the graph.
+
+---
+
 ## 1.76 — Robust Apple Health import, marginal-radio HR mode, live HR graph
 
 - **Improved (Mac and Android):** a very large Apple Health export no longer fails to import because
