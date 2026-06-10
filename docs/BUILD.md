@@ -158,10 +158,48 @@ Copy the bundle wherever you like (e.g. `~/Desktop/NOOP.app`) and double-click t
 run macOS prompts for Bluetooth permission — the prompt text comes from
 `NSBluetoothAlwaysUsageDescription` in the Info.plist and explains that data stays on-device.
 
-### 3b. Developer ID signing (distributing to others)
+### 3b. Personal Team signing (free Apple ID)
 
-Ad-hoc signing only works on your own machine. To share a build with someone else, you need a
-**Developer ID** certificate from an Apple Developer account ($99/year).
+A free Apple ID gives you a **Personal Team** certificate that signs the app so it can run on
+other Macs — but Gatekeeper will warn about an "unidentified developer". The recipient needs to
+right-click → Open to accept it. No payment required.
+
+1. Open Xcode → Settings → Accounts → add your Apple ID → Xcode creates the certificate automatically
+2. Find your team ID:
+   ```bash
+   security find-identity -v -p codesigning
+   # Look for: "Apple Development: Your Name (XXXXXXXXXX)"
+   # The 10-character string in parentheses is your team ID
+   ```
+3. Set `DEVELOPMENT_TEAM` in `project.yml`:
+   ```yaml
+   settings:
+     base:
+       DEVELOPMENT_TEAM: XXXXXXXXXX  # your personal team ID
+   ```
+4. Re-run `xcodegen generate`
+5. Build:
+   ```bash
+   xcodebuild \
+     -project Strand.xcodeproj \
+     -scheme Strand \
+     -configuration Release \
+     -destination 'platform=macOS' \
+     -derivedDataPath build \
+     build
+   ```
+
+The `.app` is now signed with your personal certificate. When someone else opens it, macOS shows
+"Apple cannot verify this app" — they click **Done**, then go to **System Settings → Privacy &
+Security → scroll down → Open Anyway**. After confirming once, it opens normally.
+
+> Personal Team certificates cannot be used for notarisation — that requires a paid Developer ID.
+> Do not commit your team ID to the public repo.
+
+### 3c. Developer ID signing (Gatekeeper-transparent distribution)
+
+Developer ID costs $99/year but the app opens without any Gatekeeper warning on any Mac, once
+notarised.
 
 1. Open Xcode → Settings → Accounts → add your Apple ID
 2. Set `DEVELOPMENT_TEAM` in `project.yml` to your 10-character team ID:
