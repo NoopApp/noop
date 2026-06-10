@@ -17,6 +17,9 @@ final class HealthKitBridge: ObservableObject {
     @Published private(set) var auth: AuthState = .unknown
     @Published private(set) var lastSync: Date?
     @Published private(set) var syncing = false
+    /// The most recent failure surfaced by `sync` / `writeBack`. Cleared on a successful run. UI binds
+    /// here so an Apple Health auth revoke, quota hit, or invalid sample is visible instead of silent.
+    @Published private(set) var lastError: String?
 
     private let store = HKHealthStore()
     private let repo: Repository
@@ -149,8 +152,16 @@ final class HealthKitBridge: ObservableObject {
         try? await store.upsertAppleDaily(appleRows, deviceId: appleDeviceId)
         try? await store.upsertDailyMetrics(dmRows, deviceId: appleDeviceId)
 
-        await writeBack(whoopStore: store)
-        lastSync = Date()
+        // Only advance lastSync when the round-trip actually succeeded. A failed write-back used to
+        // be swallowed by `try?`, then lastSync moved forward — the next delta sync skipped the window
+        // and the data was never written back.
+        do {
+            try await writeBack(whoopStore: store)
+            lastSync = Date()
+            lastError = nil
+        } catch {
+            lastError = "Apple Health write-back failed: \(error.localizedDescription)"
+        }
     }
 
     // MARK: - Write back (NOOP → Health)
@@ -163,7 +174,9 @@ final class HealthKitBridge: ObservableObject {
     /// carry the same key (scoped to `HKSource.default()` so we never touch another app's data) and
     /// then save the fresh batch. HealthKit assigns a new UUID per save, so the previous strategy
     /// (no metadata, no delete) flooded Health with duplicates on every `sync()`.
-    private func writeBack(whoopStore: WhoopStore, days: Int = 14) async {
+    ///
+    /// Throws on save failure so the caller can decide whether to advance `lastSync`.
+    private func writeBack(whoopStore: WhoopStore, days: Int = 14) async throws {
         guard auth == .authorized else { return }
         let cal = Calendar.current
         let to = HealthKitBridge.dayString(Date())
@@ -216,7 +229,7 @@ final class HealthKitBridge: ObservableObject {
             let pred = NSCompoundPredicate(andPredicateWithSubpredicates: [bySource, byKey])
             _ = try? await self.store.deleteObjects(of: type, predicate: pred)
         }
-        try? await self.store.save(candidates.map { $0.sample })
+        try await self.store.save(candidates.map { $0.sample })
     }
 
     private struct DayAgg {
