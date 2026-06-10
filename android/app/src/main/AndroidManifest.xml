@@ -29,11 +29,12 @@
         android:name="android.permission.BLUETOOTH_ADMIN"
         android:maxSdkVersion="30" />
 
-    <!-- Android 6-11 (API 26-30) require a location permission to perform BLE scans.
-         Not requested on API 31+ thanks to neverForLocation above. -->
-    <uses-permission
-        android:name="android.permission.ACCESS_FINE_LOCATION"
-        android:maxSdkVersion="30" />
+    <!-- Fine location is needed on ALL API levels: pre-12 (API <=30) for BLE scans, and on every
+         version for GPS-tracked workouts (route/distance/pace). It is requested at runtime right
+         before a GPS workout starts (see rememberRequestLocation, #101) — NOT for BLE, which stays
+         opted out of location via neverForLocation above. Capping this at API 30 made GPS workouts
+         crash on Android 12+ because the permission could never be held. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
     <!-- Keep the BLE link alive while collecting/offloading in the background. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
