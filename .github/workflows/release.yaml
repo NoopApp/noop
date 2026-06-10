@@ -29,8 +29,10 @@ jobs:
       - name: Generate Xcode Project
         run: xcodegen generate
 
-      # Baut exakt das NOOPiOS-Target, welches die Mac-Dateien korrekt ausschließt
-      # Baut exakt das NOOPiOS-Target und ignoriert kaputte App-Icons
+      # Baut über das NOOPiOS-SCHEME (nicht -target), damit die Widget- und
+      # Live-Activity-Extension korrekt mitgebaut und embedded werden — `-target`
+      # umgeht die Scheme-Pre-Actions und den Dependency-Graph, sodass eine kaputte
+      # Extension nie CI-rot werden würde.
       #
       # CODE_SIGN_ENTITLEMENTS="" entfernt App-Group und HealthKit aus dem
       # ungesignten Build: das ist absichtlich (Compile-Only-Check), aber damit
@@ -40,7 +42,7 @@ jobs:
         run: |
           xcodebuild build \
             -project Strand.xcodeproj \
-            -target NOOPiOS \
+            -scheme NOOPiOS \
             -sdk iphoneos \
             -configuration Release \
             CONFIGURATION_BUILD_DIR="$(pwd)/build/ios_output" \
