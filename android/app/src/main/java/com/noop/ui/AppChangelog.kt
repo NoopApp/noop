@@ -25,7 +25,7 @@ object AppChangelog {
      * Bump this when you add a release below. The "What's New" sheet shows automatically when the
      * stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
      */
-    const val CURRENT_VERSION = "1.69"
+    const val CURRENT_VERSION = "1.71"
 
     data class Release(
         val version: String,
@@ -36,6 +36,23 @@ object AppChangelog {
 
     /** Newest first. */
     val releases: List<Release> = listOf(
+        Release(
+            version = "1.71",
+            title = "GPS-tracked workouts (Android)",
+            date = "June 2026",
+            items = listOf(
+                "New (Android): when you start a workout you now pick a sport (searchable), and your phone's GPS records the route, distance and pace as you go. Live distance + pace show on the workout card; at the end the route draws right on the Live screen — entirely offline, no maps are fetched. The session can also write to Health Connect (opt-in, under Data Sources). Builds on the manual workout tracking from v1.67. A community request. (Mac: version bump only.)",
+            ),
+        ),
+        Release(
+            version = "1.70",
+            title = "Clearer sync status + a responsive Compare screen",
+            date = "June 2026",
+            items = listOf(
+                "Improved (Android): the Live screen now says \"Syncing your strap history…\" plainly while the strap is offloading, so it's obvious it's working — the brief status-pill change was easy to miss. (Mac already showed this clearly.)",
+                "Fixed (Mac): the Compare screen's time-range controls now stack instead of overflowing when the window is narrow.",
+            ),
+        ),
         Release(
             version = "1.69",
             title = "Cleaner Live status + better sync diagnostics",

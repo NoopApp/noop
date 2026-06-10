@@ -17,6 +17,30 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 1.71 — GPS-tracked workouts (Android)
+
+A community-requested feature, built on the v1.67 manual workout tracking.
+
+- **Pick a sport on start.** Tapping "Start workout" opens a searchable picker (the Health Connect
+  exercise-type catalogue, ~21 sports) + a "Track GPS route" toggle that defaults on for distance sports.
+- **GPS route / distance / pace** via the platform `LocationManager` (no Google Play Services dependency).
+  Live distance + pace show on the workout card; accuracy/teleport filtering via a pure `TrackFilter`.
+- **Offline route drawing** — the route is stored as an encoded polyline (`WorkoutRow.routePolyline`,
+  Room migration 3→4) and drawn on a blank Compose `Canvas` (`RouteCanvas`) — **no map tiles fetched.**
+- **Health Connect writeback** — an `ExerciseSession` (+ `DistanceRecord`) on save, opt-in under Data
+  Sources (unions `EXERCISE_PERMISSIONS` into the writeback request; non-fatal if not granted).
+- New: `RouteMath` (Haversine/pace/polyline/normalize), `WorkoutSport`/`ExerciseTypes`, `LocationTracker`,
+  `RouteCanvas`; `WhoopConnectionService` gains the `location` foreground-service type. Mac: version bump only.
+- *Follow-ups:* per-session route on the Workouts screen; screen-off background tracking (dynamic FGS type).
+
+## 1.70 — Clearer sync status + responsive Compare (#91, #93)
+
+- **Android: sync is now visibly in progress.** The Live screen shows a plain "Syncing your strap
+  history…" line while the strap offloads, instead of only a brief "· syncing" pill suffix that was easy
+  to miss (#91, #93). `LiveScreen.kt`. Mac already surfaced this.
+- **macOS: responsive Compare controls.** The time-range pills + Add menu now stack (`ViewThatFits`)
+  instead of overflowing on a narrow window — ported from the iOS port's fix. `CompareView.swift`.
+
 ## 1.69 — Cleaner Live status + sync diagnostics (#91, #92)
 
 - **Fixed (Mac + Android): "Last Event" no longer leaks plumbing.** The Live status field was showing
