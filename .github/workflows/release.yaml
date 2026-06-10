@@ -9,33 +9,6 @@ permissions:
   contents: write # Erlaubt das Hochladen der Dateien in die Releases
 
 jobs:
-  # --- JOB 1: Android App bauen ---
-  build-android:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-          cache: 'gradle'
-
-      - name: Build Unsigned Android APK
-        run: |
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleRelease
-
-      - name: Upload Android Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-unsigned-apk
-          path: android/app/build/outputs/apk/
-
-  # --- JOB 2: iOS App bauen (Unsignierte .ipa) ---
   build-ios:
     runs-on: macos-15
     steps:
@@ -85,17 +58,11 @@ jobs:
 
   # --- JOB 3: GitHub Release erstellen ---
   create-release:
-    needs: [build-android, build-ios]
+    needs: [build-ios]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-
-      - name: Download Android Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: android-unsigned-apk
-          path: artifacts/
 
       - name: Download iOS Artifact
         uses: actions/download-artifact@v4
@@ -107,7 +74,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/**/*.apk
             artifacts/*.ipa
           name: Release ${{ github.ref_name }}
           body: |
@@ -116,7 +82,6 @@ jobs:
             These files were generated automatically and are **not digitally signed**.
                         
             ### Installation Instructions:
-            * **Android (`.apk`):** Can be installed directly on your smartphone (you may need to enable "Install from unknown sources" in your Android settings).
             * **iOS (`.ipa`):** Since this file is unsigned, it cannot be installed directly. Use tools like **Sideloadly**, **AltServer/AltStore**, or **TrollStore** on your PC/Mac to sign the app with your own Apple ID and transfer it to your iPhone.
           draft: false
           prerelease: false
