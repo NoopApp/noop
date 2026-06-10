@@ -32,9 +32,14 @@ struct StrandiOSApp: App {
                 .environmentObject(model.coach)
                 .environmentObject(health)
                 .preferredColorScheme(.dark)
+                // HealthKit sync runs from the scenePhase.active handler below. It used to ALSO run
+                // here in `.task`, which fired on initial view appearance and raced the scenePhase
+                // transition on cold launch — doubling the HealthKit writes on first run.
+                // HealthKitBridge.sync guards on `auth == .authorized` and `!syncing` so a duplicate
+                // call was a no-op once auth was settled, but on the very first launch (auth dialog
+                // still in flight) the two calls overlapped in unpredictable ways.
                 .task {
                     await health.requestAuthorization()
-                    await health.sync()
                 }
                 .onReceive(model.live.$heartRate) { _ in
                     liveActivity.update(
