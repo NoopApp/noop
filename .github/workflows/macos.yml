@@ -27,7 +27,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install XcodeGen
-        run: brew install xcodegen
+        run: |
+          brew install xcodegen
+          xcodegen --version | grep -qF "2.45" || { echo "Unexpected XcodeGen version — expected 2.45.x"; exit 1; }
 
       - name: Generate Xcode project
         run: xcodegen generate
