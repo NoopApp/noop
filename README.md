@@ -66,7 +66,8 @@ Pre-built apps you can run right now:
 
 > **First launch on macOS.** NOOP is **not notarized** by Apple — notarization needs a paid Apple
 > Developer ID tied to a real identity, which doesn't fit an anonymous, free project. The app *is*
-> sandboxed and ad-hoc code-signed, and the full source is here to inspect. Because it isn't notarized,
+> ad-hoc code-signed, and the full source is here to inspect (the distributed build is **not**
+> sandboxed — the App Sandbox applies to local Xcode builds). Because it isn't notarized,
 > macOS Gatekeeper blocks it on first open (you may see *"damaged"* or *"unverified developer"* — that's
 > the download quarantine flag, not real damage). To open it, do one of these **once**:
 >
@@ -80,7 +81,7 @@ Pre-built apps you can run right now:
 
 Prefer to build it yourself? See [`docs/BUILD.md`](docs/BUILD.md).
 
-Everything runs **offline**. The only feature that ever uses the network is the optional **AI Coach**, and only with your own API key.
+Everything runs **offline**. Exactly two features ever use the network, both user-initiated and opt-in: the optional **AI Coach** (off until you add your own API key) and **Settings → About → Check for updates** (a single read of GitHub's public releases API, only when you click it).
 
 ---
 
@@ -168,8 +169,8 @@ The macOS reference app organizes everything behind a single sidebar
 | **Data Sources** | One-tap import of a WHOOP CSV export or an Apple Health export, plus live-strap status. "Bring your history in once, then it's yours." |
 | **Notifications** | Configure local notifications and thresholds (`Strand/Data/NotificationSettingsStore.swift`). |
 | **Automations** | Turn the strap's physical inputs and live biometrics into Mac actions — all on-device (see below). |
-| **Coach** | An optional **AI Coach** you can ask about your data in plain language. It's the one feature that ever uses the network: off until you add your own OpenAI/Anthropic key, and it sends only a short text summary of recent metrics plus your question — never raw streams or identifiers. Available on both macOS and Android. See [`docs/PRIVACY_SECURITY.md`](docs/PRIVACY_SECURITY.md). |
-| **Settings** | Profile, preferences, the in-app **What's new** changelog, and an opt-in **Experimental** section (WHOOP 5/MG protocol probes). |
+| **Coach** | An optional **AI Coach** you can ask about your data in plain language. Off until you add your own OpenAI / Anthropic / Google Gemini key, and it sends only a short text summary of recent metrics plus your question — never raw streams or identifiers. (Besides the user-initiated update check, it's the only feature that ever uses the network.) Available on both macOS and Android. See [`docs/PRIVACY_SECURITY.md`](docs/PRIVACY_SECURITY.md). |
+| **Settings** | Profile, preferences, the in-app **What's new** changelog, a user-initiated **Check for updates** button, and an opt-in **Experimental** section (WHOOP 5/MG protocol probes). |
 | **Support** | Attribution + **optional** crypto donations. The whole app works without them. |
 
 There is also a **menu-bar extra** (`Strand/MenuBar/MenuBarContent.swift`) with a
@@ -190,8 +191,8 @@ and an in-app **"What's new"** changelog shown after each update.
 - **Haptic coaching.** HR-zone coaching and an experimental resting-stress nudge —
   the strap buzzes so you don't have to watch a screen.
 - **Smart alarm.** Arms the strap's own **firmware** alarm to buzz at your wake
-  time (still fires if the Mac is asleep or NOOP is closed), with an optional
-  light-sleep wake window when the Mac stays awake and connected.
+  time (still fires if the Mac is asleep or NOOP is closed). The buzz fires at
+  exactly the time you set — NOOP has no light-sleep early-wake layer.
 
 ---
 
@@ -215,7 +216,7 @@ NOOP is an independent, **experimental** project — capable, but a work in prog
 | Strap | Status |
 |---|---|
 | **WHOOP 4.0** | ✅ The tested, supported path. Live HR, recovery, strain, sleep, history offload — the full experience. |
-| **WHOOP 5.0 / MG** | 🧪 **Live heart rate works** (confirmed on real hardware). Pick "WHOOP 5.0 / MG" before connecting — and see the pairing note below, because you can't just scan for it. Deeper 5/MG metrics (recovery, strain, sleep) are still being reverse-engineered; there's an opt-in **Settings → Experimental** toggle for 5/MG owners who want to help map the protocol. |
+| **WHOOP 5.0 / MG** | 🧪 **Live heart rate and the history offload work** (confirmed on real hardware). Pick "WHOOP 5.0 / MG" before connecting — and see the pairing note below, because you can't just scan for it. Since v1.62 the strap's ~14-day history syncs: heart rate, R-R intervals, skin temperature, gravity/motion and steps decode from the type-47 records observed on the wire (layout v18 on current firmware), so recovery, strain and sleep are scored on-device from 5/MG data too, and skin-temperature deviation analytics ship. The firmware smart alarm ships as **experimental** (arming is acknowledged on hardware). Still unmapped: the tail bytes of the v18 record and other record versions — there's an opt-in **Settings → Experimental** toggle for 5/MG owners who want to help map them. |
 
 > ### Pairing a WHOOP 5.0 / MG — read this first
 >
@@ -245,6 +246,11 @@ NOOP is an independent, **experimental** project — capable, but a work in prog
 > re-pair afterwards. This is the **hardest part of 5/MG support** — if it refuses, you're almost
 > certainly still bonded to the WHOOP app (or another device); free the strap and retry.
 
+> **Firmware updates.** NOOP cannot install WHOOP firmware updates — only the official app delivers
+> them (temporarily re-pair the strap there if you want one). Firmware updates occasionally change
+> the strap's protocol, so check this project's **pinned issues** before accepting one to see
+> whether NOOP support is affected.
+
 The app always tells you what's live now versus still building, both in onboarding and on each screen.
 
 ### What to expect when you start
@@ -259,6 +265,10 @@ needs a little data before everything fills in:
   then sharpens each night. WHOOP makes you wait for the same reason.
 - **In a hurry?** Import your WHOOP export in Data Sources and your full history
   fills in about a minute.
+- **Older Mac dropping the connection?** On pre-2018 Macs running a newer macOS via
+  OpenCore Legacy Patcher, the built-in Bluetooth controller can drop the link the
+  moment live streaming starts ([#80](../../issues/80)). A cheap external USB
+  Bluetooth adapter resolves it.
 
 ---
 
@@ -302,7 +312,8 @@ offload, and live notifications.
 
 Everything is stored on-device in SQLite (using
 [GRDB.swift](https://github.com/groue/GRDB.swift)). The schema is a versioned
-migrator (`Database.swift`, currently through `v9`). Examples of decoded-stream
+migrator (`Database.swift`; `WhoopStoreInfo.schemaVersion` in `WhoopStore.swift`
+is the source of truth for the current version). Examples of decoded-stream
 tables created in `v1`–`v3`:
 
 ```sql
@@ -374,8 +385,9 @@ open Strand.xcodeproj
 
 Notes:
 
-- Bundle id `com.noopapp.noop`, product name **NOOP**, sandboxed with the
-  Bluetooth and user-selected-files entitlements.
+- Bundle id `com.noopapp.noop`, product name **NOOP**, with the Bluetooth and
+  user-selected-files entitlements. Local Xcode builds run inside the App
+  Sandbox; the distributed release build is unsandboxed.
 - Swift Package Manager resolves the only third-party dependencies automatically:
   **GRDB.swift** (SQLite) and **ZIPFoundation** (export unzip).
 - Run the tests from Xcode (the `StrandTests` target + each package's test target),

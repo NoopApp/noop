@@ -1,9 +1,11 @@
 # NOOP — Feature Guide
 
-NOOP is a standalone, fully **offline** companion app for WHOOP straps (4.0 and 5.0). It pairs
+NOOP is a standalone, **offline-by-design** companion app for WHOOP straps (4.0 and 5.0). It pairs
 directly with the strap over Bluetooth Low Energy — **no WHOOP account, no
 cloud** — stores everything on-device in SQLite, imports your WHOOP and Apple Health exports,
-and computes recovery, strain, HRV and sleep locally. The macOS app (in `Strand/`) is the
+and computes recovery, strain, HRV and sleep locally. Exactly two features ever touch the
+network, both user-initiated: the opt-in, bring-your-own-key **AI Coach** and the
+**Check for updates** button (see [`PRIVACY_SECURITY.md`](PRIVACY_SECURITY.md)). The macOS app (in `Strand/`) is the
 reference implementation; Android (in `android/`) is a full, shipped app, and iOS is an
 experimental, build-from-source community port ([PR #42](../../../pull/42)).
 
@@ -34,7 +36,7 @@ Screens are grouped below by whether they need a connected strap:
 
 | Needs a connected strap (live BLE) | Works from imported data alone |
 | --- | --- |
-| Live, Breathe (for haptics), Intervals (for haptics), Health Monitor (live HR), Automations (to act), Notifications (to buzz) | Control Center, Explore, Compare, Insights, Sleep, Trends, Workouts, Stress, Apple Health, Data Sources |
+| Live, Breathe (for haptics), Intervals (for haptics), Health Monitor (live HR), Automations (to act), Notifications (to buzz) | Control Center, Intelligence, Coach (needs your own API key), Explore, Compare, Insights, Sleep, Trends, Workouts, Stress, Apple Health, Data Sources |
 
 Most of NOOP works the moment you import an export. The strap adds the *live* layer — real-time
 heart rate, haptic cues, and physical-input automations.
@@ -93,6 +95,10 @@ The home dashboard (`TodayView.swift`, titled "Control Center"). A tight, gaples
 - **Today's Synthesis** — the signature **Recovery Ring** (HRV and resting HR underneath) beside
   a plain-English read-out ("Recovery is strong and sleep was consistent.") and a recovery state
   word (Depleted / Low / Steady / Primed / Peak).
+- **Readiness** — a "Should you push today?" read-out synthesized from your own history (HRV vs
+  baseline, resting-HR drift, respiratory drift, training-load balance and monotony) into a single
+  headline — Primed / Balanced / Strained / Run down — with the drivers behind it. Local math, not
+  medical advice.
 - **Key Metrics** — a uniform tile grid, each with a 14-day sparkline: Recovery, Day Strain
   (of 21), Sleep (hours + efficiency), HRV, Resting HR, Blood Oxygen, Respiratory, Steps,
   Weight, Calories. WHOOP metrics come from the `my-whoop` source; Steps/Weight/Calories/
@@ -101,6 +107,29 @@ The home dashboard (`TodayView.swift`, titled "Control Center"). A tight, gaples
 - **Last Workouts** — up to six recent sessions as tiles (duration, date, avg HR, kcal).
 - **Data Sources** — a footer showing whether WHOOP and Apple Health data are present, with day/
   session counts.
+
+---
+
+## Intelligence
+
+**Sidebar: Intelligence · works from strap-collected data.**
+
+`IntelligenceView.swift` — NOOP's own recovery / strain / sleep scores for recent nights,
+computed on-device from the raw strap streams using the WHOOP model shape — so live-collected
+days score with no cloud and no import. Each night gets a card with its scores and the signals
+behind them, plus a Recompute button. Like everything NOOP derives, approximate.
+
+---
+
+## AI Coach
+
+**Sidebar: Coach · optional, bring your own API key — one of the two networked features.**
+
+`CoachView.swift` — ask about your recovery, strain, sleep and workouts in plain language.
+Strictly opt-in: nothing works (or connects) until you paste your own OpenAI, Anthropic, or
+Google Gemini key (stored in the macOS Keychain). When you ask a question, only a compact text
+summary of recent metrics plus your question is sent to the provider you chose — never raw
+streams or identifiers. See [`PRIVACY_SECURITY.md`](PRIVACY_SECURITY.md) §1.1a.
 
 ---
 
@@ -455,8 +484,25 @@ of history. On-device and approximate — informational only, **not** a diagnosi
 - **Profile** — age, sex, weight, height, and max heart rate (auto-estimated via Tanaka, or a
   manual override). These power your zones, calorie estimates and recovery baselines.
 - **Strap** — connection status, battery, and Re-scan / Disconnect controls.
-- **About** — version, the "all your data, none of the cloud" note, a **medical disclaimer**, and
+- **Experimental · WHOOP 5/MG** — opt-in research toggles for 5/MG owners, off by default and
+  never touching a WHOOP 4.0: a **protocol probe** (send a puffin realtime-stream request after
+  the handshake and log what comes back) and a **raw puffin frame recorder** (save frames the
+  strap already sent — timestamped, with the live HR — to a shareable JSON file that helps map
+  the biometric layout).
+- **Backup & restore** — export everything (history, sleeps, workouts, settings) to a single
+  file you can copy to another Mac; import replaces this Mac's data with a backup.
+- **About** — version, the in-app **What's new** changelog, a user-initiated **Check for
+  updates** button (a single read of GitHub's public releases API — the other networked
+  feature), the "all your data, none of the cloud" note, a **medical disclaimer**, and
   attribution to the community protocols NOOP is built on.
+
+---
+
+## What's New window
+
+`WhatsNewView.swift` — a proper in-app changelog, shown automatically after an update and
+reachable any time from **Settings → About → What's new**. Up top it restates what NOOP is and
+what to expect (independent, experimental, the WHOOP 5/MG status), then lists every release.
 
 ---
 

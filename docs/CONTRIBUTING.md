@@ -437,7 +437,8 @@ Only after re-reading [The BLE safety contract](#the-ble-safety-contract-read-th
 ### Add a database column or table
 
 Schema lives in `Packages/WhoopStore/Sources/WhoopStore/Database.swift` as a **versioned GRDB
-`DatabaseMigrator`** (currently through `v9`).
+`DatabaseMigrator`** (`WhoopStoreInfo.schemaVersion` in `WhoopStore.swift` is the source of truth
+for the current version).
 
 - **Never edit an existing migration.** They've already run on users' on-device databases. Add a
   **new** `migrator.registerMigration("vN") { db in … }` block.

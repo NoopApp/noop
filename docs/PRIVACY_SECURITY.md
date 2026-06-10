@@ -22,9 +22,11 @@ local SQLite — has no network layer at all: no phone-home, no analytics, no ac
 no login, no cloud sync, and no telemetry. Everything NOOP computes about you lives in a
 single SQLite file on your own device.
 
-There is exactly **one** opt-in exception: the **AI Coach** (§1.1a). It is off until you
-turn it on with your own API key; when you ask it a question it sends a short text
-summary of your recent metrics to the provider you choose. Nothing else in the app ever
+There are exactly **two** user-initiated exceptions. The opt-in **AI Coach** (§1.1a) is
+off until you turn it on with your own API key; when you ask it a question it sends a
+short text summary of your recent metrics to the provider you choose. The
+**"Check for updates"** button performs a single read of GitHub's public releases API —
+only when you click it, and it sends nothing about you. Nothing else in the app ever
 touches the network, and your raw data never does.
 
 Data enters NOOP two ways:
@@ -34,17 +36,21 @@ Data enters NOOP two ways:
 | Live collection | Bluetooth LE, strap → device | Read-only from the strap |
 | File import | User-selected files on disk | Read-only from disk |
 
-The only outbound path is the opt-in AI Coach; the biometric pipeline produces no network
-traffic of any kind.
+The only outbound paths are the opt-in AI Coach and the user-initiated update check; the
+biometric pipeline produces no network traffic of any kind.
 
-### 1.1 Network code: only the optional AI Coach
+### 1.1 Network code: only the AI Coach and the update check
 
 The biometric pipeline and all five Swift packages
 (`WhoopProtocol`, `WhoopStore`, `StrandAnalytics`, `StrandImport`, `StrandDesign`)
 contain **no** use of `URLSession`, `URLRequest`, `NWConnection`, `dataTask`, or any
 other networking API. The **only** networking anywhere in the app is the AI Coach
 (`Strand/AI/AICoach.swift` on macOS, `com.noop.ai.AiCoach` on Android), described in
-§1.1a. The package manifests reference dependency *download* URLs that Swift Package
+§1.1a, plus the user-initiated "Check for updates"
+(`Strand/System/UpdateChecker.swift` on macOS, `com.noop.update.UpdateCheck` on
+Android) — one read of GitHub's public releases API when, and only when, the user
+clicks the button; no background polling, no auto-update, nothing about the user
+sent. The package manifests reference dependency *download* URLs that Swift Package
 Manager resolves at build time, never at runtime:
 
 ```
@@ -61,23 +67,26 @@ The AI Coach lets you ask questions about your data in plain language. It is the
 feature that uses the network, and only on your terms:
 
 - **Off until you enable it.** You enter your own API key for the provider you choose
-  (OpenAI or Anthropic). No key, no network calls, ever.
+  (OpenAI, Anthropic, or Google Gemini). No key, no network calls, ever.
 - **What is sent.** When you ask a question, NOOP builds a compact **text** summary of
   your recent metrics (recovery, strain, sleep, HRV, resting HR over ~14 days, plus
   30-day averages and recent workouts) and sends it, with your question, directly to
-  that provider's API (`api.openai.com` / `api.anthropic.com`).
+  that provider's API (`api.openai.com` / `api.anthropic.com` /
+  `generativelanguage.googleapis.com`).
 - **What is NOT sent.** No raw biometric streams, no Bluetooth data, no account or
   device identifiers — only the summary text and your question.
 - **Your key, your relationship.** The request goes from your device straight to the
   provider you picked, under your own account. NOOP runs no server in between and keeps
   no copy.
 
-If you never enable the AI Coach, NOOP makes zero network connections.
+If you never enable the AI Coach and never click "Check for updates", NOOP makes zero
+network connections.
 
 ### 1.2 The macOS sandbox (and what it means for the AI Coach)
 
-On macOS the App Sandbox is the backstop. The app ships with a deliberately minimal
-entitlement set (`Strand/Resources/Strand.entitlements`):
+On macOS the entitlement set is deliberately minimal (`Strand/Resources/Strand.entitlements`);
+the App Sandbox enforces it on local Xcode builds (the distributed build is unsandboxed — see
+below):
 
 ```xml
 <key>com.apple.security.app-sandbox</key>                       <true/>
@@ -98,20 +107,22 @@ That is the entire entitlement file. Three keys:
 
 Notably **absent**:
 
-- `com.apple.security.network.client` — **no outbound network entitlement.** The macOS
-  sandbox will refuse any socket the app tries to open, **including the AI Coach's**. So
-  on the sandboxed macOS build the AI Coach cannot reach the network as currently
-  shipped — the whole macOS app, Coach included, is offline. (Android has no equivalent
-  sandbox restriction, so the AI Coach's call works there with your own key.) Turning the
-  macOS Coach on would mean adding this entitlement; until that's a deliberate choice, it
-  stays out and macOS stays fully offline.
+- `com.apple.security.network.client` — **no outbound network entitlement.** On a
+  **sandboxed build** the macOS sandbox refuses any socket the app tries to open,
+  including the AI Coach's and the update check's. The App Sandbox applies to local
+  Xcode builds; the **distributed macOS build is unsandboxed** (ad-hoc signed, not
+  notarized), so the opt-in Coach and the user-initiated update check work there —
+  on both macOS and Android those two remain the only features that ever attempt a
+  network connection.
 - `com.apple.security.network.server` — no inbound listener.
 - No `files.downloads`, `files.documents`, or any broad filesystem entitlement —
   the app cannot wander the disk; it sees only what the user hands it through the
   open panel, plus its own sandbox container.
 
-This is the structural guarantee behind "offline by design" on macOS: the privacy
-property is enforced by the OS, not merely by convention.
+On a sandboxed (local) build these limits are a structural guarantee enforced by the
+OS. On the distributed, unsandboxed build the offline posture rests on the code itself —
+which is why the network surface is kept to the two small, user-initiated, inspectable
+call sites above.
 
 > **Note on Hardened Runtime.** `project.yml` currently sets
 > `ENABLE_HARDENED_RUNTIME: NO` for local development builds. Distributable /
@@ -131,12 +142,13 @@ opens it at (`Strand/Collect/StorePaths.swift`):
 <Application Support>/OpenWhoop/whoop.sqlite
 ```
 
-Because the app is sandboxed, `<Application Support>` resolves **inside the app's
-sandbox container**, not the user's global `~/Library/Application Support`. Other
-apps cannot read it through normal filesystem access.
+On a sandboxed (local Xcode) build, `<Application Support>` resolves **inside the app's
+sandbox container**, where other apps cannot read it through normal filesystem access;
+on the unsandboxed distributed build it is the regular `~/Library/Application Support`.
 
 The schema is defined by a versioned `DatabaseMigrator` in
-`Packages/WhoopStore/Sources/WhoopStore/Database.swift` (currently schema version 9).
+`Packages/WhoopStore/Sources/WhoopStore/Database.swift` (`WhoopStoreInfo.schemaVersion`
+is the source of truth for the current version).
 It holds exactly the kinds of data you would expect from the features:
 
 - **Decoded biometric streams** (durable): `hrSample`, `rrInterval`, `spo2Sample`,
@@ -160,7 +172,8 @@ data on disk relies on the platform:
 - **FileVault** (full-disk encryption, on by default on modern Macs) protects the
   database whenever the disk is at rest / the machine is powered off.
 - The **sandbox container** keeps other user-space apps from reading the file
-  directly.
+  directly (on sandboxed local builds; the distributed build relies on FileVault
+  and normal user-account separation).
 
 What this does **not** protect against: an attacker with your unlocked, logged-in
 session, or a backup/Time Machine copy of the container made while FileVault is
@@ -400,7 +413,7 @@ bundle of CSV files, but the same defensive posture applies.
 
 | Surface | Risk | Mitigation | Where |
 |---------|------|------------|-------|
-| Process | Data exfiltration / network egress | Only the opt-in AI Coach networks (your key, to your chosen provider, a text summary — §1.1a), on both macOS and Android — nothing else makes a network call, and nothing is sent until you ask | `Strand/AI/AICoach.swift`, `android/.../ai/AiCoach.kt` |
+| Process | Data exfiltration / network egress | Only the opt-in AI Coach (your key, to your chosen provider, a text summary — §1.1a) and the user-initiated update check (one read of GitHub's public releases API) network, on both macOS and Android — nothing else makes a network call, and nothing is sent until you ask | `Strand/AI/AICoach.swift`, `android/.../ai/AiCoach.kt`, `Strand/System/UpdateChecker.swift`, `android/.../update/UpdateCheck.kt` |
 | Filesystem | Broad disk access | Only `files.user-selected.read-write`; data stays in the sandbox container | `Strand.entitlements`, `Strand/Collect/StorePaths.swift` |
 | BLE frames | Malformed / adversarial packets | CRC8 + CRC32 (+ CRC16 for v5) gating; reject on failure | `WhoopProtocol/Framing.swift`, `Strand/BLE/FrameRouter.swift` |
 | BLE frames | Out-of-bounds reads from short/lying length | `nil`-returning bounds-checked readers; slice clamping; min-length guards | `WhoopProtocol/Interpreter.swift` |

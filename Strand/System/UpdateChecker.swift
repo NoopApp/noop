@@ -3,8 +3,9 @@ import WhoopProtocol
 
 /// User-initiated "Check for updates": one call to GitHub's PUBLIC releases API, made ONLY when the
 /// user taps the button. No background polling and no auto-update — it just reads the latest version
-/// number and compares it to the installed one; nothing about the user is sent. (Uses the
-/// network-client entitlement, which is otherwise only for the opt-in, off-by-default AI Coach.)
+/// number and compares it to the installed one; nothing about the user is sent. (The distributed
+/// build is unsandboxed, so no network entitlement is involved; sandboxed local dev builds block
+/// this call. Networking is otherwise only the opt-in, off-by-default AI Coach.)
 @MainActor
 final class UpdateChecker: ObservableObject {
 

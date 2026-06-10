@@ -1,6 +1,6 @@
 # NOOP — System Architecture
 
-NOOP is a standalone, fully **offline** companion app for WHOOP straps (4.0 and 5.0). It talks
+NOOP is a standalone, **offline-by-design** companion app for WHOOP straps (4.0 and 5.0). It talks
 directly to the strap over Bluetooth Low Energy, stores everything on-device in SQLite, and computes
 recovery, strain, HRV, and sleep locally. There is no WHOOP cloud, no account —
 the app interoperates with **your own device and your own data**. It can also import data you already
@@ -17,8 +17,10 @@ own: WHOOP CSV exports and Apple Health exports.
 
 The system is a one-directional pipeline. Bytes arrive from the strap (or from an import file), get
 decoded into typed rows, land durably in SQLite, are read back through a thin repository, are turned
-into daily metrics by pure analytics functions, and finally render in SwiftUI. Nothing is ever sent
-off-device.
+into daily metrics by pure analytics functions, and finally render in SwiftUI. Nothing in this
+pipeline is ever sent off-device. (The only two network touches in the whole app sit outside it,
+both user-initiated: the opt-in, bring-your-own-key AI Coach in `Strand/AI/`, and the
+"Check for updates" button, a single read of GitHub's public releases API.)
 
 ```
                           ┌─────────────────────────────────────────────────────────┐
@@ -66,6 +68,8 @@ Strand/                         macOS SwiftUI app target (the reference implemen
 │   ├── AppModel.swift          @MainActor root state — owns BLE, Repository, profiles
 │   ├── RootView.swift          NavigationSplitView shell + NavItem routing
 │   └── ContentView.swift
+├── AI/                         opt-in, bring-your-own-key AI Coach engine (the network exception)
+│   └── AICoach.swift
 ├── BLE/                        CoreBluetooth + the live/decode seam
 │   ├── BLEManager.swift        CBCentral/CBPeripheral delegate, scan→bond→stream
 │   ├── FrameRouter.swift       pure decode→LiveState router (no CoreBluetooth)
@@ -88,6 +92,7 @@ Strand/                         macOS SwiftUI app target (the reference implemen
 │   ├── AppleHealthImport.swift Apple Health result → store rows
 │   ├── Profile.swift           user profile (age/sex/body/HRmax)
 │   └── BehaviorStore.swift     toggles for automations/coaching
+├── Onboarding/                 first-run wizard (OnboardingWizard.swift)
 ├── Screens/                    SwiftUI feature screens (Today, Live, Sleep, Trends…)
 ├── MenuBar/                    glanceable menu-bar extra
 └── System/                     macOS integrations (lock screen, Shortcuts)
@@ -102,10 +107,11 @@ Packages/                       Cross-platform Swift packages (iOS 16+ / macOS 1
 Tools/Backfill/                 CLI offload/replay tool
 ```
 
-The app target (`Strand/`) is the **macOS reference implementation**. iOS and Android apps are
-planned; the five packages already declare `.iOS(.v16)` and `.macOS(.v13)` and keep all
-UI-framework code behind `#if canImport(UIKit)` / `#if canImport(AppKit)` guards so the cores port
-unchanged.
+The app target (`Strand/`) is the **macOS reference implementation**. Android is a **shipped full
+app** (the `android/` tree — a native Kotlin/Compose re-implementation with APK releases); iOS
+exists as an experimental, build-from-source community port in [PR #42](../../../pull/42). The five
+packages declare `.iOS(.v16)` and `.macOS(.v13)` and keep all UI-framework code behind
+`#if canImport(UIKit)` / `#if canImport(AppKit)` guards so the cores port unchanged.
 
 ---
 
@@ -285,8 +291,9 @@ shell doesn't re-render on every beat.
 
 ## 7. Storage model (WhoopStore / SQLite)
 
-GRDB drives a migrator (`WhoopStoreInfo.schemaVersion`, currently `9`). The schema groups into four
-concerns:
+GRDB drives a migrator versioned by `WhoopStoreInfo.schemaVersion`
+(`Packages/WhoopStore/Sources/WhoopStore/WhoopStore.swift` — the source of truth for the current
+schema version). The schema groups into four concerns:
 
 **Durable decoded streams** — natural key `(deviceId, ts)`, one row per sample:
 `hrSample`, `rrInterval`, `event`, `battery`, plus the type-47 biometrics `spo2Sample`,
@@ -359,8 +366,9 @@ backfilled streams, or imported data interchangeably. **All derived values are a
 `StrandApp` (`@main`) builds a single `AppModel`, injects it plus `LiveState`, `Repository`,
 `ProfileStore`, and `BehaviorStore` into the environment, and presents a `WindowGroup` (dark, hidden
 title bar) alongside a glanceable `MenuBarExtra`. `RootView` is a `NavigationSplitView` whose sidebar
-is the `NavItem` enum (Today, Live, Breathe, Intervals, Explore, Compare, Insights, Sleep, Trends,
-Workouts, Health, Stress, Apple Health, Data Sources, Notifications, Automations, Settings, Support).
+is the `NavItem` enum (Today, Intelligence, Coach, Live, Breathe, Intervals, Explore, Compare,
+Insights, Sleep, Trends, Workouts, Health, Stress, Apple Health, Data Sources, Notifications,
+Automations, Settings, Support).
 
 Screens bind to `Repository`'s published `days`/`sleeps` caches (refreshed on data change, not on the
 ~1 Hz stream) and render with `StrandDesign` components — `RecoveryRing`, `StrainGauge`, `Hypnogram`,
@@ -373,8 +381,11 @@ computed locally.
 
 ## 11. Design principles, restated
 
-1. **Offline by construction.** There is no network client anywhere in the data path. The strap, the
-   SQLite file, and the UI are the whole system.
+1. **Offline by construction.** There is no network client anywhere in the data path — the strap,
+   the SQLite file, and the UI are the whole system. The only two exceptions sit outside the data
+   path and are user-initiated: the opt-in, bring-your-own-key AI Coach (which sends a short text
+   summary, never raw streams), and the "Check for updates" button (a single read of GitHub's
+   public releases API).
 2. **Decoded-first durability.** Metrics are committed before raw is queued; the raw outbox is a
    prunable convenience, never the source of truth.
 3. **Resumable safe-trim.** The strap forgets historical data only after NOOP has it durably and has

@@ -1,10 +1,12 @@
 # NOOP — Android Port Guide
 
-NOOP is a standalone, fully **offline** companion app for WHOOP straps (4.0 and 5.0). It pairs
+NOOP is a standalone, **offline-by-design** companion app for WHOOP straps (4.0 and 5.0). It pairs
 directly with the strap over Bluetooth Low Energy, stores everything on-device in SQLite, imports
-WHOOP CSV exports and Apple Health exports, and computes recovery / strain / HRV / sleep locally.
-There is no cloud, no account — the app talks only to **your own device** and
-works only with **your own data**.
+WHOOP CSV exports, Apple Health exports and Health Connect data, and computes recovery / strain /
+HRV / sleep locally. There is no cloud, no account — the app talks only to **your own device** and
+works only with **your own data**. The only two network touches are user-initiated: the opt-in,
+bring-your-own-key AI Coach and the Check-for-updates button (see
+[`PRIVACY_SECURITY.md`](PRIVACY_SECURITY.md)).
 
 This document covers the **Android client** under [`android/`](../android). The macOS app is the
 reference implementation; the Android app is a native re-implementation of the same wire protocol
@@ -17,16 +19,15 @@ and on-device data model, not a wrapper around the Swift code.
 > approximations and are **not** clinically validated. See [`../DISCLAIMER.md`](../DISCLAIMER.md)
 > and [`../ATTRIBUTION.md`](../ATTRIBUTION.md).
 
-> ### ⚠️ Status: faithful translation, **not yet compiled or device-tested**
+> ### Status: shipped — a full app with release APKs
 >
-> The Kotlin code in `android/` is a careful, line-by-line translation of the
-> **hardware-verified** macOS protocol and analytics. It has **not** been built with Android
-> Studio, run on an emulator, or tested against a real strap in this repository. Several files the
-> manifest and build refer to are **still stubs or absent** (see
-> [What exists vs. what is missing](#what-exists-vs-what-is-missing)). Treat the BLE connection
-> layer in particular as **unproven on Android** until validated against a physical WHOOP 4.0/5.0.
-> The [verification checklist](#verification-checklist) at the end is the gate before claiming the
-> Android client works.
+> The Kotlin app in `android/` is a complete, native re-implementation of the
+> **hardware-verified** macOS protocol and analytics — built, validated against real straps, and
+> distributed as `NOOP-full.apk` (plus a sample-data `NOOP-demo.apk`) on the
+> [Releases](../../../releases) page. It pairs over BLE, offloads and scores on-device, and
+> imports WHOOP CSV / Apple Health / Health Connect history. The
+> [verification checklist](#verification-checklist) at the end is the regression gate for changes
+> to the protocol, storage, or BLE layers.
 
 ---
 
@@ -34,7 +35,6 @@ and on-device data model, not a wrapper around the Swift code.
 
 - [Design intent](#design-intent)
 - [Project structure](#project-structure)
-- [What exists vs. what is missing](#what-exists-vs-what-is-missing)
 - [Build prerequisites](#build-prerequisites)
 - [Building](#building)
 - [The protocol module (Kotlin port of `WhoopProtocol`)](#the-protocol-module-kotlin-port-of-whoopprotocol)
@@ -42,7 +42,7 @@ and on-device data model, not a wrapper around the Swift code.
 - [Storage with Room](#storage-with-room)
 - [Analytics](#analytics)
 - [Compose UI](#compose-ui)
-- [Permissions and the no-internet posture](#permissions-and-the-no-internet-posture)
+- [Permissions and the network posture](#permissions-and-the-network-posture)
 - [Donations](#donations)
 - [Verification checklist](#verification-checklist)
 - [Credits](#credits)
@@ -56,12 +56,12 @@ re-implements the same observable behavior in idiomatic Kotlin:
 
 | Swift package (reference) | Android counterpart | Status |
 | --- | --- | --- |
-| `WhoopProtocol` — BLE framing, CRC, command/event/packet decode | `com.noop.protocol` (Kotlin) | CRC ported; `parseFrame`/enums to do |
-| `WhoopStore` — GRDB/SQLite persistence | `com.noop.data` (Room) | entities ported; DAOs/DB to do |
-| `StrandAnalytics` — HRV / recovery / strain / sleep math | `com.noop.analytics` | RMSSD / zones / illness-watch ported |
-| `StrandImport` — WHOOP CSV + Apple Health importers | _(planned)_ | not started |
-| `StrandDesign` — SwiftUI design system | Jetpack Compose theme | theme stubs only |
-| `Strand/` macOS app (CoreBluetooth + UI) | `com.noop.ui` + `com.noop.ble` (Compose + `BluetoothGatt`) | not started |
+| `WhoopProtocol` — BLE framing, CRC, command/event/packet decode | `com.noop.protocol` (Kotlin) | shipped — `Crc`, `Framing`, `ParsedFrame`, `Streams`, `HistoricalStreams`, `DeviceFamily`, `Enums` |
+| `WhoopStore` — GRDB/SQLite persistence | `com.noop.data` (Room) | shipped — entities + `WhoopDao` + `WhoopDatabase` + `WhoopRepository` |
+| `StrandAnalytics` — HRV / recovery / strain / sleep math | `com.noop.analytics` | shipped — recovery / strain / sleep-stager / baselines / readiness / intelligence ports |
+| `StrandImport` — WHOOP CSV + Apple Health importers | `com.noop.ingest` | shipped — WHOOP CSV + Apple Health, plus Android-only Health Connect import/writeback |
+| `StrandDesign` — SwiftUI design system | Jetpack Compose theme | shipped — `Theme.kt`, `Components.kt`, `Charts.kt` |
+| `Strand/` macOS app (CoreBluetooth + UI) | `com.noop.ui` + `com.noop.ble` (Compose + `BluetoothGatt`) | shipped — `WhoopBleClient` + the full Compose screen set |
 
 The single source of truth that **both** platforms must agree on is the protocol schema resource
 `Packages/WhoopProtocol/Sources/WhoopProtocol/Resources/whoop_protocol.json` (top-level keys
@@ -81,21 +81,28 @@ android/
 ├── settings.gradle.kts          # rootProject.name = "NOOP"; include(":app")
 ├── build.gradle.kts             # root: declares AGP / Kotlin / KSP plugin versions (apply false)
 ├── gradle.properties            # JVM args, AndroidX on, R8 full mode, parallel/caching
-├── gradle/wrapper/              # (wrapper jar/properties NOT yet committed — see below)
+├── gradlew / gradlew.bat        # committed Gradle wrapper (Gradle 8.7)
+├── gradle/wrapper/              # wrapper jar + properties (committed)
 └── app/
     ├── build.gradle.kts         # namespace com.noop, applicationId com.noop.whoop, Compose + Room
+    ├── proguard-rules.pro       # R8 rules for the release build
     └── src/
         ├── main/
         │   ├── AndroidManifest.xml
         │   ├── java/com/noop/
-        │   │   ├── protocol/    # Crc.kt  (+ Framing.kt, ParseFrame.kt, Schema.kt to come)
-        │   │   ├── data/        # Entities.kt  (+ Daos.kt, NoopDatabase.kt to come)
-        │   │   ├── analytics/   # Analytics.kt
-        │   │   ├── ble/         # (BluetoothGatt manager to come)
-        │   │   └── ui/          # (MainActivity + Compose screens to come)
-        │   └── res/values/      # colors.xml, themes.xml, strings.xml
-        └── test/java/com/noop/
-            └── analytics/AnalyticsTest.kt
+        │   │   ├── protocol/    # Crc, Framing, ParsedFrame, Streams, HistoricalStreams, DeviceFamily, Enums
+        │   │   ├── data/        # Entities, WhoopDao, WhoopDatabase, WhoopRepository, backup + demo seeding
+        │   │   ├── analytics/   # HRV / recovery / strain / sleep / readiness / intelligence ports
+        │   │   ├── ingest/      # WHOOP CSV, Apple Health and Health Connect importers (+ writeback)
+        │   │   ├── ble/         # WhoopBleClient (GATT), Backfiller, foreground connection service
+        │   │   ├── ui/          # MainActivity, AppRoot and the Compose screens
+        │   │   ├── ai/          # opt-in, bring-your-own-key AI Coach (the network exception)
+        │   │   ├── notif/       # wrist alerts (notification listener) + optional call alerts
+        │   │   ├── update/      # user-initiated GitHub release check
+        │   │   ├── widget/      # home-screen Glance widget
+        │   │   └── location/    # GPS route tracking for manual workouts
+        │   └── res/             # themes, strings, launcher icons, widget + data-extraction XML
+        └── test/java/com/noop/  # JVM unit tests: protocol parity, analytics vectors, UI helpers
 ```
 
 ### Version contract
@@ -116,56 +123,9 @@ bump forces matching KSP and Compose-compiler bumps:
 | `sourceCompatibility` / `jvmTarget` | `17` | JDK 17 |
 | `applicationId` | `com.noop.whoop` | `.debug` suffix on debug builds |
 
-The app declares **no `INTERNET` permission** by design (see
-[Permissions](#permissions-and-the-no-internet-posture)) and sets `android:allowBackup="false"`.
-
----
-
-## What exists vs. what is missing
-
-Be honest about the state of the port before building on it.
-
-**Present and ported** (under `android/app/src/main/java/com/noop/`):
-
-- `protocol/Crc.kt` — `Crc.crc8`, `Crc.crc32`, `Crc.crc16Modbus`. **Ported verbatim** from
-  `Packages/WhoopProtocol/Sources/WhoopProtocol/Framing.swift` (same CRC8 table, same zlib CRC-32
-  table generation, same CRC16-Modbus loop). Returns are widened (`Int`/`Long`) because Kotlin has
-  no commonly-used unsigned return types, but carry only the low 8/16/32 bits.
-- `data/Entities.kt` — Room `@Entity` classes mirroring the GRDB schema: `DeviceRow`, `HrSample`,
-  `RrInterval`, `EventRow`, `BatterySample`, `Spo2Sample`, `SkinTempSample`, `RespSample`,
-  `GravitySample`, `DailyMetric`, `SleepSession`, `MetricSeriesRow`. Natural/composite keys match
-  the Swift `ON CONFLICT … DO NOTHING` upserts (use `OnConflictStrategy.IGNORE`).
-- `analytics/Analytics.kt` — `Hrv.rmssd`, `Zones.zone` / `Zones.hrMaxTanaka`, `IllnessWatch.evaluate`.
-  Ported from `Strand/App/AppModel.swift` (`rmssd`, `coachZone`, `evaluateIllness`).
-- `test/java/com/noop/analytics/AnalyticsTest.kt` — JUnit unit tests for the analytics above
-  (RMSSD known-vector, zone ladder/boundaries, Tanaka rounding, illness-watch flag logic). These
-  are the **only** tests in the module today.
-- Manifest, `res/values/{colors,themes,strings}.xml`, launcher mipmaps, and
-  `res/xml/data_extraction_rules.xml`.
-
-**Referenced but NOT yet present** (the build/manifest will not assemble until these land):
-
-| Missing file | Referenced by | Needed for |
-| --- | --- | --- |
-| `com/noop/NoopApplication.kt` | `AndroidManifest.xml` (`android:name=".NoopApplication"`) | app `Application` subclass |
-| `com/noop/ui/MainActivity.kt` | `AndroidManifest.xml` (launcher `<activity>`) | Compose entry point |
-| `app/proguard-rules.pro` | `app/build.gradle.kts` (release `proguardFiles`) | R8 release build |
-| `gradle/wrapper/gradle-wrapper.{jar,properties}`, `gradlew`, `gradlew.bat` | `./gradlew …` | reproducible Gradle version |
-| `com/noop/protocol/Framing.kt` (`verifyFrame`, `Reassembler`) | BLE layer | frame validation + reassembly |
-| `com/noop/protocol/ParseFrame.kt` (`parseFrame`) | decode/UI | field-level decode |
-| `com/noop/protocol/Schema.kt` + bundled `whoop_protocol.json` asset | `parseFrame` | enum/packet specs |
-| `com/noop/protocol/DeviceFamily.kt` (UUIDs, CLIENT_HELLO) | BLE layer | WHOOP 4.0 vs 5.0 |
-| `com/noop/protocol/Commands.kt` (`WhoopCommand`) | BLE layer | build/send command frames |
-| `com/noop/ble/*` (`BluetoothGatt` manager, frame router, collector, backfiller) | app | the BLE pipeline |
-| `com/noop/data/*Dao.kt`, `NoopDatabase.kt` | app | Room DAOs + database |
-| `com/noop/ui/*` Compose screens | app | the UI |
-
-> The gradle wrapper is `.gitignore`d only at the artifact level (`android/.gradle/`,
-> `android/build/`, `android/app/build/`, `android/local.properties`, `android/.idea/`,
-> `android/*.iml`). The **wrapper script + properties are not ignored** and should be committed so
-> the project builds on a clean checkout. If `gradle/wrapper/gradle-wrapper.properties` is absent,
-> run `gradle wrapper --gradle-version 8.7` once (with a system Gradle that supports AGP 8.5) to
-> generate it, then commit it.
+The app declares a single **`INTERNET` permission**, used only by the opt-in AI Coach and the
+user-initiated update check (see [Permissions](#permissions-and-the-network-posture)), and sets
+`android:allowBackup="false"`.
 
 ---
 
@@ -176,7 +136,7 @@ Be honest about the state of the port before building on it.
 | JDK | **17** | AGP 8.5 / Kotlin 1.9 target JVM 17 |
 | Android SDK | API **34** platform + build-tools; `minSdk` 26 | install via Android Studio SDK Manager or `sdkmanager` |
 | Android Studio | current stable (Koala / Ladybug or newer) | optional but recommended; provides the SDK and emulator |
-| Gradle | provided by the wrapper (target ~8.7) | do not rely on a global Gradle once the wrapper is committed |
+| Gradle | provided by the committed wrapper (8.7) | always build through `./gradlew`, not a global Gradle |
 | A physical WHOOP 4.0 or 5.0 strap | — | **required** for any real BLE validation; emulators have no BLE radio |
 | A physical Android device with BLE | Android 8.0+ (API 26+) | the emulator **cannot** reach a real strap |
 
@@ -192,17 +152,13 @@ or export `ANDROID_HOME` / `ANDROID_SDK_ROOT`.
 
 ## Building
 
-> These commands describe the intended flow. As noted above, `assembleDebug` will **fail** until
-> the missing `NoopApplication`, `MainActivity`, and `proguard-rules.pro` exist and the wrapper is
-> committed. The unit-test task runs today because the analytics + entities it exercises are present.
-
 ```bash
 cd android
 
-# Run the pure-Kotlin unit tests (analytics). No device needed.
+# Run the pure-Kotlin unit tests (protocol parity + analytics vectors). No device needed.
 ./gradlew :app:testDebugUnitTest
 
-# Assemble a debug APK (once the entry-point stubs exist).
+# Assemble a debug APK.
 ./gradlew assembleDebug
 # → app/build/outputs/apk/debug/app-debug.apk  (applicationId com.noop.whoop.debug)
 
@@ -210,7 +166,7 @@ cd android
 ./gradlew installDebug
 adb shell am start -n com.noop.whoop.debug/com.noop.ui.MainActivity
 
-# Release build (needs proguard-rules.pro; R8 full mode + resource shrink are enabled).
+# Release build (R8 full mode + resource shrink are enabled).
 ./gradlew assembleRelease
 ```
 
@@ -226,9 +182,11 @@ any Android Bluetooth types, so it can be unit-tested on the JVM exactly like `W
 in Swift CLI tools and tests. The BLE layer is responsible for turning the UUID *strings* the
 protocol exposes into `android.os.ParcelUuid` / `UUID` values.
 
-### Framing and CRCs (`Crc.kt`, present)
+### Framing and CRCs (`Crc.kt`)
 
-Already ported verbatim from `Framing.swift`:
+Ported verbatim from `Framing.swift` (same CRC8 table, same zlib CRC-32 table generation, same
+CRC16-Modbus loop; returns are widened to `Int`/`Long` because Kotlin has no commonly-used
+unsigned return types, but carry only the low 8/16/32 bits):
 
 | Function | Algorithm | Guards |
 | --- | --- | --- |
@@ -236,10 +194,10 @@ Already ported verbatim from `Framing.swift`:
 | `Crc.crc32(data)` | zlib CRC-32, reflected, poly `0xEDB88320` | the frame payload (both families) |
 | `Crc.crc16Modbus(data)` | CRC16-Modbus, poly `0xA001`, init `0xFFFF`, reflected | WHOOP 5.0 frame header |
 
-### Frame envelopes (to port — `Framing.swift` → `Framing.kt`)
+### Frame envelopes (`Framing.swift` → `Framing.kt`)
 
-Two families, one payload CRC. Port `verifyFrame(_:)`, `verifyFrame(_:family:)`,
-`frameFromPayload(...)`, and `Reassembler` from `Framing.swift`.
+Two families, one payload CRC. `Framing.kt` ports `verifyFrame(_:)`, `verifyFrame(_:family:)`,
+the command-frame builder, and `Reassembler` from `Framing.swift`.
 
 **WHOOP 4.0 envelope** (`DeviceFamily.whoop4`, CRC8 header):
 
@@ -269,33 +227,35 @@ total = declaredLength + 8
 ```
 
 `Reassembler.feed(fragment)` accumulates BLE notification fragments and emits complete frames; a
-complete WHOOP 4.0 frame is `length + 4` bytes where `length = u16 LE at buf[1..3]`. Port the
-`firstIndex(of: 0xAA)` resync logic exactly — partial fragments are the norm over GATT notifications.
+complete WHOOP 4.0 frame is `length + 4` bytes where `length = u16 LE at buf[1..3]`. The
+`firstIndex(of: 0xAA)` resync logic is ported exactly — partial fragments are the norm over GATT
+notifications.
 
-### Decode (to port — `Interpreter.swift` → `ParseFrame.kt`)
+### Decode (`Interpreter.swift` → `ParsedFrame.kt`)
 
 `parseFrame(frame)` (WHOOP 4.0) and `parseFrame(frame, family)` (WHOOP 5.0) build a `ParsedFrame`
-with `ok`, `typeName`, `seq`, `cmdName`, `crcOK`, `fields`, and a flat `parsed` map. The decoder is
-**schema-driven** — it reads static field offsets/dtypes/enums from the bundled
-`whoop_protocol.json`, then applies a per-type post-hook for irregular fields. The Kotlin port
-should:
+with `ok`, `typeName`, `seq`, `cmdName`, `crcOK`, `fields`, and a flat `parsed` map. The Swift
+decoder is **schema-driven** — it reads static field offsets/dtypes/enums from the bundled
+`whoop_protocol.json`, then applies a per-type post-hook for irregular fields. The Kotlin port:
 
-1. Bundle `whoop_protocol.json` as an `assets/` resource (or `res/raw/`) and parse it into a
-   `Schema` data class mirroring `Schema.swift` (`enums`, `envelope`, `packets`, with a
-   `byType` index built from each packet's `type` + `aliases`).
-2. Implement the LE readers (`u8`/`u16`/`u32`/`i16`, nullable on out-of-range) and the
+1. Carries the schema constants in `Enums.kt` (`PacketType`, `MetadataType`, `EventNumber`,
+   `CommandNumber` — a deliberately curated subset of the device's full enum tables) instead of
+   bundling the JSON. When touching them, port against `whoop_protocol.json` and the SHARED
+   CONTRACT, not memory.
+2. Implements the LE readers (`u8`/`u16`/`u32`/`i16`, nullable on out-of-range) and the
    `FieldBuilder`/post-hook pattern from `Interpreter.swift`.
-3. Alias the WHOOP 5.0 "puffin" packet types onto their base names via `canonicalTypeName`:
+3. Aliases the WHOOP 5.0 "puffin" packet types onto their base names via `canonicalTypeName`:
    `38 (PUFFIN_COMMAND_RESPONSE) → COMMAND_RESPONSE`, `56 (PUFFIN_METADATA) → METADATA`
    (`DeviceFamily.swift`).
 
 The enum groups in `whoop_protocol.json` are `PacketType` (16 entries), `MetadataType`,
-`EventNumber`, and `CommandNumber` (77 entries). Decode the command name for COMMAND (35) /
-COMMAND_RESPONSE (36) frames via the `CommandNumber` enum.
+`EventNumber`, and `CommandNumber` (77 entries). The command name for COMMAND (35) /
+COMMAND_RESPONSE (36) frames decodes via the `CommandNumber` enum.
 
-### Device family + GATT identity (to port — `DeviceFamily.swift` → `DeviceFamily.kt`)
+### Device family + GATT identity (`DeviceFamily.swift` → `DeviceFamily.kt`)
 
-`DeviceFamily` exposes everything the BLE layer needs as plain strings. Port these constants exactly:
+`DeviceFamily` exposes everything the BLE layer needs as plain strings. These constants are ported
+exactly:
 
 | | WHOOP 4.0 (`whoop4`) | WHOOP 5.0 (`whoop5`) |
 | --- | --- | --- |
@@ -306,11 +266,12 @@ COMMAND_RESPONSE (36) frames via the `CommandNumber` enum.
 | CLIENT_HELLO | none | `AA 01 08 00 00 01 E6 71 23 01 91 01 36 3E 5C 8D` |
 
 The WHOOP 5.0 CLIENT_HELLO is a fully-formed type-35 (COMMAND) frame written immediately after GATT
-discovery; transcribe it verbatim (`DeviceFamily.whoop5ClientHello`).
+discovery; it is transcribed verbatim (`DeviceFamily.whoop5ClientHello`).
 
-### Commands (to port — `Commands.swift` → `Commands.kt`)
+### Commands (`Commands.swift` → `Enums.kt` `CommandNumber` + `Framing.buildCommand`)
 
-Port the **curated, safe** `WhoopCommand` enum from `Strand/BLE/Commands.swift`. It intentionally
+The Kotlin port keeps the **curated, safe** command set from `Strand/BLE/Commands.swift` as the
+`CommandNumber` enum. It intentionally
 **excludes** destructive commands (reboot, firmware load, force-trim, ship-mode, power-cycle,
 fuel-gauge reset, BLE DFU) so the command sender can never brick or wipe the strap — preserve that
 exclusion. Raw values are the on-wire command codes; the ones the connect/offload lifecycle relies on:
@@ -329,22 +290,23 @@ exclusion. Raw values are the on-wire command codes; the ones the connect/offloa
 | `setAlarmTime` / `getAlarmTime` / `runAlarm` / `disableAlarm` | 66/67/68/69 | firmware alarm |
 | `runHapticsPattern` | 79 | buzz the motor (`[patternId, numLoops, 0,0,0]`) |
 
-`WhoopCommand.frame(seq, payload)` builds the framed COMMAND packet for WHOOP 4.0:
+`Framing.buildCommand(cmd, payload, seq)` builds the framed COMMAND packet for WHOOP 4.0:
 `[0xAA][len u16 LE][crc8(len)][type=35][seq][cmd][payload…][crc32 LE]`, where `len = (3 + payload) + 4`,
-crc8 is over the two length bytes, and crc32 (zlib) is over `[type][seq][cmd][payload]`. Port this
-builder exactly — it is the most-exercised write path.
+crc8 is over the two length bytes, and crc32 (zlib) is over `[type][seq][cmd][payload]`. This
+builder is ported exactly — it is the most-exercised write path.
 
 ---
 
 ## Android BLE layer
 
-This is the **highest-risk** part of the port and the least validated. The macOS reference is
+This was the **highest-risk** part of the port; it is now hardware-validated
+(`com.noop.ble.WhoopBleClient`). The macOS reference is
 `Strand/BLE/BLEManager.swift` (CoreBluetooth). The Android equivalent uses `BluetoothGatt`. The
 **sequence is identical**; only the API differs.
 
 ### CoreBluetooth → Android mapping
 
-| CoreBluetooth (macOS, verified) | Android `BluetoothGatt` (to build) |
+| CoreBluetooth (macOS, verified) | Android `BluetoothGatt` (`WhoopBleClient.kt`) |
 | --- | --- |
 | `CBCentralManager.scanForPeripherals(withServices: [service])` | `BluetoothLeScanner.startScan(filters, settings, callback)` with a `ScanFilter` on the service UUID |
 | `central.connect(peripheral)` | `device.connectGatt(context, autoConnect=false, gattCallback, TRANSPORT_LE)` |
@@ -386,7 +348,7 @@ This is the **highest-risk** part of the port and the least validated. The macOS
 - **Serialize GATT operations.** Unlike CoreBluetooth, Android's GATT stack allows **one
   outstanding operation at a time**. Queue writes / reads / descriptor writes and only issue the
   next on the matching callback, or operations will silently drop. The Swift `send(...)` path is
-  fire-and-forget because CoreBluetooth queues internally; the Kotlin port must add its own queue.
+  fire-and-forget because CoreBluetooth queues internally; the Kotlin port adds its own queue.
 - **CCCD descriptor.** `setCharacteristicNotification(true)` alone is not enough on Android — you
   must also write `BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE` to the Client Characteristic
   Configuration descriptor (`00002902-0000-1000-8000-00805f9b34fb`).
@@ -432,8 +394,8 @@ does not contain — and why logcat is opt-in — is covered in `PRIVACY_SECURIT
 ## Storage with Room
 
 `com.noop.data.Entities.kt` mirrors the GRDB schema from
-`Packages/WhoopStore/Sources/WhoopStore/Database.swift`. To finish the storage layer, add DAOs and a
-`@Database` and keep these invariants:
+`Packages/WhoopStore/Sources/WhoopStore/Database.swift`; `WhoopDao.kt` and `WhoopDatabase.kt`
+complete the storage layer. Keep these invariants when changing it:
 
 - **Composite natural keys preserved exactly** so `OnConflictStrategy.IGNORE` reproduces the Swift
   `ON CONFLICT(...) DO NOTHING` dedupe:
@@ -446,10 +408,14 @@ does not contain — and why logcat is opt-in — is covered in `PRIVACY_SECURIT
   | `BatterySample` | `battery` | `(deviceId, ts)` |
   | `Spo2Sample` | `spo2Sample` | `(deviceId, ts)` |
   | `SkinTempSample` | `skinTempSample` | `(deviceId, ts)` |
+  | `StepSample` | `stepSample` | `(deviceId, ts)` |
   | `RespSample` | `respSample` | `(deviceId, ts)` |
   | `GravitySample` | `gravitySample` | `(deviceId, ts)` |
   | `DailyMetric` | `dailyMetric` | `(deviceId, day)` |
   | `SleepSession` | `sleepSession` | `(deviceId, startTs)` |
+  | `JournalEntry` | `journal` | `(deviceId, day, question)` |
+  | `WorkoutRow` | `workout` | `(deviceId, startTs, sport)` |
+  | `AppleDaily` | `appleDaily` | `(deviceId, day)` |
   | `MetricSeriesRow` | `metricSeries` | `(deviceId, day, key)` + index `idx_metricSeries_device_key_day (deviceId, key, day)` |
   | `DeviceRow` | `device` | `id` |
 
@@ -458,17 +424,20 @@ does not contain — and why logcat is opt-in — is covered in `PRIVACY_SECURIT
 - **`payloadJSON` is deterministic sorted-keys JSON** (the parsed event fields minus
   `event`/`event_timestamp`). Match `StreamStore.encodePayload` so event rows are byte-identical
   across platforms.
-- **Schema version parity.** The GRDB migrations run `v1`…`v9`. The entities already carry forward
-  later additions (e.g. `synced` flags, `battery.charging` from v6, the v7 in-sleep aggregates
-  `spo2Pct`/`skinTempDevC`/`respRateBpm`, and the v9 `metricSeries`). When you add the Room
-  `@Database`, set its `version` and migrations to reach the same logical schema; Room generates the
-  SQL, so verify the emitted `CREATE TABLE`/index against `Database.swift` rather than assuming.
+- **Schema version parity.** The GRDB migrations are versioned by `WhoopStoreInfo.schemaVersion`
+  (`Packages/WhoopStore/Sources/WhoopStore/WhoopStore.swift` — the source of truth). The entities
+  carry forward the later additions (e.g. `synced` flags, `battery.charging` from v6, the v7
+  in-sleep aggregates `spo2Pct`/`skinTempDevC`/`respRateBpm`, the v9 `metricSeries`). The Room
+  `@Database` (`WhoopDatabase.kt`) tracks the same logical schema with its own version counter and
+  migrations; Room generates the SQL, so verify the emitted `CREATE TABLE`/index against
+  `Database.swift` rather than assuming.
 
-Some Swift tables are not yet represented as Room entities (`rawBatch`, `cursors`, `journal`,
-`workout`, `appleDaily`) — add them when the collector / importer / journal features are ported.
+The Swift-side `rawBatch` and `cursors` tables have no Room counterparts (Android's opt-in raw
+5/MG research capture writes a JSONL file via `BackfillCaptureJsonl` instead).
 
-The database is created **without** an `INTERNET` permission and lives entirely in the app's private
-storage; nothing is uploaded.
+The database lives entirely in the app's private storage; nothing in the data path is uploaded
+(the single `INTERNET` permission exists only for the opt-in AI Coach and the user-initiated
+update check).
 
 ---
 
@@ -485,43 +454,54 @@ storage; nothing is uploaded.
   anomalies fire. Requires ≥14 days of history. The Swift `behavior.illnessWatch` UI toggle is
   intentionally omitted from this pure function — the caller decides whether to run it.
 
-`AnalyticsTest.kt` locks these against known vectors. The heavier `StrandAnalytics` package
-(`RecoveryScorer`, `StrainScorer`, `SleepStager`, `CorrelationEngine`, `Baselines`, …) is **not yet
-ported**; port it module-by-module against the Swift sources and add matching JVM unit tests.
+`AnalyticsTest.kt` locks these against known vectors. The heavier `StrandAnalytics` ports live
+alongside in the same package — `RecoveryScorer.kt`, `StrainScorer.kt`, `SleepStager.kt`,
+`Baselines.kt`, `HrvAnalyzer.kt`, `WorkoutDetector.kt`, `AnalyticsEngine.kt`, plus
+`ReadinessEngine.kt` and `IntelligenceEngine.kt` — each ported module-by-module against the Swift
+sources with matching JVM unit tests (`SleepStagerTest.kt`, `ReadinessEngineTest.kt`,
+`BaselineSeedingTest.kt`, …).
 
 ---
 
 ## Compose UI
 
-The UI is Jetpack Compose (Material 3). Today only the theme resources
-(`res/values/colors.xml`, `themes.xml` with `Theme.NOOP`, `strings.xml` with `app_name = "NOOP"`)
-exist; `MainActivity` and the screens are not yet written. The dependency set in
-`app/build.gradle.kts` is already wired for Compose (BOM `2024.06.00`, Material 3, Material icons
+The UI is Jetpack Compose (Material 3). `MainActivity.kt` hosts `AppRoot.kt`, which routes the
+full screen set mirroring the reference app's information architecture (`Strand/Screens/`):
+Today, Intelligence, Coach, Live, Breathe, Intervals, Trends/Explore, Compare, Insights, Sleep,
+Workouts, Health, Stress, Apple Health, Data Sources, Notifications, Automations, Settings and
+Support — plus first-run onboarding (`OnboardingScreen.kt`), a What's-New sheet
+(`WhatsNewSheet.kt`), and a home-screen Glance widget (`com.noop.widget`). The dependency set in
+`app/build.gradle.kts` is wired for Compose (BOM `2024.06.00`, Material 3, Material icons
 extended, `activity-compose`, `navigation-compose`, `lifecycle-viewmodel-compose`) and Coroutines.
 
-When building screens, follow the reference app's information architecture
-(`Strand/Screens/`): Today, Live, Sleep, Trends, Stress, Workouts, Compare, Insights, Metric
-Explorer, Data Sources, Settings, Support. Treat `StrandDesign` (palette / components / charts) as
-the spec for tokens and chart styles, re-expressed as a Compose theme — do not hardcode colors.
+When changing screens, treat `StrandDesign` (palette / components / charts) as
+the spec for tokens and chart styles, re-expressed as the Compose theme in `Theme.kt` /
+`Components.kt` / `Charts.kt` — do not hardcode colors.
 
 ---
 
-## Permissions and the no-internet posture
+## Permissions and the network posture
 
-The manifest is deliberately minimal and **declares no `INTERNET` permission** — nothing leaves the
-device. Permissions, straight from `android/app/src/main/AndroidManifest.xml`:
+The manifest is deliberately minimal. The biometric pipeline makes no network calls; the single
+`INTERNET` permission exists only for the opt-in, bring-your-own-key AI Coach and the
+user-initiated update check. Permissions, straight from `android/app/src/main/AndroidManifest.xml`:
 
 | Permission | API range | Why |
 | --- | --- | --- |
+| `INTERNET` | all | **only** the opt-in AI Coach (`com.noop.ai`) and the user-initiated update check (`com.noop.update`) — nothing else networks |
 | `BLUETOOTH_SCAN` (`neverForLocation`) | 31+ | scan for the strap; opt out of location coupling |
 | `BLUETOOTH_CONNECT` | 31+ | connect / bond / GATT I/O |
 | `BLUETOOTH`, `BLUETOOTH_ADMIN` | ≤30 | legacy install-time BLE perms |
 | `ACCESS_FINE_LOCATION` | ≤30 | required for BLE scans on API 26–30 only |
 | `FOREGROUND_SERVICE` | all | keep the link alive while backgrounded |
 | `FOREGROUND_SERVICE_CONNECTED_DEVICE` | 34+ | typed foreground service for the GATT connection |
+| `FOREGROUND_SERVICE_LOCATION` | 34+ | GPS route tracking while a manual workout runs backgrounded |
+| `POST_NOTIFICATIONS` | 33+ | the dismissable "strap connected" notification (requested at runtime) |
+| `READ_PHONE_STATE` | all | optional call alerts — requested just-in-time; never reads numbers, contacts, or call history |
+| `android.permission.health.READ_*` / `WRITE_*` | — | optional Health Connect import, plus the opt-in (default-off) writeback of NOOP's own computed metrics |
 | `<uses-feature bluetooth_le required="true">` | — | BLE is mandatory hardware |
 
-On API 31+ you must **request `BLUETOOTH_SCAN` and `BLUETOOTH_CONNECT` at runtime** before scanning
+On API 31+ the app **requests `BLUETOOTH_SCAN` and `BLUETOOTH_CONNECT` at runtime** before scanning
 or connecting. `android:allowBackup="false"` and the `data_extraction_rules.xml` keep the local DB
 out of cloud/device-transfer backups — consistent with "your data stays on your device."
 
@@ -530,7 +510,7 @@ out of cloud/device-transfer backups — consistent with "your data stays on you
 ## Donations
 
 NOOP is free and works fully without paying anything; donations are optional support, never a
-paywall. The Android Support screen should reuse the same addresses as the macOS app
+paywall. The Android Support screen (`SupportScreen.kt`) reuses the same addresses as the macOS app
 (`Strand/System/ProjectInfo.swift`, kept in sync with `docs/DONATIONS.md`):
 
 | Symbol | Name | Address |
@@ -540,37 +520,38 @@ paywall. The Android Support screen should reuse the same addresses as the macOS
 | ETH | Ethereum | `0xd64D508b531c4b1297Ca4023C774e0E97aA67B7F` |
 | XRP | XRP | `rpvijHi2nVY9WWAJhojsAX5tJmHdmLtFhq` |
 
-Present them as copyable rows with a copy-to-clipboard action and accessible labels, mirroring
-`Strand/Screens/SupportView.swift`. Keep the screen attribution-first (credit the upstream
-reverse-engineering) with donations clearly marked optional.
+They are presented as copyable rows with a copy-to-clipboard action and accessible labels,
+mirroring `Strand/Screens/SupportView.swift`. Keep the screen attribution-first (credit the
+upstream reverse-engineering) with donations clearly marked optional.
 
 ---
 
 ## Verification checklist
 
-Nothing here has been validated on Android yet. Treat each item as **unverified** until checked off
-against a real build, a real device, and a real strap.
+The shipped app has passed this list against real builds, real devices, and real straps. Treat it
+as the **regression gate**: re-run the relevant block whenever you touch the protocol, storage, or
+BLE layers.
 
 **Build & static**
 
-- [ ] Commit the gradle wrapper (`gradlew`, `gradlew.bat`, `gradle/wrapper/gradle-wrapper.{jar,properties}`).
-- [ ] Add the missing entry points: `com/noop/NoopApplication.kt`, `com/noop/ui/MainActivity.kt`,
-      `app/proguard-rules.pro`.
-- [ ] `./gradlew :app:testDebugUnitTest` is green (analytics vectors).
+- [ ] `./gradlew :app:testDebugUnitTest` is green (protocol parity + analytics vectors).
 - [ ] `./gradlew assembleDebug` produces `app-debug.apk`.
 - [ ] `./gradlew assembleRelease` succeeds with R8 full mode + resource shrinking.
-- [ ] APK declares **no `INTERNET` permission** (`aapt dump permissions app-debug.apk`).
+- [ ] APK permissions match the manifest — `INTERNET` plus the BLE / foreground-service /
+      notification / Health Connect set, nothing more (`aapt dump permissions app-debug.apk`).
 
 **Protocol parity (JVM, no device)**
 
-- [ ] `Crc.crc8/crc32/crc16Modbus` match the Swift `FramingTests` vectors bit-for-bit.
-- [ ] Port `verifyFrame` + `Reassembler` and reproduce `FramingTests` / `ReassemblerTests`.
-- [ ] Port `parseFrame` (4.0) + `parseFrame(family: whoop5)` and reproduce `ParityTests` /
+- [ ] `Crc.crc8/crc32/crc16Modbus` match the Swift `FramingTests` vectors bit-for-bit
+      (`CrcTest.kt`).
+- [ ] `verifyFrame` + `Reassembler` reproduce `FramingTests` / `ReassemblerTests`
+      (`FramingTest.kt`).
+- [ ] `parseFrame` (4.0) + `parseFrame(family: whoop5)` reproduce `ParityTests` /
       `StreamsParityTests` / `HistoricalStreamsParityTests` against the same fixtures.
-- [ ] `WhoopCommand.frame(seq, payload)` reproduces the macOS command bytes (e.g. CLIENT_HELLO and a
-      known `GET_BATTERY_LEVEL` frame).
-- [ ] The bundled `whoop_protocol.json` asset is the same file as the Swift resource (same
-      `version`, enum counts: PacketType 16, CommandNumber 77).
+- [ ] `Framing.buildCommand(cmd, payload, seq)` reproduces the macOS command bytes (e.g.
+      CLIENT_HELLO and a known `GET_BATTERY_LEVEL` frame).
+- [ ] The `Enums.kt` constants stay in lockstep with the Swift `whoop_protocol.json` resource
+      (same on-wire codes and names for every entry the curated subset carries).
 
 **Storage parity (JVM/instrumented)**
 
@@ -580,7 +561,7 @@ against a real build, a real device, and a real strap.
 - [ ] `payloadJSON` for a decoded event equals the Swift `StreamStore.encodePayload` output
       (sorted keys, `event`/`event_timestamp` removed).
 
-**BLE on a real device with a real strap (the unproven layer)**
+**BLE on a real device with a real strap**
 
 - [ ] Runtime permission flow: `BLUETOOTH_SCAN` + `BLUETOOTH_CONNECT` granted on API 31+.
 - [ ] Scan finds the strap by the family service UUID (4.0 `61080001-…`, 5.0 `fd4b0001-…`).
