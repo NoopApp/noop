@@ -156,8 +156,13 @@ final class HealthKitBridge: ObservableObject {
     // MARK: - Write back (NOOP → Health)
 
     /// Write NOOP's strap-derived daily metrics (resting HR, HRV, SpO₂, respiratory rate) into Apple
-    /// Health so they appear across the user's Health ecosystem. Idempotency is left to HealthKit's
-    /// own de-duplication by sample time; we only write the most recent `days` of NOOP metrics.
+    /// Health so they appear across the user's Health ecosystem.
+    ///
+    /// Dedup model: each emitted sample carries a deterministic `HKMetadataKeyExternalUUID` derived
+    /// from `noopDeviceId + metric + day`. Before saving, we delete any of *our* prior samples that
+    /// carry the same key (scoped to `HKSource.default()` so we never touch another app's data) and
+    /// then save the fresh batch. HealthKit assigns a new UUID per save, so the previous strategy
+    /// (no metadata, no delete) flooded Health with duplicates on every `sync()`.
     private func writeBack(whoopStore: WhoopStore, days: Int = 14) async {
         guard auth == .authorized else { return }
         let cal = Calendar.current
@@ -166,25 +171,52 @@ final class HealthKitBridge: ObservableObject {
         let from = HealthKitBridge.dayString(fromDate)
         guard let rows = try? await whoopStore.dailyMetrics(deviceId: noopDeviceId, from: from, to: to) else { return }
 
-        var samples: [HKObject] = []
+        struct Candidate { let type: HKQuantityType; let key: String; let sample: HKQuantitySample }
+        var candidates: [Candidate] = []
+        func add(_ id: HKQuantityTypeIdentifier, _ unit: HKUnit, _ value: Double, _ day: String, _ at: Date) {
+            guard let type = HKQuantityType.quantityType(forIdentifier: id) else { return }
+            let key = "noop:\(noopDeviceId):\(id.rawValue):\(day)"
+            let sample = HKQuantitySample(
+                type: type,
+                quantity: .init(unit: unit, doubleValue: value),
+                start: at, end: at,
+                metadata: [HKMetadataKeyExternalUUID: key]
+            )
+            candidates.append(Candidate(type: type, key: key, sample: sample))
+        }
+
         for row in rows {
             guard let date = HealthKitBridge.date(from: row.day) else { continue }
             let noon = cal.date(bySettingHour: 12, minute: 0, second: 0, of: date) ?? date
-            if let rhr = row.restingHr, let t = HKQuantityType.quantityType(forIdentifier: .restingHeartRate) {
-                samples.append(HKQuantitySample(type: t, quantity: .init(unit: HKUnit.count().unitDivided(by: .minute()), doubleValue: Double(rhr)), start: noon, end: noon))
+            if let rhr = row.restingHr {
+                add(.restingHeartRate, HKUnit.count().unitDivided(by: .minute()), Double(rhr), row.day, noon)
             }
-            if let hrv = row.avgHrv, let t = HKQuantityType.quantityType(forIdentifier: .heartRateVariabilitySDNN) {
-                samples.append(HKQuantitySample(type: t, quantity: .init(unit: .secondUnit(with: .milli), doubleValue: hrv), start: noon, end: noon))
+            if let hrv = row.avgHrv {
+                add(.heartRateVariabilitySDNN, .secondUnit(with: .milli), hrv, row.day, noon)
             }
-            if let spo2 = row.spo2Pct, let t = HKQuantityType.quantityType(forIdentifier: .oxygenSaturation) {
-                samples.append(HKQuantitySample(type: t, quantity: .init(unit: .percent(), doubleValue: spo2 / 100), start: noon, end: noon))
+            if let spo2 = row.spo2Pct {
+                add(.oxygenSaturation, .percent(), spo2 / 100, row.day, noon)
             }
-            if let rr = row.respRateBpm, let t = HKQuantityType.quantityType(forIdentifier: .respiratoryRate) {
-                samples.append(HKQuantitySample(type: t, quantity: .init(unit: HKUnit.count().unitDivided(by: .minute()), doubleValue: rr), start: noon, end: noon))
+            if let rr = row.respRateBpm {
+                add(.respiratoryRate, HKUnit.count().unitDivided(by: .minute()), rr, row.day, noon)
             }
         }
-        guard !samples.isEmpty else { return }
-        try? await store.save(samples)
+        guard !candidates.isEmpty else { return }
+
+        // Delete any of OUR prior samples that carry the same metadata keys, then write the fresh
+        // batch. Scoped to HKSource.default() so we never touch a sample written by another app
+        // that happens to use the same external UUID. Delete failures are non-fatal (e.g., nothing
+        // to delete on first run) — only the save throws.
+        let bySource = HKQuery.predicateForObjects(from: HKSource.default())
+        let grouped = Dictionary(grouping: candidates, by: { $0.type })
+        for (type, items) in grouped {
+            let keys = Array(Set(items.map { $0.key }))
+            let byKey = HKQuery.predicateForObjects(withMetadataKey: HKMetadataKeyExternalUUID,
+                                                    allowedValues: keys)
+            let pred = NSCompoundPredicate(andPredicateWithSubpredicates: [bySource, byKey])
+            _ = try? await self.store.deleteObjects(of: type, predicate: pred)
+        }
+        try? await self.store.save(candidates.map { $0.sample })
     }
 
     private struct DayAgg {
