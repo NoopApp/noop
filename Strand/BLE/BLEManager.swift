@@ -882,6 +882,7 @@ extension BLEManager: CBCentralManagerDelegate {
         Task { @MainActor in await collector?.flush() }
         state.connected = false
         state.encryptedBond = false   // cleared with didBond; next session must re-prove the bond (#69)
+        state.charging = nil          // a stale charging flag must not outlive the link
         didBond = false
         whoop5RealtimeArmed = false
         whoop5SessionStarted = false

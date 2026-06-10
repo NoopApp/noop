@@ -1090,6 +1090,22 @@
         }
       }
     },
+    "Battery %lld%% · Charging": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Battery %lld%% · Charging"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Akku %lld%% · Lädt"
+          }
+        }
+      }
+    },
     "Behaviour Effects": {
       "localizations": {
         "en": {

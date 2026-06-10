@@ -163,7 +163,9 @@ struct SettingsView: View {
                 HStack(spacing: 12) {
                     StatePill("\(strapStatusTitle)", tone: strapTone, pulsing: live.connected)
                     if let pct = live.batteryPct {
-                        StatePill("Battery \(Int(pct.rounded()))%",
+                        StatePill(live.charging == true
+                                  ? "Battery \(Int(pct.rounded()))% · Charging"
+                                  : "Battery \(Int(pct.rounded()))%",
                                   tone: batteryTone(pct), showsDot: false)
                     }
                     Spacer(minLength: 0)

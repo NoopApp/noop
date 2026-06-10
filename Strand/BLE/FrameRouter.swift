@@ -57,6 +57,14 @@ public final class FrameRouter {
                 if ev.hasPrefix("BLE_BONDED") {
                     state.bonded = true
                 }
+                // BATTERY_LEVEL events carry the only charging flag the strap reports (wire
+                // observation: u8 bit0, ~every 8 min on captured links). Flag only — battery %
+                // keeps its family-specific source (#77). No freshness gate needed here: this
+                // path never sees historical replay (backfill skips handle(frame:), see below).
+                if ev.hasPrefix("BATTERY_LEVEL"),
+                   let ch = parsed.parsed["battery_charging"]?.intValue {
+                    state.charging = (ch != 0)
+                }
                 // Physical inputs the strap exposes — live only (this path never sees historical
                 // replay, which goes through the Backfiller). Event strings are "NAME(rawValue)".
                 if ev.hasPrefix("DOUBLE_TAP") {

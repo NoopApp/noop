@@ -24,6 +24,11 @@ public final class LiveState: ObservableObject {
     @Published public var heartRate: Int? = nil
     @Published public var rr: [Int] = []
     @Published public var batteryPct: Double? = nil
+    /// Charging flag from the strap's BATTERY_LEVEL events — wire observation: u8 bit0 in the
+    /// event payload (4.0 @26 / 5.0 @30), pushed ~every 8 min on captured links. nil until the
+    /// first event of a session; cleared on disconnect so a stale flag can't outlive the link.
+    /// Flag ONLY — the battery % keeps its family-specific source (#77).
+    @Published public var charging: Bool? = nil
     @Published public var lastFrameType: String? = nil
     @Published public var lastEvent: String? = nil
     /// Wrist-wear state from WRIST_ON/WRIST_OFF events. Defaults true so wear-gated features work

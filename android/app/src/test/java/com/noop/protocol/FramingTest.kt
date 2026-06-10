@@ -183,6 +183,23 @@ class FramingTest {
     }
 
     @Test
+    fun parse_eventBatteryLevel_notCharging() {
+        // Same synthetic BATTERY_LEVEL vector with the charge byte @26 = 0 (and the CRC32 trailer
+        // recomputed over the same type..payload region). Pins the decoder's bit in BOTH states so
+        // a charging consumer can trust 0 as "not charging", not "field missing".
+        val frame = bytes(
+            0xaa, 0x1b, 0x00, 0xc0, 0x30, 0x00, 0x03, 0x00, 0x32, 0xf1, 0x53, 0x65,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x6b, 0x03, 0x00, 0x00, 0xac, 0x0f, 0x00,
+            0x00, 0x00, 0x00, 0x2e, 0xd1, 0x9b, 0x65,
+        )
+        val r = Framing.parseFrame(frame)
+        assertTrue(r.ok)
+        assertEquals(true, r.crcOk)
+        assertEquals("BATTERY_LEVEL(3)", r.parsed["event"])
+        assertEquals(0, r.parsed["battery_charging"])
+    }
+
+    @Test
     fun parse_metadata_historyEnd() {
         // METADATA HISTORY_END(2): unix=1699999999, trim=123456.
         val frame = bytes(

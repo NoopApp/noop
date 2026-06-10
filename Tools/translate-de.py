@@ -60,6 +60,7 @@ DE: dict[str, str] = {
     "Age, %lld years": "Alter, %lld Jahre",
     "Auto · %lld bpm (Tanaka)": "Automatisch · %lld bpm (Tanaka)",
     "Battery %lld%%": "Akku %lld%%",
+    "Battery %lld%% · Charging": "Akku %lld%% · Lädt",
     "Choose the buzz pattern for %@": "Vibrationsmuster für %@ wählen",
     "Coach said: %@": "Coach sagte: %@",
     "Copy %@ address": "%@-Adresse kopieren",
