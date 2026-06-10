@@ -128,6 +128,16 @@ object DemoSeeder {
                     round1((18.0 - fitness * 0.2 + gauss(rng, 0.0, 0.4)).coerceIn(10.0, 24.0))
                 )
             )
+            // Export-verbatim sleep figures (same metricSeries keys the importers write), so
+            // the demo Sleep tiles exercise the prefer-imported path.
+            val demoNeedMin = (totalSleep + gauss(rng, 25.0, 20.0)).coerceIn(420.0, 560.0)
+            series.add(MetricSeriesRow(WHOOP, day, "sleep_performance",
+                round1((totalSleep / demoNeedMin * 100.0).coerceAtMost(100.0))))
+            series.add(MetricSeriesRow(WHOOP, day, "sleep_consistency",
+                round1(gauss(rng, 80.0, 8.0).coerceIn(40.0, 100.0))))
+            series.add(MetricSeriesRow(WHOOP, day, "sleep_need_min", round1(demoNeedMin)))
+            series.add(MetricSeriesRow(WHOOP, day, "sleep_debt_min",
+                round1((demoNeedMin - totalSleep).coerceAtLeast(0.0))))
 
             // --- Apple Health daily aggregate ---
             val steps = gauss(rng, 8500.0, 2600.0).coerceIn(1200.0, 19000.0).toInt()

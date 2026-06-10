@@ -85,7 +85,23 @@ fun SleepScreen(vm: AppViewModel) {
         }.getOrNull()
     }
 
-    val model = remember(days, session) { buildSleepModel(days, session) }
+    // Export-verbatim sleep figures (sleep_performance / consistency / need / debt) — the
+    // headline tiles prefer them over the on-device approximations. Keyed on `days` so a
+    // fresh import (which always rewrites dailyMetric too) reloads; metricSeries has no Flow.
+    var imported by remember { mutableStateOf(ImportedSleepSeries()) }
+    LaunchedEffect(days) {
+        suspend fun load(key: String) = runCatching {
+            vm.repo.metricSeries("my-whoop", key, "0000-00-00", "9999-99-99")
+        }.getOrDefault(emptyList()).associate { it.day to it.value }
+        imported = ImportedSleepSeries(
+            performance = load("sleep_performance"),
+            consistency = load("sleep_consistency"),
+            needMin = load("sleep_need_min"),
+            debtMin = load("sleep_debt_min"),
+        )
+    }
+
+    val model = remember(days, session, imported) { buildSleepModel(days, session, imported) }
 
     ScreenScaffold(title = "Sleep", subtitle = "Last night, read in two seconds.") {
         if (model == null) {
@@ -507,7 +523,7 @@ private fun SleepEmptyState() {
 // MARK: - Model + derivation (faithful to SleepView.swift)
 
 /** Stage minutes for a single night (mirrors the macOS Stages struct). */
-private data class Stages(
+internal data class Stages(
     val awake: Double,
     val light: Double,
     val deep: Double,
@@ -521,14 +537,22 @@ private data class Stages(
 }
 
 /** (latest, typical mean, full history) per metric — mirrors the macOS Metric tuple. */
-private data class Metric(
+internal data class Metric(
     val latest: Double?,
     val typical: Double?,
     val series: List<Double>,
 )
 
+/** Export-verbatim per-day sleep figures (metricSeries keys mirroring macOS WhoopImporter). */
+internal data class ImportedSleepSeries(
+    val performance: Map<String, Double> = emptyMap(), // sleep_performance, 0–100
+    val consistency: Map<String, Double> = emptyMap(), // sleep_consistency, 0–100
+    val needMin: Map<String, Double> = emptyMap(),     // sleep_need_min, minutes
+    val debtMin: Map<String, Double> = emptyMap(),     // sleep_debt_min, minutes
+)
+
 /** Everything the screen renders, derived once per data change. */
-private data class SleepModel(
+internal data class SleepModel(
     val stages: Stages,
     val clockLabel: String,
     val efficiencyText: String,
@@ -550,11 +574,17 @@ private data class SleepModel(
 )
 
 /**
- * Build the whole model from the cached daily metrics + the latest sleep session. Returns
- * null when there is no usable latest night (no stage minutes), which renders the empty
- * state. All series are computed in one pass-set here, matching the macOS buildModel().
+ * Build the whole model from the cached daily metrics + the latest sleep session + the
+ * export-verbatim sleep figures. Returns null when there is no usable latest night (no
+ * stage minutes), which renders the empty state. All series are computed in one pass-set
+ * here, matching the macOS buildModel(). Internal so SleepImportedFiguresTest can pin the
+ * prefer-imported logic (the recoveryCalibrationNights test pattern).
  */
-private fun buildSleepModel(days: List<DailyMetric>, session: SleepSession?): SleepModel? {
+internal fun buildSleepModel(
+    days: List<DailyMetric>,
+    session: SleepSession?,
+    imported: ImportedSleepSeries = ImportedSleepSeries(),
+): SleepModel? {
     val latest = days.lastOrNull { (it.deepMin ?: 0.0) + (it.remMin ?: 0.0) + (it.lightMin ?: 0.0) > 0.0 }
         ?: return null
 
@@ -583,15 +613,28 @@ private fun buildSleepModel(days: List<DailyMetric>, session: SleepSession?): Sl
     val needMin = max(450.0, typicalTotalMin ?: 450.0)
 
     // Per-tile metrics — each a full pass over `days`, exactly as the macOS screen.
+    // Where the WHOOP export carried the figure verbatim (metricSeries), it wins per day;
+    // the on-device recomputation is the APPROXIMATE fallback for strap-only days.
     val performance = metric(days) { d ->
-        d.totalSleepMin?.takeIf { it > 0.0 && needMin > 0.0 }?.let { minOf(100.0, it / needMin * 100.0) }
+        imported.performance[d.day]   // WHOOP's own 0–100 figure wins per day
+            ?: d.totalSleepMin?.takeIf { it > 0.0 && needMin > 0.0 }
+                ?.let { minOf(100.0, it / needMin * 100.0) }   // APPROXIMATE fallback
     }
     val efficiency = metric(days) { d ->
         d.efficiency?.let { if (it <= 1.0) it * 100.0 else it }
     }
-    val consistency = consistencySeries(days)
+    val consistency = run {
+        // Prefer the imported sleep_consistency series, but only when it covers the latest
+        // night — otherwise "latest" would silently be a months-old import-era value.
+        val lastDay = days.lastOrNull()?.day
+        if (lastDay != null && imported.consistency[lastDay] != null) {
+            val series = days.mapNotNull { imported.consistency[it.day] }
+            Metric(series.lastOrNull(), mean(series), series)
+        } else consistencySeries(days)   // APPROXIMATE duration-spread proxy
+    }
     val hoursVsNeeded = metric(days) { d ->
-        d.totalSleepMin?.takeIf { it > 0.0 && needMin > 0.0 }?.let { it / needMin * 100.0 }
+        val need = imported.needMin[d.day] ?: needMin   // imported need wins per day
+        d.totalSleepMin?.takeIf { it > 0.0 && need > 0.0 }?.let { it / need * 100.0 }
     }
     val restorative = metric(days) { d ->
         val dp = d.deepMin; val rm = d.remMin; val sl = d.totalSleepMin
@@ -600,7 +643,9 @@ private fun buildSleepModel(days: List<DailyMetric>, session: SleepSession?): Sl
     val respiratory = metric(days) { it.respRateBpm }
     val sleepDebt = run {
         val series = days.mapNotNull { d ->
-            d.totalSleepMin?.takeIf { it > 0.0 && needMin > 0.0 }?.let { max(0.0, needMin - it) }
+            imported.debtMin[d.day]   // minutes, export-verbatim
+                ?: d.totalSleepMin?.takeIf { it > 0.0 && needMin > 0.0 }
+                    ?.let { max(0.0, needMin - it) }   // APPROXIMATE fallback
         }
         Metric(series.lastOrNull(), mean(series), series)
     }

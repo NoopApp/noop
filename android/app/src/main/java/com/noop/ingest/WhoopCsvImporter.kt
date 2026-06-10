@@ -5,6 +5,7 @@ import android.net.Uri
 import com.noop.data.DailyMetric
 import com.noop.data.ImportSummary
 import com.noop.data.JournalEntry
+import com.noop.data.MetricSeriesRow
 import com.noop.data.SleepSession
 import com.noop.data.WhoopRepository
 import com.noop.data.WorkoutRow
@@ -82,6 +83,7 @@ object WhoopCsvImporter {
         }
 
         val cycles = csvData[CYCLES_NAME]?.let { parseCycles(CsvTable.fromData(it), deviceId) } ?: emptyList()
+        val cycleSeries = csvData[CYCLES_NAME]?.let { parseCycleSeries(CsvTable.fromData(it), deviceId) } ?: emptyList()
         val sleepParse = csvData[SLEEPS_NAME]?.let { parseSleeps(CsvTable.fromData(it), deviceId) }
         val sleepSessions = sleepParse?.sessions ?: emptyList()
         val sleepDaily = sleepParse?.daily ?: emptyList()
@@ -102,12 +104,14 @@ object WhoopCsvImporter {
         if (sleepSessions.isNotEmpty()) repo.upsertSleepSessions(sleepSessions)
         if (workouts.isNotEmpty()) repo.upsertWorkouts(workouts)
         if (journal.isNotEmpty()) repo.upsertJournal(journal)
+        if (cycleSeries.isNotEmpty()) repo.upsertMetricSeries(cycleSeries)
 
         val counts = LinkedHashMap<String, Int>()
         if (daily.isNotEmpty()) counts["dailyMetric"] = daily.size
         if (sleepSessions.isNotEmpty()) counts["sleepSession"] = sleepSessions.size
         if (workouts.isNotEmpty()) counts["workout"] = workouts.size
         if (journal.isNotEmpty()) counts["journal"] = journal.size
+        if (cycleSeries.isNotEmpty()) counts["metricSeries"] = cycleSeries.size
 
         // Date span across everything we wrote.
         val days = ArrayList<String>()
@@ -317,6 +321,30 @@ object WhoopCsvImporter {
                     respRateBpm = resp,
                 )
             )
+        }
+        return out
+    }
+
+    /**
+     * physiological_cycles.csv -> long-format metricSeries rows for the export-verbatim sleep
+     * figures the wide DailyMetric has no columns for. Keys mirror the macOS WhoopImporter
+     * (Strand/Data/WhoopImporter.swift): sleep_performance / sleep_consistency are 0–100 %,
+     * sleep_need_min / sleep_debt_min are minutes. Internal + pure so it is JVM unit-testable
+     * (WhoopCycleSeriesTest).
+     */
+    internal fun parseCycleSeries(table: CsvTable, deviceId: String): List<MetricSeriesRow> {
+        val out = ArrayList<MetricSeriesRow>()
+        for (row in table.rows) {
+            val tz = WhoopTime.tzOffsetMinutes(row["cycle_timezone"])
+            val cycleStart = WhoopTime.parseEpochSeconds(row.cell("cycle_start_time"), tz)
+            val cycleEnd = WhoopTime.parseEpochSeconds(row.cell("cycle_end_time"), tz)
+            if (cycleStart == null && cycleEnd == null) continue   // same skip rule as parseCycles
+            val day = epochSecondsToDay(cycleStart ?: cycleEnd!!, tz)
+            fun add(key: String, v: Double?) { if (v != null) out.add(MetricSeriesRow(deviceId, day, key, v)) }
+            add("sleep_performance", row.double("sleep_performance_pct"))
+            add("sleep_consistency", row.double("sleep_consistency_pct"))
+            add("sleep_need_min", row.double("sleep_need_min"))
+            add("sleep_debt_min", row.double("sleep_debt_min"))
         }
         return out
     }
