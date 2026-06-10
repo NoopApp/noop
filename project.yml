@@ -128,7 +128,9 @@ targets:
         CFBundleName: NOOP
         CFBundleDisplayName: NOOP
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
-        CFBundleVersion: "25"
+        # Derive CFBundleVersion from the project setting so App Store / TestFlight uploads track a
+        # single source (settings.base.CURRENT_PROJECT_VERSION below) instead of a literal here.
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         LSApplicationCategoryType: public.app-category.healthcare-fitness
         UILaunchScreen: {}
         NSSupportsLiveActivities: true
@@ -153,6 +155,9 @@ targets:
           - group.com.noopapp.noop
     settings:
       base:
+        # Build number for the iOS target; threaded into Info.plist's CFBundleVersion via
+        # $(CURRENT_PROJECT_VERSION). Bump on each TestFlight / App Store upload.
+        CURRENT_PROJECT_VERSION: "25"
         PRODUCT_BUNDLE_IDENTIFIER: com.noopapp.noop
         PRODUCT_NAME: NOOP
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
