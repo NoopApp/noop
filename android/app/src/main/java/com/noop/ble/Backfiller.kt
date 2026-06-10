@@ -168,6 +168,12 @@ class Backfiller(
             // pending a confirmed root cause; not acking here would wedge the offload on a re-send loop.)
             if (decoded.isEmpty) {
                 log("Backfill: WARNING ${frames.size} frame(s) decoded to 0 rows (trim=$trim) — dropped (CRC/layout/timestamp); nothing persisted for this chunk")
+                // #91: dump a hex sample of the rejected frames so an unmapped firmware's record
+                // layout can be mapped from a user's strap log — the count alone can't be decoded.
+                frames.take(3).forEachIndexed { i, f ->
+                    val hex = f.take(64).joinToString("") { "%02x".format(it) }
+                    log("Backfill: rejected frame[$i] ${f.size}B: $hex${if (f.size > 64) "…" else ""}")
+                }
             }
             try {
                 repository.insert(decoded, deviceId) // DECODED FIRST (durable)

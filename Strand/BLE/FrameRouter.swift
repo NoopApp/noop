@@ -49,7 +49,12 @@ public final class FrameRouter {
 
         case "EVENT":
             if let ev = parsed.parsed["event"]?.stringValue {
-                state.lastEvent = ev
+                // #92: don't surface the live-HR stream toggle (BLE_REALTIME_HR_ON/OFF) in "Last
+                // Event" — it's internal plumbing that fires on every connect and just confuses
+                // users. Every other event (wrist, double-tap, battery, bonded…) still shows.
+                if !ev.hasPrefix("BLE_REALTIME_HR") {
+                    state.lastEvent = ev
+                }
                 // Strap-pushed event = "I may have new data" → kick a (rate-limited) sync.
                 onSyncTrigger?()
                 // Belt-and-suspenders: a BLE_BONDED event confirms the link is bonded.

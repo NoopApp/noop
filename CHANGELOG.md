@@ -17,6 +17,22 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 1.69 — Cleaner Live status + sync diagnostics (#91, #92)
+
+- **Fixed (Mac + Android): "Last Event" no longer leaks plumbing.** The Live status field was showing
+  the raw internal event `BLE_REALTIME_HR_ON` (truncated to "BLE_REALTIME_…") whenever live HR started
+  — confusing (#92). Both platforms now skip the `BLE_REALTIME_HR_ON/OFF` stream toggle in that field;
+  every meaningful event (wrist on/off, double-tap, battery, bonded…) still shows. Swift `FrameRouter`
+  EVENT case + Android `WhoopBleClient` non-gesture branch.
+- **Diagnostics (Mac + Android): dump rejected-frame hex.** Building on the v1.65 "decoded to 0 rows"
+  WARNING — when a history chunk has frames that all fail to decode (CRC / unmapped firmware layout /
+  out-of-range timestamp), the Backfiller now logs a hex sample of the first 3 rejected frames (≤64 B
+  each). #91 is the first confirmed in-the-wild case (Moto Razr fold, WHOOP 4, layout the v1.66 fallback
+  didn't catch) — the count alone can't be decoded, but the bytes let us map the firmware's layout.
+  `Backfiller.swift` + `Backfiller.kt` at the WARNING site.
+- **Docs:** corrected the stale "macOS AI Coach is sandbox-blocked" claim in README + PRIVACY_SECURITY —
+  the distributed macOS build is unsandboxed, so the opt-in Coach works on both platforms.
+
 ## 1.68 — Sleep figures, HR zones, charging, calibration (thanks iHateSubscriptions, #88)
 
 A large community contribution (#88), reviewed hard and reimplemented as our own commit onto v1.67.

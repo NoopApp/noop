@@ -1297,8 +1297,12 @@ class WhoopBleClient(
                     }
 
                     if (!isGesture) {
-                        // Non-gesture events (BLE_BONDED, BATTERY_LEVEL, …) surface unconditionally.
-                        _state.value = _state.value.copy(lastEvent = ev)
+                        // Non-gesture events (BLE_BONDED, BATTERY_LEVEL, …) surface in "Last Event" —
+                        // except the live-HR stream toggle (BLE_REALTIME_HR_ON/OFF), which is internal
+                        // plumbing that fires on every connect and just confuses users (#92).
+                        if (!ev.startsWith("BLE_REALTIME_HR")) {
+                            _state.value = _state.value.copy(lastEvent = ev)
+                        }
                         // Charging flag — wire observation: BATTERY_LEVEL u8 bit0 (4.0 @26 / 5.0 @30).
                         // handleFrame also sees replayed HISTORICAL events during a backfill (old ts),
                         // so gate exactly like the gestures below: live ungated, backfill only if fresh —
