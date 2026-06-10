@@ -80,6 +80,12 @@ public final class LiveState: ObservableObject {
     /// the official WHOOP app. Surfaced as actionable pairing-mode guidance; cleared once the link bonds.
     @Published public var pairingHint: String? = nil
 
+    /// Set when a connect attempt fails because the strap wiped its bond ("Peer removed pairing
+    /// information") — a firmware update, or the official WHOOP app re-bonding it. macOS keeps re-presenting
+    /// the now-stale pairing key, so reconnects loop on the same error with no recovery. Carries an
+    /// actionable forget-and-re-pair guide; cleared on the next successful connect. (5/MG firmware reset, 2026-06)
+    @Published public var reconnectGuide: String? = nil
+
     public init() {}
 
     /// Single funnel for battery readings — updates the published value AND notifies the hook,
