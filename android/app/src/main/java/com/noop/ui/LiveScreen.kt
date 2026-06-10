@@ -87,6 +87,28 @@ fun LiveScreen(viewModel: AppViewModel) {
                 modifier = Modifier.fillMaxWidth(),
             )
         }
+        // Honest sync outcome for a cloud-free app: a non-silent error if the last offload stalled, else
+        // a relative "history synced N ago". Hidden while actively syncing (the pill already says so).
+        if (!live.backfilling) {
+            val syncError = live.lastSyncError
+            if (syncError != null) {
+                Text(
+                    syncError,
+                    style = NoopType.footnote,
+                    color = Palette.statusWarning,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            } else {
+                live.lastSyncAt?.let { at ->
+                    Text(
+                        "History synced ${relativeAgo(at)}",
+                        style = NoopType.footnote,
+                        color = Palette.textTertiary,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+        }
 
         // Big HR card.
         HeartRateCard(bpm = bpm, rr = live.rr)
@@ -265,4 +287,18 @@ private fun batteryColor(pct: Double?): Color = when {
     pct < 15 -> Palette.statusCritical
     pct < 30 -> Palette.statusWarning
     else -> Palette.accent
+}
+
+/**
+ * Coarse relative-time label for the "History synced N ago" sync-status line. Pure + unit-tested
+ * (see RelativeAgoTest); [nowSec] is injectable for determinism. Buckets to just-now / min / h / d.
+ */
+internal fun relativeAgo(epochSec: Long, nowSec: Long = System.currentTimeMillis() / 1000L): String {
+    val d = (nowSec - epochSec).coerceAtLeast(0)
+    return when {
+        d < 60L -> "just now"
+        d < 3600L -> "${d / 60L} min ago"
+        d < 86_400L -> "${d / 3600L} h ago"
+        else -> "${d / 86_400L} d ago"
+    }
 }
