@@ -79,6 +79,9 @@ targets:
       - package: StrandAnalytics
       - package: StrandImport
       - package: StrandDesign
+    scheme:
+      testTargets:
+        - StrandTests
   StrandTests:
     type: bundle.unit-test
     platform: macOS
