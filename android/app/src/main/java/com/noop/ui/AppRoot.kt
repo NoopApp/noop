@@ -117,6 +117,8 @@ private enum class Destination(
 
     // Group: Health
     Health("health", "Health", Icons.Filled.MonitorHeart),
+    VitalSigns("vital_signs", "Vital Signs", Icons.Filled.HealthAndSafety),
+    VitalSignsDetail("vital_detail/{key}", "Vital Signs", Icons.Filled.HealthAndSafety),
     AppleHealth("apple_health", "Apple Health", Icons.Filled.HealthAndSafety),
 
     // Group: System
@@ -144,7 +146,7 @@ private val drawerGroups: List<DrawerGroup> = listOf(
     DrawerGroup("Insight", listOf(
         Destination.Coach, Destination.Insights, Destination.Explore, Destination.Compare,
     )),
-    DrawerGroup("Health", listOf(Destination.Health, Destination.AppleHealth)),
+    DrawerGroup("Health", listOf(Destination.Health, Destination.VitalSigns, Destination.AppleHealth)),
     DrawerGroup("System", listOf(
         Destination.Automations, Destination.DataSources,
         Destination.Notifications, Destination.Support, Destination.Settings,
@@ -331,7 +333,24 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 composable(Destination.Trends.route) { TrendsScreen(viewModel) }
                 composable(Destination.Insights.route) { InsightsScreen(viewModel) }
                 composable(Destination.Compare.route) { CompareScreen(viewModel) }
-                composable(Destination.Health.route) { HealthScreen(viewModel) }
+                composable(Destination.Health.route) {
+                    HealthScreen(
+                        vm = viewModel,
+                        onVitalClick = { nav.navigate("vital_detail/$it") },
+                    )
+                }
+                composable(Destination.VitalSigns.route) {
+                    VitalSignsScreen(
+                        vm = viewModel,
+                        onVitalClick = { nav.navigate("vital_detail/$it") },
+                    )
+                }
+                composable(Destination.VitalSignsDetail.route) { backStackEntry ->
+                    VitalDetailScreen(
+                        vm = viewModel,
+                        key = backStackEntry.arguments?.getString("key").orEmpty(),
+                    )
+                }
                 composable(Destination.AppleHealth.route) { AppleHealthScreen(viewModel) }
                 composable(Destination.DataSources.route) { DataSourcesScreen(viewModel) }
                 composable(Destination.Notifications.route) { NotificationsSettingsScreen(viewModel) }

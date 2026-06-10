@@ -234,6 +234,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // survive restarts. Only the reconnect itself respects the pref. (#78 fork)
         _selectedModel.value = saved.second
         if (!NoopPrefs.backgroundConnection(appContext)) return
+        // APK updates tear down the old foreground service along with the old process. Re-promote it
+        // on the first launch after update/restart before reconnecting, so the persistent notification
+        // and long-lived connection both come back without the user toggling the setting again.
+        WhoopConnectionService.start(appContext)
         ble.reconnectToAddress(saved.first, saved.second)
     }
 

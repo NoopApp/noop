@@ -1,6 +1,8 @@
 package com.noop.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -35,6 +38,7 @@ import com.noop.analytics.AnalyticsEngine
 import com.noop.data.DailyMetric
 import com.noop.data.SleepSession
 import org.json.JSONArray
+import java.time.LocalDate
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -70,18 +74,21 @@ import kotlin.math.roundToInt
 fun SleepScreen(vm: AppViewModel) {
     val days by vm.recentDays.collectAsStateWithLifecycle()
     val live by vm.live.collectAsStateWithLifecycle()
+    var selectedDayOffset by remember { mutableIntStateOf(0) }
+    val selectedDay = remember(selectedDayOffset) { LocalDate.now().minusDays(selectedDayOffset.toLong()) }
+    val selectedDayKey = remember(selectedDay) { selectedDay.toString() }
 
     // The latest sleep session (for onset/wake clock + stored efficiency). Loaded once
     // from the repo; the my-whoop daily metrics drive everything else and arrive via the
     // shared recentDays flow.
     var session by remember { mutableStateOf<SleepSession?>(null) }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(selectedDayKey) {
         val now = System.currentTimeMillis() / 1000L
         val from = now - 60L * 24L * 60L * 60L // 60-day lookback
         session = runCatching {
-            // Merged: imported WHOOP sessions win per night; on-device computed
-            // ("my-whoop-noop") sessions gap-fill so strap-only nights still show a clock.
-            vm.repo.sleepSessionsMerged("my-whoop", from, now).maxByOrNull { it.startTs }
+            vm.repo.sleepSessionsMerged("my-whoop", from, now)
+                .filter { AnalyticsEngine.dayString(it.endTs) == selectedDayKey }
+                .maxByOrNull { it.startTs }
         }.getOrNull()
     }
 
@@ -101,9 +108,12 @@ fun SleepScreen(vm: AppViewModel) {
         )
     }
 
-    val model = remember(days, session, imported) { buildSleepModel(days, session, imported) }
+    val model = remember(days, session, imported, selectedDayKey) {
+        buildSleepModel(days, session, imported, selectedDay = selectedDayKey)
+    }
 
     ScreenScaffold(title = "Sleep", subtitle = "Last night, read in two seconds.") {
+        DaySelectorBar(selectedOffset = selectedDayOffset, onSelect = { selectedDayOffset = it })
         if (model == null) {
             // While the strap is mid-offload, say so — "No nights" reads as final otherwise (#77).
             if (live.backfilling) SyncingHistoryNote(chunks = live.syncChunksThisSession)
@@ -116,6 +126,54 @@ fun SleepScreen(vm: AppViewModel) {
             StagesVsTypical(model)
             Spacer(Modifier.height(Metrics.sectionGap - 20.dp))
             DurationTrend(model)
+        }
+    }
+}
+
+@Composable
+private fun DaySelectorBar(selectedOffset: Int, onSelect: (Int) -> Unit) {
+    val base = LocalDate.now()
+    val blockShape = RoundedCornerShape(12.dp)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(2, 1, 0).forEach { offset ->
+            val day = base.minusDays(offset.toLong())
+            val selected = selectedOffset == offset
+            val label = when (offset) {
+                0 -> "Today"
+                1 -> "Yesterday"
+                else -> "2 days ago"
+            }
+            val date = day.format(java.time.format.DateTimeFormatter.ofPattern("d MMM", Locale.US))
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(blockShape)
+                    .background(if (selected) Palette.accent.copy(alpha = 0.12f) else Palette.surfaceInset)
+                    .border(
+                        width = 1.dp,
+                        color = if (selected) Palette.accent.copy(alpha = 0.55f) else Palette.hairline,
+                        shape = blockShape,
+                    )
+                    .clickable { onSelect(offset) }
+                    .padding(vertical = 10.dp, horizontal = 10.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    text = label,
+                    style = NoopType.caption,
+                    color = if (selected) Palette.textPrimary else Palette.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = date,
+                    style = NoopType.captionNumber,
+                    color = if (selected) Palette.accent else Palette.textTertiary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
         }
     }
 }
@@ -584,8 +642,13 @@ internal fun buildSleepModel(
     days: List<DailyMetric>,
     session: SleepSession?,
     imported: ImportedSleepSeries = ImportedSleepSeries(),
+    selectedDay: String? = null,
 ): SleepModel? {
-    val latest = days.lastOrNull { (it.deepMin ?: 0.0) + (it.remMin ?: 0.0) + (it.lightMin ?: 0.0) > 0.0 }
+    val effectiveDay = selectedDay ?: days.lastOrNull()?.day ?: return null
+    val windowDays = days.filter { it.day <= effectiveDay }
+    val latest = windowDays.lastOrNull {
+        it.day == effectiveDay && (it.deepMin ?: 0.0) + (it.remMin ?: 0.0) + (it.lightMin ?: 0.0) > 0.0
+    }
         ?: return null
 
     val deep = latest.deepMin ?: 0.0
@@ -604,10 +667,10 @@ internal fun buildSleepModel(
     if (stages.total <= 0.0) return null
 
     // Typical = mean across nights with data (mirrors typicalTotalMin / typicalStageMin).
-    val typicalTotalMin = mean(days.mapNotNull { it.totalSleepMin }.filter { it > 0.0 })
-    val typicalDeepMin = mean(days.mapNotNull { it.deepMin }.filter { it > 0.0 })
-    val typicalRemMin = mean(days.mapNotNull { it.remMin }.filter { it > 0.0 })
-    val typicalLightMin = mean(days.mapNotNull { it.lightMin }.filter { it > 0.0 })
+    val typicalTotalMin = mean(windowDays.mapNotNull { it.totalSleepMin }.filter { it > 0.0 })
+    val typicalDeepMin = mean(windowDays.mapNotNull { it.deepMin }.filter { it > 0.0 })
+    val typicalRemMin = mean(windowDays.mapNotNull { it.remMin }.filter { it > 0.0 })
+    val typicalLightMin = mean(windowDays.mapNotNull { it.lightMin }.filter { it > 0.0 })
 
     // Personal sleep need (minutes): mean asleep, floored at 7.5h (450 min).
     val needMin = max(450.0, typicalTotalMin ?: 450.0)
@@ -615,34 +678,34 @@ internal fun buildSleepModel(
     // Per-tile metrics — each a full pass over `days`, exactly as the macOS screen.
     // Where the WHOOP export carried the figure verbatim (metricSeries), it wins per day;
     // the on-device recomputation is the APPROXIMATE fallback for strap-only days.
-    val performance = metric(days) { d ->
+    val performance = metric(windowDays) { d ->
         imported.performance[d.day]   // WHOOP's own 0–100 figure wins per day
             ?: d.totalSleepMin?.takeIf { it > 0.0 && needMin > 0.0 }
                 ?.let { minOf(100.0, it / needMin * 100.0) }   // APPROXIMATE fallback
     }
-    val efficiency = metric(days) { d ->
+    val efficiency = metric(windowDays) { d ->
         d.efficiency?.let { if (it <= 1.0) it * 100.0 else it }
     }
     val consistency = run {
         // Prefer the imported sleep_consistency series, but only when it covers the latest
         // night — otherwise "latest" would silently be a months-old import-era value.
-        val lastDay = days.lastOrNull()?.day
+        val lastDay = windowDays.lastOrNull()?.day
         if (lastDay != null && imported.consistency[lastDay] != null) {
-            val series = days.mapNotNull { imported.consistency[it.day] }
+            val series = windowDays.mapNotNull { imported.consistency[it.day] }
             Metric(series.lastOrNull(), mean(series), series)
-        } else consistencySeries(days)   // APPROXIMATE duration-spread proxy
+        } else consistencySeries(windowDays)   // APPROXIMATE duration-spread proxy
     }
-    val hoursVsNeeded = metric(days) { d ->
+    val hoursVsNeeded = metric(windowDays) { d ->
         val need = imported.needMin[d.day] ?: needMin   // imported need wins per day
         d.totalSleepMin?.takeIf { it > 0.0 && need > 0.0 }?.let { it / need * 100.0 }
     }
-    val restorative = metric(days) { d ->
+    val restorative = metric(windowDays) { d ->
         val dp = d.deepMin; val rm = d.remMin; val sl = d.totalSleepMin
         if (dp != null && rm != null && sl != null && sl > 0.0) (dp + rm) / sl * 100.0 else null
     }
-    val respiratory = metric(days) { it.respRateBpm }
+    val respiratory = metric(windowDays) { it.respRateBpm }
     val sleepDebt = run {
-        val series = days.mapNotNull { d ->
+        val series = windowDays.mapNotNull { d ->
             imported.debtMin[d.day]   // minutes, export-verbatim
                 ?: d.totalSleepMin?.takeIf { it > 0.0 && needMin > 0.0 }
                     ?.let { max(0.0, needMin - it) }   // APPROXIMATE fallback
@@ -651,7 +714,7 @@ internal fun buildSleepModel(
     }
 
     // 14-day asleep-hours trend (falls back to all nights if the window is too sparse).
-    val allHours = days.mapNotNull { it.totalSleepMin?.takeIf { m -> m > 0.0 }?.let { m -> m / 60.0 } }
+    val allHours = windowDays.mapNotNull { it.totalSleepMin?.takeIf { m -> m > 0.0 }?.let { m -> m / 60.0 } }
     val recentHours = allHours.takeLast(14)
     val trendHours = if (recentHours.size >= 2) recentHours else allHours
 

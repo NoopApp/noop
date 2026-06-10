@@ -200,13 +200,13 @@ private fun DaySelectorBar(selectedOffset: Int, onSelect: (Int) -> Unit) {
     val base = LocalDate.now()
     val blockShape = RoundedCornerShape(12.dp)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        listOf(0, 1, 2).forEach { offset ->
+        listOf(2, 1, 0).forEach { offset ->
             val day = base.minusDays(offset.toLong())
             val selected = selectedOffset == offset
             val label = when (offset) {
                 0 -> "Today"
                 1 -> "Yesterday"
-                else -> day.format(DateTimeFormatter.ofPattern("EEE", Locale.US))
+                else -> "2 days ago"
             }
             val date = day.format(DateTimeFormatter.ofPattern("d MMM", Locale.US))
             Column(
