@@ -117,6 +117,9 @@ targets:
           - "MenuBar"
           - "Data/NotificationSettingsStore.swift"
           - "Screens/NotificationSettingsView.swift"
+          # macOS-only AppIntents (BuzzStrap/MarkMoment) — iOS uses StrandiOS/System/NOOPAppIntents.swift.
+          # Without this exclude, both files compile into the iOS target and collide on NOOPAppIntents.stringsdata.
+          - "System/NOOPAppIntents.swift"
       - path: StrandiOS
         excludes:
           - "Resources/Info.plist"
