@@ -11,6 +11,10 @@ struct StrandiOSApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
+        // Debug-only canary: trips if the App Group entitlement is missing on this target before any
+        // silent no-op (PendingIntents, WidgetSnapshot.publish, Live Activity) can mask the issue as
+        // "the widget doesn't show anything yet." No-op in Release.
+        WidgetSnapshot.assertGroupProvisioned()
         let model = AppModel()
         _model = StateObject(wrappedValue: model)
         _health = StateObject(wrappedValue: HealthKitBridge(
@@ -32,15 +36,6 @@ struct StrandiOSApp: App {
                 .environmentObject(model.coach)
                 .environmentObject(health)
                 .preferredColorScheme(.dark)
-                // HealthKit sync runs from the scenePhase.active handler below. It used to ALSO run
-                // here in `.task`, which fired on initial view appearance and raced the scenePhase
-                // transition on cold launch — doubling the HealthKit writes on first run.
-                // HealthKitBridge.sync guards on `auth == .authorized` and `!syncing` so a duplicate
-                // call was a no-op once auth was settled, but on the very first launch (auth dialog
-                // still in flight) the two calls overlapped in unpredictable ways.
-                .task {
-                    await health.requestAuthorization()
-                }
                 .onReceive(model.live.$heartRate) { _ in
                     liveActivity.update(
                         bpm: model.bpm ?? model.live.heartRate,
@@ -50,6 +45,12 @@ struct StrandiOSApp: App {
                     )
                 }
         }
+        // HealthKit authorization is intentionally NOT requested on launch. The system permission
+        // dialog without prior in-app rationale violates Apple HIG / App Review guidance — the user
+        // sees the prompt before any context. Authorization should be triggered from an explicit
+        // user action: an "Enable Apple Health" row in Settings, or a dedicated step in
+        // OnboardingWizard. HealthKitBridge.sync below guards on `auth == .authorized`, so the
+        // scenePhase trigger is a safe no-op until the user opts in.
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 model.drainPendingIntents()
