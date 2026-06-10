@@ -9,7 +9,6 @@ on:
       - 'StrandTests/**'
       - 'Packages/**'
       - 'project.yml'
-      - 'Package.resolved'
   push:
     branches:
       - main
@@ -18,7 +17,6 @@ on:
       - 'StrandTests/**'
       - 'Packages/**'
       - 'project.yml'
-      - 'Package.resolved'
 
 jobs:
   build-and-test:
