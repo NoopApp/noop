@@ -165,6 +165,12 @@ final class Backfiller {
             // (not acking would wedge the offload on a re-send loop). Surfaces in the user's strap log.
             if decoded.isEmpty {
                 log?("Backfill: \(frames.count) frame(s) decoded to 0 rows (trim=\(trim)) — dropped (CRC/layout/timestamp); nothing persisted for this chunk.")
+                // #91: dump a hex sample of the rejected frames so an unmapped firmware's record
+                // layout can be mapped from a user's strap log — the count alone can't be decoded.
+                for (i, f) in frames.prefix(3).enumerated() {
+                    let hex = f.prefix(64).map { String(format: "%02x", $0) }.joined()
+                    log?("Backfill: rejected frame[\(i)] \(f.count)B: \(hex)\(f.count > 64 ? "…" : "")")
+                }
             }
             do { try await store.insert(decoded, deviceId: deviceId) } catch { return }
 

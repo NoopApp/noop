@@ -400,7 +400,7 @@ bundle of CSV files, but the same defensive posture applies.
 
 | Surface | Risk | Mitigation | Where |
 |---------|------|------------|-------|
-| Process | Data exfiltration / network egress | Only the opt-in AI Coach networks (your key, to your chosen provider, a text summary — §1.1a); on macOS even that is blocked by the sandbox (**no network entitlement**) | `Strand/AI/AICoach.swift`, `Strand/Resources/Strand.entitlements`, `project.yml` |
+| Process | Data exfiltration / network egress | Only the opt-in AI Coach networks (your key, to your chosen provider, a text summary — §1.1a), on both macOS and Android — nothing else makes a network call, and nothing is sent until you ask | `Strand/AI/AICoach.swift`, `android/.../ai/AiCoach.kt` |
 | Filesystem | Broad disk access | Only `files.user-selected.read-write`; data stays in the sandbox container | `Strand.entitlements`, `Strand/Collect/StorePaths.swift` |
 | BLE frames | Malformed / adversarial packets | CRC8 + CRC32 (+ CRC16 for v5) gating; reject on failure | `WhoopProtocol/Framing.swift`, `Strand/BLE/FrameRouter.swift` |
 | BLE frames | Out-of-bounds reads from short/lying length | `nil`-returning bounds-checked readers; slice clamping; min-length guards | `WhoopProtocol/Interpreter.swift` |
