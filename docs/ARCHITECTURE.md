@@ -1,3 +1,4 @@
+<!-- generated-by: gsd-doc-writer -->
 # NOOP — System Architecture
 
 NOOP is a standalone, fully **offline** companion app for WHOOP straps (4.0 and 5.0). It talks
@@ -384,6 +385,53 @@ computed locally.
    surface.
 5. **Interoperability, not impersonation.** NOOP reads your strap and your exports for your own use.
    It is independent of WHOOP and is not a medical device.
+
+---
+
+## 12. CI/CD
+
+The project runs four GitHub Actions workflows. All CI builds skip code signing
+(`CODE_SIGNING_ALLOWED=NO`) so they work without certificates on every fork.
+
+### Workflow summary
+
+| Workflow file | Trigger | Runner | What it does |
+|---|---|---|---|
+| `android.yml` | PR / push → `main` | `ubuntu-latest` | Builds `assembleFullDebug`, runs `testFullDebugUnitTest`, uploads APK artifact (7-day retention) |
+| `macos.yml` | PR / push → `main` + `workflow_dispatch` | `macos-15` | Installs XcodeGen 2.45.x, generates the project, runs `xcodebuild build test` on scheme `Strand` (Debug, no signing), uploads `NOOP.app` artifact (7-day retention) |
+| `ios.yml` | PR / push → `main` | `macos-15` | Runs `xcodebuild test` for each Swift package (`WhoopProtocol`, `WhoopStore`*, `StrandAnalytics`, `StrandDesign`, `StrandImport`) on the iOS Simulator, uploads `.xcresult` bundles (7-day retention) |
+| `release.yml` | Push of a `v*` tag | `ubuntu-latest` + `macos-15` | Builds `assembleFullRelease` (Android) and a universal Release macOS app (no signing); assembles a GitHub Release with both artifacts and extracts release notes from `CHANGELOG.md` |
+
+\* `WhoopStore` CI step runs with `continue-on-error: true` because the package test target depends on GRDB
+and may fail in the simulator environment without additional setup.
+
+### Path filters
+
+Each CI workflow only fires when relevant paths change, keeping unrelated commits fast:
+
+| Workflow | Paths that trigger it |
+|---|---|
+| `android.yml` | `android/**` |
+| `macos.yml` | `Strand/**`, `StrandTests/**`, `Packages/**`, `project.yml` |
+| `ios.yml` | `Packages/**`, `Strand/**` |
+| `release.yml` | Any push of a tag matching `v*` (no path filter — full build always runs on release) |
+
+### Android build flavors
+
+The Android app defines two product flavors under the `tier` dimension:
+
+- **`full`** (`com.noop.whoop`) — the real app; starts empty, user pairs a strap or imports data.
+- **`demo`** (`com.noop.whoop.demo`) — ships 120 days of synthetic data with a visible DEMO badge so
+  anyone can explore every screen without a strap.
+
+CI builds and tests the `full` flavor (`assembleFullDebug`, `testFullDebugUnitTest`). Release builds
+produce `assembleFullRelease` (demo variant is out of scope for automated releases).
+
+### Release signing
+
+macOS builds in CI run unsigned (`CODE_SIGNING_ALLOWED=NO`). Android release builds fall back to the
+debug key when `keystore.properties` is absent (i.e., all CI and fresh clones), so
+`assembleFullRelease` always produces an installable APK without requiring stored secrets.
 
 ---
 
