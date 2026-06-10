@@ -17,6 +17,14 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 1.70 — Clearer sync status + responsive Compare (#91, #93)
+
+- **Android: sync is now visibly in progress.** The Live screen shows a plain "Syncing your strap
+  history…" line while the strap offloads, instead of only a brief "· syncing" pill suffix that was easy
+  to miss (#91, #93). `LiveScreen.kt`. Mac already surfaced this.
+- **macOS: responsive Compare controls.** The time-range pills + Add menu now stack (`ViewThatFits`)
+  instead of overflowing on a narrow window — ported from the iOS port's fix. `CompareView.swift`.
+
 ## 1.69 — Cleaner Live status + sync diagnostics (#91, #92)
 
 - **Fixed (Mac + Android): "Last Event" no longer leaks plumbing.** The Live status field was showing

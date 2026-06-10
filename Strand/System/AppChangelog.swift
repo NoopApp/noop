@@ -7,7 +7,7 @@ enum AppChangelog {
 
     /// Bump this when you add a release below. The "What's New" sheet shows automatically when the
     /// stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
-    static let currentVersion = "1.69"
+    static let currentVersion = "1.70"
 
     struct Release: Identifiable {
         let version: String
@@ -19,6 +19,14 @@ enum AppChangelog {
 
     /// Newest first.
     static let releases: [Release] = [
+        Release(
+            version: "1.70",
+            title: "Clearer sync status + a responsive Compare screen",
+            date: "June 2026",
+            items: [
+                "Improved (Android): the Live screen now says \"Syncing your strap history…\" plainly while the strap is offloading, so it's obvious it's working — the brief status-pill change was easy to miss. (Mac already showed this clearly.)",
+                "Fixed (Mac): the Compare screen's time-range controls now stack instead of overflowing when the window is narrow.",
+            ]),
         Release(
             version: "1.69",
             title: "Cleaner Live status + better sync diagnostics",

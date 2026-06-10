@@ -25,7 +25,7 @@ object AppChangelog {
      * Bump this when you add a release below. The "What's New" sheet shows automatically when the
      * stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
      */
-    const val CURRENT_VERSION = "1.69"
+    const val CURRENT_VERSION = "1.70"
 
     data class Release(
         val version: String,
@@ -36,6 +36,15 @@ object AppChangelog {
 
     /** Newest first. */
     val releases: List<Release> = listOf(
+        Release(
+            version = "1.70",
+            title = "Clearer sync status + a responsive Compare screen",
+            date = "June 2026",
+            items = listOf(
+                "Improved (Android): the Live screen now says \"Syncing your strap history…\" plainly while the strap is offloading, so it's obvious it's working — the brief status-pill change was easy to miss. (Mac already showed this clearly.)",
+                "Fixed (Mac): the Compare screen's time-range controls now stack instead of overflowing when the window is narrow.",
+            ),
+        ),
         Release(
             version = "1.69",
             title = "Cleaner Live status + better sync diagnostics",

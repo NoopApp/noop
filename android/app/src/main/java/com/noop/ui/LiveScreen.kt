@@ -94,9 +94,17 @@ fun LiveScreen(viewModel: AppViewModel) {
             )
         }
 
-        // Honest sync outcome for a cloud-free app: a non-silent error if the last offload stalled,
-        // else a relative "history synced N ago". Hidden while actively syncing (the pill says so). (PR #85)
-        if (!live.backfilling) {
+        // Honest sync outcome for a cloud-free app. While offloading, say so plainly — the brief
+        // "· syncing" pill suffix is easy to miss (#91/#93). Otherwise: a non-silent error if the
+        // last offload stalled, else a relative "history synced N ago". (PR #85; sync-visibility v1.70)
+        if (live.backfilling) {
+            Text(
+                "Syncing your strap history…",
+                style = NoopType.footnote,
+                color = Palette.textSecondary,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        } else {
             val syncError = live.lastSyncError
             if (syncError != null) {
                 Text(
