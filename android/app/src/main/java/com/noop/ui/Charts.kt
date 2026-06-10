@@ -1,9 +1,15 @@
 package com.noop.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -13,8 +19,14 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import java.util.Locale
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 // MARK: - Charts (pure Compose Canvas — dark, instrument-grade, no external library)
 //
@@ -120,49 +132,114 @@ fun LineChart(
     color: Color = Palette.accent,
     fill: Boolean = true,
 ) {
-    Canvas(modifier = modifier.fillMaxWidth()) {
-        val strokePx = 2.5f
-        val topPad = strokePx + 4f
-        val bottomPad = strokePx + 4f
-        val pts = pointsFor(values, size.width, size.height, topPad, bottomPad)
-        if (pts.isEmpty()) {
-            drawBaseline()
-            return@Canvas
-        }
+    val cleanValues = remember(values) { values.filter { it.isFinite() } }
+    var selectedIndex by remember(cleanValues) { mutableIntStateOf(-1) }
 
-        // Soft gradient fill under the curve.
-        if (fill) {
-            val fillPath = Path().apply {
-                moveTo(pts.first().x, size.height)
-                lineTo(pts.first().x, pts.first().y)
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .pointerInput(cleanValues) {
+                detectTapGestures { tap ->
+                    if (cleanValues.size < 2 || size.width <= 0f) return@detectTapGestures
+                    val tappedIndex = nearestIndexForX(
+                        count = cleanValues.size,
+                        width = size.width.toFloat(),
+                        x = tap.x,
+                    )
+                    selectedIndex = if (selectedIndex == tappedIndex) -1 else tappedIndex
+                }
+            },
+    ) {
+        Canvas(modifier = Modifier.fillMaxWidth()) {
+            val strokePx = 2.5f
+            val topPad = strokePx + 4f
+            val bottomPad = strokePx + 4f
+            val pts = pointsFor(cleanValues, size.width, size.height, topPad, bottomPad)
+            if (pts.isEmpty()) {
+                drawBaseline()
+                return@Canvas
+            }
+
+            // Soft gradient fill under the curve.
+            if (fill) {
+                val fillPath = Path().apply {
+                    moveTo(pts.first().x, size.height)
+                    lineTo(pts.first().x, pts.first().y)
+                    for (i in 1 until pts.size) lineTo(pts[i].x, pts[i].y)
+                    lineTo(pts.last().x, size.height)
+                    close()
+                }
+                drawPath(
+                    path = fillPath,
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            color.copy(alpha = 0.28f),
+                            color.copy(alpha = 0.04f),
+                            Color.Transparent,
+                        ),
+                        startY = 0f,
+                        endY = size.height,
+                    ),
+                )
+            }
+
+            // The line itself.
+            val linePath = Path().apply {
+                moveTo(pts.first().x, pts.first().y)
                 for (i in 1 until pts.size) lineTo(pts[i].x, pts[i].y)
-                lineTo(pts.last().x, size.height)
-                close()
             }
             drawPath(
-                path = fillPath,
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        color.copy(alpha = 0.28f),
-                        color.copy(alpha = 0.04f),
-                        Color.Transparent,
-                    ),
-                    startY = 0f,
-                    endY = size.height,
-                ),
+                path = linePath,
+                color = color,
+                style = Stroke(width = strokePx, cap = StrokeCap.Round, join = StrokeJoin.Round),
             )
-        }
 
-        // The line itself.
-        val linePath = Path().apply {
-            moveTo(pts.first().x, pts.first().y)
-            for (i in 1 until pts.size) lineTo(pts[i].x, pts[i].y)
+            // Tap-to-pinpoint: vertical marker + dot + value text.
+            if (selectedIndex in pts.indices) {
+                val p = pts[selectedIndex]
+                drawLine(
+                    color = color.copy(alpha = 0.35f),
+                    start = Offset(p.x, 0f),
+                    end = Offset(p.x, size.height),
+                    strokeWidth = 1.5f,
+                    cap = StrokeCap.Round,
+                )
+                drawCircle(color = color, radius = 5f, center = p)
+                drawCircle(color = Color.Black.copy(alpha = 0.28f), radius = 9f, center = p)
+                drawCircle(color = color, radius = 4.5f, center = p)
+                drawContext.canvas.nativeCanvas.apply {
+                    val paint = android.graphics.Paint().apply {
+                        isAntiAlias = true
+                        textSize = 30f
+                        this.color = color.copy(alpha = 0.95f).toArgb()
+                        typeface = android.graphics.Typeface.create(
+                            android.graphics.Typeface.DEFAULT,
+                            android.graphics.Typeface.BOLD,
+                        )
+                    }
+                    val label = formatLineValue(cleanValues[selectedIndex])
+                    drawText(label, 8f, 32f, paint)
+                }
+            }
         }
-        drawPath(
-            path = linePath,
-            color = color,
-            style = Stroke(width = strokePx, cap = StrokeCap.Round, join = StrokeJoin.Round),
-        )
+    }
+}
+
+private fun nearestIndexForX(count: Int, width: Float, x: Float): Int {
+    if (count <= 1 || width <= 0f) return 0
+    val step = width / (count - 1)
+    val clampedX = x.coerceIn(0f, width)
+    val raw = (clampedX / step).roundToInt()
+    return raw.coerceIn(0, count - 1)
+}
+
+private fun formatLineValue(value: Double): String {
+    if (!value.isFinite()) return "-"
+    val rounded = value.roundToInt().toDouble()
+    return if (abs(value - rounded) < 0.05) {
+        rounded.toInt().toString()
+    } else {
+        String.format(Locale.US, "%.1f", value)
     }
 }
 

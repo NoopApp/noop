@@ -2,6 +2,7 @@ package com.noop.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -56,20 +58,41 @@ import kotlin.math.roundToInt
  */
 @Composable
 fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
-    val today by viewModel.today.collectAsStateWithLifecycle()
     val alert by viewModel.healthAlert.collectAsStateWithLifecycle()
     val days by viewModel.recentDays.collectAsStateWithLifecycle()
     val live by viewModel.live.collectAsStateWithLifecycle()
     var footer by remember { mutableStateOf(TodayFooterState()) }
+    var selectedDayOffset by remember { mutableIntStateOf(0) }
+    val selectedDay = remember(selectedDayOffset) { LocalDate.now().minusDays(selectedDayOffset.toLong()) }
+    val selectedDayKey = remember(selectedDay) { selectedDay.toString() }
+    val selectedMetric = remember(days, selectedDayKey) { days.lastOrNull { it.day == selectedDayKey } }
+    val dayLabel = remember(selectedDayOffset, selectedDay) {
+        when (selectedDayOffset) {
+            0 -> "Today"
+            1 -> "Yesterday"
+            else -> selectedDay.format(DateTimeFormatter.ofPattern("EEE, d MMM", Locale.US))
+        }
+    }
+    val synthesisTitle = remember(selectedDayOffset) {
+        when (selectedDayOffset) {
+            0 -> "Today's Synthesis"
+            1 -> "Yesterday's Synthesis"
+            else -> "Synthesis"
+        }
+    }
 
     // Recovery cold-start: recovery is null until the HRV baseline crosses the seed gate
     // (Baselines.minNightsSeed valid nights). Show honest "calibrating — N of 4 nights" progress
     // instead of a bare "No Data" so a new BLE-only user knows scores are coming, not broken. (PR #85)
-    val recoveryCalibration: Int? = recoveryCalibrationNights(days, today?.recovery != null)
+    val recoveryCalibration: Int? = if (selectedDayOffset == 0) {
+        recoveryCalibrationNights(days, selectedMetric?.recovery != null)
+    } else {
+        null
+    }
 
     // 14-day trailing calendar window ending on the phone's actual local day.
     // Old imports stay in history, but they do not fill the Today trend tiles.
-    val window = remember14(days)
+    val window = remember14(days, selectedDay)
 
     LaunchedEffect(days) {
         val now = System.currentTimeMillis() / 1000
@@ -103,11 +126,12 @@ fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
     }
 
     ScreenScaffold(title = "Control Center", subtitle = "Your day, read in full") {
+        DaySelectorBar(selectedOffset = selectedDayOffset, onSelect = { selectedDayOffset = it })
 
         // When there is no daily score yet (today's recovery is null / no history),
         // lead with the "live now, history one import away" note so the empty tiles
         // below are explained rather than just dashed out.
-        if (today?.recovery == null) {
+        if (selectedMetric?.recovery == null) {
             // While the strap is mid-offload, say so — empty tiles read as final otherwise (#77).
             if (live.backfilling) SyncingHistoryNote(chunks = live.syncChunksThisSession)
             DataPendingNote(
@@ -124,7 +148,7 @@ fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
         // HERO — ring + synthesis read-out, with a subtle always-on support affordance.
         Row(verticalAlignment = Alignment.Top) {
             Box(modifier = Modifier.weight(1f)) {
-                SectionHeader("Today's Synthesis", overline = "At a glance", trailing = greetingWord())
+                SectionHeader(synthesisTitle, overline = dayLabel, trailing = greetingWord())
             }
             IconButton(
                 onClick = onSupport,
@@ -141,33 +165,80 @@ fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
         Row(horizontalArrangement = Arrangement.spacedBy(Metrics.gap)) {
             NoopCard(modifier = Modifier.weight(1f)) {
                 Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    TodayRecoveryRing(today, recoveryCalibration)
+                    TodayRecoveryRing(selectedMetric, recoveryCalibration)
                 }
             }
             InsightCard(
                 modifier = Modifier.weight(1f),
                 category = "Recovery",
-                status = if (recoveryCalibration != null) "Calibrating" else synthesisWord(today?.recovery),
+                status = if (recoveryCalibration != null) "Calibrating" else synthesisWord(selectedMetric?.recovery),
                 detail = if (recoveryCalibration != null) {
                     "Learning your baseline — $recoveryCalibration of ${Baselines.minNightsSeed} nights."
                 } else {
-                    synthesisDetail(today)
+                    synthesisDetail(selectedMetric)
                 },
-                statusColor = today?.recovery?.let { Palette.recoveryColor(it) } ?: Palette.textTertiary,
+                statusColor = selectedMetric?.recovery?.let { Palette.recoveryColor(it) } ?: Palette.textTertiary,
             )
         }
 
         // READINESS — on-device training-readiness synthesis (HRV / resting-HR / load).
         // Mirrors the macOS readinessSection: rendered only once there's enough history.
-        ReadinessSection(days)
+        if (selectedDayOffset == 0) ReadinessSection(days)
 
         // METRICS — uniform tile grid (two columns), each tile with a 14-day sparkline.
         Spacer(Modifier.padding(top = (Metrics.sectionGap - 20.dp) / 2))
-        SectionHeader("Key Metrics", overline = "Today", trailing = "14-day trend")
-        MetricGrid(today, window, recoveryCalibration)
-        HeartRateTrendCard(viewModel, days)
+        SectionHeader("Key Metrics", overline = dayLabel, trailing = "14-day trend")
+        MetricGrid(selectedMetric, window, recoveryCalibration)
+        HeartRateTrendCard(viewModel, days, selectedDay)
         TodayWorkoutsSection(footer.recentWorkouts)
         TodaySourcesSection(footer)
+    }
+}
+
+@Composable
+private fun DaySelectorBar(selectedOffset: Int, onSelect: (Int) -> Unit) {
+    val base = LocalDate.now()
+    val blockShape = RoundedCornerShape(12.dp)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(0, 1, 2).forEach { offset ->
+            val day = base.minusDays(offset.toLong())
+            val selected = selectedOffset == offset
+            val label = when (offset) {
+                0 -> "Today"
+                1 -> "Yesterday"
+                else -> day.format(DateTimeFormatter.ofPattern("EEE", Locale.US))
+            }
+            val date = day.format(DateTimeFormatter.ofPattern("d MMM", Locale.US))
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(blockShape)
+                    .background(if (selected) Palette.accent.copy(alpha = 0.12f) else Palette.surfaceInset)
+                    .border(
+                        width = 1.dp,
+                        color = if (selected) Palette.accent.copy(alpha = 0.55f) else Palette.hairline,
+                        shape = blockShape,
+                    )
+                    .clickable { onSelect(offset) }
+                    .padding(vertical = 10.dp, horizontal = 10.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    text = label,
+                    style = NoopType.caption,
+                    color = if (selected) Palette.textPrimary else Palette.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = date,
+                    style = NoopType.captionNumber,
+                    color = if (selected) Palette.accent else Palette.textTertiary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
     }
 }
 
@@ -370,14 +441,16 @@ private fun MetricGrid(d: DailyMetric?, w: Window, recoveryCalibration: Int? = n
 // so the buckets — being uniform 5-min means in time order — read as an even left-to-right day curve.
 
 @Composable
-private fun HeartRateTrendCard(viewModel: AppViewModel, days: List<DailyMetric>) {
+private fun HeartRateTrendCard(viewModel: AppViewModel, days: List<DailyMetric>, selectedDay: LocalDate) {
     var buckets by remember { mutableStateOf<List<Double>>(emptyList()) }
     // Re-load when the day list changes (a sync/import updates it), and on first composition.
-    LaunchedEffect(days) {
+    LaunchedEffect(days, selectedDay) {
         val zone = ZoneId.systemDefault()
-        val startOfToday = LocalDate.now(zone).atStartOfDay(zone).toEpochSecond()
+        val start = selectedDay.atStartOfDay(zone).toEpochSecond()
+        val nextStart = selectedDay.plusDays(1).atStartOfDay(zone).toEpochSecond()
         val now = System.currentTimeMillis() / 1000
-        buckets = viewModel.repo.hrBuckets("my-whoop", startOfToday, now, 300L).map { it.avgBpm }
+        val end = if (selectedDay == LocalDate.now(zone)) now else (nextStart - 1)
+        buckets = viewModel.repo.hrBuckets("my-whoop", start, end, 300L).map { it.avgBpm }
     }
     if (buckets.size < 2) return
 
@@ -386,15 +459,26 @@ private fun HeartRateTrendCard(viewModel: AppViewModel, days: List<DailyMetric>)
     val max = buckets.max().roundToInt()
     val avg = buckets.average().roundToInt()
 
-    SectionHeader("Heart Rate", overline = "Today")
+    val selectedLabel = when (selectedDay) {
+        LocalDate.now() -> "Today"
+        LocalDate.now().minusDays(1) -> "Yesterday"
+        else -> selectedDay.format(DateTimeFormatter.ofPattern("d MMM", Locale.US))
+    }
+
+    SectionHeader("Heart Rate", overline = selectedLabel)
     NoopCard {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             // Header — mirrors the macOS ChartCard (title + subtitle, trailing read-out).
             Row(verticalAlignment = Alignment.Top) {
                 Column(modifier = Modifier.weight(1f)) {
                     Overline("Beats per minute")
+                    val subtitle = if (selectedDay == LocalDate.now()) {
+                        "5-minute average | since midnight"
+                    } else {
+                        "5-minute average | selected day"
+                    }
                     Text(
-                        "5-minute average · since midnight",
+                        subtitle,
                         style = NoopType.footnote,
                         color = Palette.textTertiary,
                     )
@@ -721,12 +805,13 @@ private data class Window(
  * trailing calendar window only, so stale imports do not draw a current-day trend.
  */
 @Composable
-private fun remember14(days: List<com.noop.data.DailyMetric>): Window =
-    androidx.compose.runtime.remember(days) {
+private fun remember14(days: List<com.noop.data.DailyMetric>, anchorDay: LocalDate): Window =
+    androidx.compose.runtime.remember(days, anchorDay) {
         // Trailing 14 CALENDAR days ending today — NOT the last 14 stored rows, which on an old import
         // were months-old data shown as a "14-day trend" (issue #23). ISO yyyy-MM-dd sorts chronologically.
-        val cutoff = java.time.LocalDate.now().minusDays(13).toString()
-        val recent = days.filter { it.day >= cutoff }
+        val cutoff = anchorDay.minusDays(13).toString()
+        val end = anchorDay.toString()
+        val recent = days.filter { it.day >= cutoff && it.day <= end }
         fun series(pick: (DailyMetric) -> Double?): List<Double> = recent.mapNotNull(pick)
         Window(
             recovery = series { it.recovery },
