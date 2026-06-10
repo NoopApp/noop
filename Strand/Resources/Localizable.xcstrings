@@ -2658,6 +2658,22 @@
         }
       }
     },
+    "Get the latest release": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Get the latest release"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Neueste Version laden"
+          }
+        }
+      }
+    },
     "Got it": {
       "localizations": {
         "en": {
@@ -4478,6 +4494,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Open-Source-BLE-Reverse-Engineering-Arbeit. Danke."
+          }
+        }
+      }
+    },
+    "Opens the GitHub releases page in your browser. NOOP itself makes no network connections — the macOS sandbox has no network entitlement.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opens the GitHub releases page in your browser. NOOP itself makes no network connections — the macOS sandbox has no network entitlement."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Öffnet die GitHub-Releases-Seite in deinem Browser. NOOP selbst stellt keine Netzwerkverbindungen her — die macOS-Sandbox hat keine Netzwerk-Berechtigung."
           }
         }
       }

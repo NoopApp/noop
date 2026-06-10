@@ -89,6 +89,7 @@ targets:
       - target: Strand
       - package: WhoopProtocol
       - package: WhoopStore
+      - package: StrandDesign
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES

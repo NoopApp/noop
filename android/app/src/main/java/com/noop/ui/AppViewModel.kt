@@ -93,6 +93,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Non-null when the illness watch flags an early-warning pattern. Drives the banner. */
     val healthAlert: StateFlow<String?> = _healthAlert.asStateFlow()
 
+    // Declared BEFORE the init block on purpose: the recentDays collector launched from init
+    // runs synchronously on Main.immediate and reads this on its very first (cached) emission —
+    // a declaration after init would still be null there (JVM initializes fields in declaration
+    // order) and crash the constructor. Opt-OUT, default ON (Android has always run the watch);
+    // port of macOS behavior.illnessWatch, which is opt-in.
+    private val _illnessWatchEnabled = MutableStateFlow(NoopPrefs.illnessWatch(appContext))
+    /** Whether the illness early-warning runs (banner + notification). */
+    val illnessWatchEnabled: StateFlow<Boolean> = _illnessWatchEnabled.asStateFlow()
+
     // MARK: - Today's cached metrics
 
     private val _today = MutableStateFlow<DailyMetric?>(null)
@@ -422,11 +431,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         applySmartAlarm()
     }
 
-    // --- Illness watch (opt-out; the evaluation itself is the pure IllnessWatch.evaluate). Port of
-    // macOS behavior.illnessWatch, but default ON here — Android has always run the watch. ---
-    private val _illnessWatchEnabled = MutableStateFlow(NoopPrefs.illnessWatch(appContext))
-    val illnessWatchEnabled: StateFlow<Boolean> = _illnessWatchEnabled.asStateFlow()
-
+    // --- Illness watch (opt-out; the evaluation itself is the pure IllnessWatch.evaluate).
+    // State lives next to _healthAlert above (declaration-order constraint); setter here with
+    // the other settings mutators. ---
     fun setIllnessWatchEnabled(enabled: Boolean) {
         _illnessWatchEnabled.value = enabled
         NoopPrefs.setIllnessWatch(appContext, enabled)

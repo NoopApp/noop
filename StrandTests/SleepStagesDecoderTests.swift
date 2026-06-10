@@ -1,4 +1,5 @@
 import XCTest
+import StrandDesign
 @testable import Strand
 
 /// Unit tests for SleepStagesDecoder, the dual-shape stagesJSON reader behind the Sleep
