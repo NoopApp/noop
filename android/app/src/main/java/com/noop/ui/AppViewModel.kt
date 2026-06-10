@@ -140,6 +140,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _hcWriteback = MutableStateFlow(NoopPrefs.hcWriteback(appContext))
     val hcWriteback: StateFlow<Boolean> = _hcWriteback.asStateFlow()
 
+    // Haptic coaching (zone buzz + resting stress nudge; opt-in, macOS BehaviorStore parity).
+    // Same declaration-order rule: ingestHr/evaluateStress run on the collector's first emission.
+    private val _zoneCoaching = MutableStateFlow(NoopPrefs.zoneCoaching(appContext))
+    val zoneCoaching: StateFlow<Boolean> = _zoneCoaching.asStateFlow()
+    private val _stressNudge = MutableStateFlow(NoopPrefs.stressNudge(appContext))
+    val stressNudge: StateFlow<Boolean> = _stressNudge.asStateFlow()
+    /** Last zone buzzed for; -1 = no prior zone (never buzz on the first classified sample). */
+    private var lastCoachZone = -1
+    /** Rolling R-R window + slow RMSSD baseline + rate limit for the stress nudge. */
+    private val stressRrBuf = ArrayDeque<Int>()
+    private var stressHrvBaseline = 0.0
+    private var lastStressBuzzAtMs = 0L
+
     // MARK: - Today's cached metrics
 
     private val _today = MutableStateFlow<DailyMetric?>(null)
@@ -164,6 +177,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             var lastBonded = false
             ble.state.collect { state ->
                 state.heartRate?.let { ingestHr(it) }
+                evaluateStress(state)
                 if (state.bonded && !lastBonded) {
                     if (_smartAlarmEnabled.value) applySmartAlarm()
                     // Remember this strap so we can reconnect to it directly on the next launch (#67),
@@ -274,6 +288,56 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val sorted = hrWindow.sorted()
         _bpm.value = sorted[sorted.size / 2]
         captureWorkoutSample(_bpm.value!!)
+        coachZone(_bpm.value)
+    }
+
+    // MARK: - Haptic coaching (port of macOS AppModel.coachZone / evaluateStress)
+
+    /** HR-zone haptic coaching: buzz entering the top zone (ease off, 3 loops) and again on
+     *  dropping back to recovery (1 loop). Decision logic lives in HapticCoaching.kt (pure). */
+    private fun coachZone(hr: Int?) {
+        if (!_zoneCoaching.value) return
+        val state = live.value
+        if (!state.bonded || !state.worn) return
+        if (hr == null || hr < 30) return
+        val maxHR = profileStore.hrMax.toDouble()
+        if (maxHR <= 0) return
+        val zone = coachZoneFor(hr, maxHR)
+        val previous = lastCoachZone
+        lastCoachZone = zone
+        zoneTransitionBuzz(previous, zone)?.let { buzz(it) }
+    }
+
+    /** Experimental resting stress nudge: RMSSD well below its slow baseline while HR is calm
+     *  (not exercising) → one buzz, rate-limited to once / 15 min. Conservative so it rarely
+     *  false-fires; off by default. Decision logic lives in HapticCoaching.kt (pure). */
+    private fun evaluateStress(state: LiveState) {
+        if (!_stressNudge.value || !state.bonded || !state.worn) return
+        val fresh = state.rr.filter { it in 301..1999 }   // plausible R-R (30–200 bpm)
+        if (fresh.isEmpty()) return
+        for (r in fresh) stressRrBuf.addLast(r)
+        while (stressRrBuf.size > 60) stressRrBuf.removeFirst()
+        if (stressRrBuf.size < 20) return
+        val rmssd = rmssdOf(stressRrBuf.toList())
+        if (rmssd <= 0.0) return
+        stressHrvBaseline = if (stressHrvBaseline == 0.0) rmssd
+        else stressHrvBaseline * 0.98 + rmssd * 0.02   // slow EMA
+        val now = System.currentTimeMillis()
+        if (stressNudgeShouldFire(rmssd, stressHrvBaseline, _bpm.value, now - lastStressBuzzAtMs)) {
+            lastStressBuzzAtMs = now
+            buzz(1)
+        }
+    }
+
+    fun setZoneCoaching(enabled: Boolean) {
+        _zoneCoaching.value = enabled
+        NoopPrefs.setZoneCoaching(appContext, enabled)
+        if (!enabled) lastCoachZone = -1   // re-enable starts fresh (no buzz on the first sample)
+    }
+
+    fun setStressNudge(enabled: Boolean) {
+        _stressNudge.value = enabled
+        NoopPrefs.setStressNudge(appContext, enabled)
     }
 
     // MARK: - Manual workout tracking

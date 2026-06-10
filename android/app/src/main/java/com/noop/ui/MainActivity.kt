@@ -207,6 +207,25 @@ object NoopPrefs {
         of(context).edit().putBoolean(KEY_ILLNESS_WATCH, enabled).apply()
     }
 
+    /** Haptic coaching (zone buzz + resting stress nudge). Both opt-IN, default off —
+     *  mirrors macOS BehaviorStore.zoneCoaching/stressNudge. */
+    const val KEY_ZONE_COACHING = "noop.zoneCoaching"
+    const val KEY_STRESS_NUDGE = "noop.stressNudge"
+
+    fun zoneCoaching(context: Context): Boolean =
+        of(context).getBoolean(KEY_ZONE_COACHING, false)
+
+    fun setZoneCoaching(context: Context, enabled: Boolean) {
+        of(context).edit().putBoolean(KEY_ZONE_COACHING, enabled).apply()
+    }
+
+    fun stressNudge(context: Context): Boolean =
+        of(context).getBoolean(KEY_STRESS_NUDGE, false)
+
+    fun setStressNudge(context: Context, enabled: Boolean) {
+        of(context).edit().putBoolean(KEY_STRESS_NUDGE, enabled).apply()
+    }
+
     /** Last local day (ISO yyyy-MM-dd) an illness notification was posted — the once-a-day gate,
      *  persisted so the app-open and background-service call sites can't double-post. */
     const val KEY_ILLNESS_LAST_NOTIFIED_DAY = "noop.illnessLastNotifiedDay"

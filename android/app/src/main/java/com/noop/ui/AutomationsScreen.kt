@@ -40,11 +40,15 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 fun AutomationsScreen(viewModel: AppViewModel) {
     val live by viewModel.live.collectAsStateWithLifecycle()
 
-    var zoneCoaching by remember { mutableStateOf(false) }
-    var stressNudge by remember { mutableStateOf(false) }
+    // Haptic coaching is real + persisted: zone buzz + stress nudge evaluate on the live HR/R-R
+    // stream in AppViewModel (port of macOS AppModel.coachZone/evaluateStress; opt-in).
+    val zoneCoaching by viewModel.zoneCoaching.collectAsStateWithLifecycle()
+    val stressNudge by viewModel.stressNudge.collectAsStateWithLifecycle()
+    // Device lock needs a DeviceAdmin/accessibility opt-in Android does not grant silently —
+    // still a preview-only placeholder until that flow exists (macOS locks via the OS entry point).
     var autoLockOnWristOff by remember { mutableStateOf(false) }
     // Smart alarm is real + persisted (issue #51): backed by the ViewModel, which arms the strap's
-    // firmware alarm. (The toggles above are still preview-only — separate follow-up.)
+    // firmware alarm.
     val smartAlarm by viewModel.smartAlarmEnabled.collectAsStateWithLifecycle()
     val alarmMinutes by viewModel.smartAlarmMinutes.collectAsStateWithLifecycle()
     // Illness watch is real + persisted (opt-OUT — the watch has always run on Android).
@@ -85,14 +89,14 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                 label = "HR-zone coaching",
                 help = "Buzz when you hit your top zone (ease off) and again when you recover. Uses your max HR from settings.",
                 checked = zoneCoaching,
-                onChange = { zoneCoaching = it },
+                onChange = { viewModel.setZoneCoaching(it) },
             )
             RowDivider()
             ToggleRow(
                 label = "Resting stress nudge (experimental)",
                 help = "A gentle buzz when your HRV drops while your heart rate is calm — a cue to take a paced breath. Rate-limited to once every 15 minutes; off by default.",
                 checked = stressNudge,
-                onChange = { stressNudge = it },
+                onChange = { viewModel.setStressNudge(it) },
             )
         }
 
