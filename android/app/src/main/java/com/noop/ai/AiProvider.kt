@@ -49,6 +49,20 @@ enum class AiProvider(
         ),
         endpoint = "https://api.anthropic.com/v1/messages",
         modelsEndpoint = "https://api.anthropic.com/v1/models",
+    ),
+    GEMINI(
+        displayName = "Google Gemini",
+        defaultModel = "gemini-2.5-flash",
+        models = listOf(
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-2.0-flash",
+        ),
+        // Gemini's chat URL is per-model: AiCoach appends "/{model}:generateContent" at
+        // request time, so this is the models BASE, not a complete chat endpoint.
+        endpoint = "https://generativelanguage.googleapis.com/v1beta/models",
+        modelsEndpoint = "https://generativelanguage.googleapis.com/v1beta/models",
     );
 
     companion object {

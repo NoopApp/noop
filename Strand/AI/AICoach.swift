@@ -24,6 +24,7 @@ public let aiCoachPrivacyNote =
 enum AIProvider: String, CaseIterable, Identifiable {
     case openAI
     case anthropic
+    case gemini
 
     var id: String { rawValue }
 
@@ -32,6 +33,7 @@ enum AIProvider: String, CaseIterable, Identifiable {
         switch self {
         case .openAI:    return "OpenAI"
         case .anthropic: return "Anthropic"
+        case .gemini:    return "Google Gemini"
         }
     }
 
@@ -40,6 +42,7 @@ enum AIProvider: String, CaseIterable, Identifiable {
         switch self {
         case .openAI:    return "gpt-4o-mini"
         case .anthropic: return "claude-sonnet-4-6"
+        case .gemini:    return "gemini-2.5-flash"
         }
     }
 
@@ -65,14 +68,24 @@ enum AIProvider: String, CaseIterable, Identifiable {
                 "claude-3-5-haiku-latest",
                 "claude-3-opus-latest"
             ]
+        case .gemini:
+            return [
+                "gemini-2.5-pro",
+                "gemini-2.5-flash",
+                "gemini-2.5-flash-lite",
+                "gemini-2.0-flash"
+            ]
         }
     }
 
-    /// The HTTPS endpoint this provider's chat request is POSTed to.
+    /// The HTTPS endpoint this provider's chat request is POSTed to. Gemini's chat URL is
+    /// per-model, so its case is the models BASE — `sendGemini` appends
+    /// "/{model}:generateContent" at request time.
     var endpoint: URL {
         switch self {
         case .openAI:    return URL(string: "https://api.openai.com/v1/chat/completions")!
         case .anthropic: return URL(string: "https://api.anthropic.com/v1/messages")!
+        case .gemini:    return URL(string: "https://generativelanguage.googleapis.com/v1beta/models")!
         }
     }
 
@@ -81,6 +94,7 @@ enum AIProvider: String, CaseIterable, Identifiable {
         switch self {
         case .openAI:    return URL(string: "https://api.openai.com/v1/models")!
         case .anthropic: return URL(string: "https://api.anthropic.com/v1/models")!
+        case .gemini:    return URL(string: "https://generativelanguage.googleapis.com/v1beta/models")!
         }
     }
 }
@@ -328,6 +342,8 @@ final class AICoachEngine: ObservableObject {
         case .anthropic:
             req.setValue(key, forHTTPHeaderField: "x-api-key")
             req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        case .gemini:
+            req.setValue(key, forHTTPHeaderField: "x-goog-api-key")
         }
 
         let data: Data
@@ -357,20 +373,27 @@ final class AICoachEngine: ObservableObject {
             return
         }
 
+        // OpenAI/Anthropic return {"data":[{"id":...}]}; Gemini returns
+        // {"models":[{"name":"models/gemini-..."}]} — ids carry a "models/" prefix.
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let list = obj["data"] as? [[String: Any]] else {
+              let list = (provider == .gemini ? obj["models"] : obj["data"]) as? [[String: Any]] else {
             errorText = AICoachError.decode.errorDescription
             return
         }
 
         // Pull ids, applying a light per-provider filter so the list stays relevant.
         let ids: [String] = list.compactMap { row in
-            guard let id = row["id"] as? String, !id.isEmpty else { return nil }
             switch provider {
             case .openAI:
+                guard let id = row["id"] as? String, !id.isEmpty else { return nil }
                 return (id.hasPrefix("gpt") || id.hasPrefix("o")) ? id : nil
             case .anthropic:
+                guard let id = row["id"] as? String, !id.isEmpty else { return nil }
                 return id
+            case .gemini:
+                guard let name = row["name"] as? String, !name.isEmpty else { return nil }
+                let id = name.hasPrefix("models/") ? String(name.dropFirst("models/".count)) : name
+                return id.hasPrefix("gemini") ? id : nil
             }
         }
         guard !ids.isEmpty else {
@@ -465,6 +488,7 @@ final class AICoachEngine: ObservableObject {
         switch provider {
         case .openAI:    return try await sendOpenAI(key: key, messages: messages)
         case .anthropic: return try await sendAnthropic(key: key, messages: messages)
+        case .gemini:    return try await sendGemini(key: key, messages: messages)
         }
     }
 
@@ -559,6 +583,45 @@ final class AICoachEngine: ObservableObject {
               let text = first["text"] as? String else {
             throw AICoachError.decode
         }
+        return text
+    }
+
+    /// Google Gemini generateContent. The system prompt is a top-level systemInstruction; turns
+    /// use "user" / "model" ("assistant" maps to "model"). The URL is per-model:
+    /// {modelsBase}/{model}:generateContent (see AIProvider.endpoint).
+    private func sendGemini(key: String,
+                            messages: [(role: ChatMessage.Role, content: String)]) async throws -> String {
+        var contents: [[String: Any]] = []
+        for m in messages {
+            contents.append([
+                "role": m.role == .assistant ? "model" : "user",
+                "parts": [["text": m.content]]
+            ])
+        }
+
+        let body: [String: Any] = [
+            "system_instruction": ["parts": [["text": systemPrompt]]],
+            "contents": contents,
+            "generationConfig": ["temperature": 0.6, "maxOutputTokens": 900]
+        ]
+
+        let url = AIProvider.gemini.endpoint.appendingPathComponent("\(model):generateContent")
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue(key, forHTTPHeaderField: "x-goog-api-key")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let json = try await perform(req)
+        // Reply text can span several parts; join them (thinking models may emit more than one).
+        guard let candidates = json["candidates"] as? [[String: Any]],
+              let first = candidates.first,
+              let content = first["content"] as? [String: Any],
+              let parts = content["parts"] as? [[String: Any]] else {
+            throw AICoachError.decode
+        }
+        let text = parts.compactMap { $0["text"] as? String }.joined()
+        guard !text.isEmpty else { throw AICoachError.decode }
         return text
     }
 

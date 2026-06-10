@@ -71,6 +71,7 @@ class AiCoach(private val repo: WhoopRepository) {
         when (provider) {
             AiProvider.OPENAI -> callOpenAi(provider, model, key, grounded)
             AiProvider.ANTHROPIC -> callAnthropic(provider, model, key, grounded)
+            AiProvider.GEMINI -> callGemini(provider, model, key, grounded)
         }
     }
 
@@ -100,21 +101,32 @@ class AiCoach(private val repo: WhoopRepository) {
                 builder.addHeader("x-api-key", key)
                 builder.addHeader("anthropic-version", "2023-06-01")
             }
+            AiProvider.GEMINI -> builder.addHeader("x-goog-api-key", key)
         }
 
         runCatching {
             val (code, text) = execute(builder.build())
             if (code !in 200..299) return@runCatching emptyList<String>()
 
-            // Both providers return {"data": [ { "id": "..." }, ... ]}.
-            val data = JSONObject(text).optJSONArray("data") ?: return@runCatching emptyList<String>()
+            // OpenAI/Anthropic return {"data":[{"id":...}]}; Gemini returns
+            // {"models":[{"name":"models/gemini-..."}]} — ids carry a "models/" prefix.
+            val json = JSONObject(text)
+            val data = when (provider) {
+                AiProvider.GEMINI -> json.optJSONArray("models")
+                else -> json.optJSONArray("data")
+            } ?: return@runCatching emptyList<String>()
             val ids = ArrayList<String>(data.length())
             for (i in 0 until data.length()) {
-                val id = data.optJSONObject(i)?.optString("id")?.trim().orEmpty()
+                val id = when (provider) {
+                    AiProvider.GEMINI -> data.optJSONObject(i)?.optString("name")
+                        ?.removePrefix("models/")?.trim().orEmpty()
+                    else -> data.optJSONObject(i)?.optString("id")?.trim().orEmpty()
+                }
                 if (id.isEmpty()) continue
                 val keep = when (provider) {
                     AiProvider.OPENAI -> id.startsWith("gpt") || id.startsWith("o")
                     AiProvider.ANTHROPIC -> true
+                    AiProvider.GEMINI -> id.startsWith("gemini")
                 }
                 if (keep) ids.add(id)
             }
@@ -294,6 +306,67 @@ class AiCoach(private val repo: WhoopRepository) {
             ?.trim()
 
         if (content.isNullOrEmpty()) throw Exception("The provider returned an empty reply. Please try again.")
+        return content
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Google Gemini — POST /v1beta/models/{model}:generateContent
+    // ---------------------------------------------------------------------------------------
+
+    private fun callGemini(
+        provider: AiProvider,
+        model: String,
+        key: String,
+        history: List<ChatMsg>,
+    ): String {
+        // Gemini has no system role inside contents: the system prompt is a top-level
+        // systemInstruction, and turns use "user" / "model" ("assistant" maps to "model").
+        val contents = JSONArray()
+        for (m in history) {
+            contents.put(
+                JSONObject()
+                    .put("role", if (m.role == "assistant") "model" else "user")
+                    .put("parts", JSONArray().put(JSONObject().put("text", m.text))),
+            )
+        }
+
+        val body = JSONObject()
+            .put(
+                "system_instruction",
+                JSONObject().put("parts", JSONArray().put(JSONObject().put("text", SYSTEM_PROMPT))),
+            )
+            .put("contents", contents)
+            .put(
+                "generationConfig",
+                JSONObject().put("temperature", 0.6).put("maxOutputTokens", 900),
+            )
+            .toString()
+
+        val request = Request.Builder()
+            .url("${provider.endpoint}/$model:generateContent")
+            .addHeader("x-goog-api-key", key)
+            .addHeader("Content-Type", "application/json")
+            .post(body.toRequestBody(JSON))
+            .build()
+
+        val (code, text) = execute(request)
+        if (code !in 200..299) throw httpError(provider, code, text)
+
+        // Reply text can span several parts; join them (thinking models may emit more than one).
+        val json = parse(text)
+        val parts = json.optJSONArray("candidates")
+            ?.optJSONObject(0)
+            ?.optJSONObject("content")
+            ?.optJSONArray("parts")
+        val content = buildString {
+            if (parts != null) {
+                for (i in 0 until parts.length()) {
+                    append(parts.optJSONObject(i)?.optString("text").orEmpty())
+                }
+            }
+        }.trim()
+
+        if (content.isEmpty()) throw Exception("The provider returned an empty reply. Please try again.")
         return content
     }
 
