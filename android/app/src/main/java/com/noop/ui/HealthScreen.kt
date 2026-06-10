@@ -1,6 +1,7 @@
 package com.noop.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -10,15 +11,20 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
@@ -30,6 +36,8 @@ import com.noop.analytics.Baselines
 import com.noop.analytics.VitalBands
 import com.noop.ble.LiveState
 import com.noop.data.DailyMetric
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -78,24 +86,48 @@ fun HealthScreen(vm: AppViewModel, onVitalClick: (String) -> Unit = {}) {
             // a small top-up reaches the section gap (28dp) used between macOS sections.
             HeartRateSection(live = live, hrMax = hrMax)
             Spacer(Modifier.height(Metrics.sectionGap - 20.dp))
-            VitalsSection(today = today, days = days, onVitalClick = onVitalClick)
+            VitalsSection(
+                title = "Vital Signs",
+                overline = "Latest readings",
+                trailing = null,
+                vitals = latestVitals(days, UnitPrefs.temperature(LocalContext.current)),
+                onVitalClick = onVitalClick,
+            )
         }
     }
 }
 
 @Composable
 fun VitalSignsScreen(vm: AppViewModel, onVitalClick: (String) -> Unit = {}) {
-    val today by vm.today.collectAsStateWithLifecycle()
     val days by vm.recentDays.collectAsStateWithLifecycle()
+    var selectedDayOffset by remember { mutableIntStateOf(0) }
+    val selectedDay = remember(selectedDayOffset) { LocalDate.now().minusDays(selectedDayOffset.toLong()) }
+    val selectedDayKey = remember(selectedDay) { selectedDay.toString() }
+    val selectedMetric = remember(days, selectedDayKey) { days.lastOrNull { it.day == selectedDayKey } }
+    val tempUnit = UnitPrefs.temperature(LocalContext.current)
+    val vitals = remember(selectedMetric, days, tempUnit) {
+        selectedMetric?.let { vitalsFor(it, days, tempUnit) }.orEmpty()
+    }
 
     ScreenScaffold(
         title = "Vital Signs",
         subtitle = "Historical vitals from your cached daily metrics.",
     ) {
-        if (today == null) {
-            HealthEmptyState()
+        RecentDaySelectorBar(selectedOffset = selectedDayOffset, onSelect = { selectedDayOffset = it })
+        if (selectedMetric == null || vitals.all { it.value == null }) {
+            DataPendingNote(
+                title = missingVitalsTitle(selectedDayOffset),
+                body = "Try Yesterday or 2 days ago from the bar above if the strap or import did not produce a daily vitals snapshot yet.",
+            )
         } else {
-            VitalsSection(today = today, days = days, onVitalClick = onVitalClick)
+            VitalsSection(
+                title = "Vital Signs",
+                overline = selectedDayLabel(selectedDayOffset),
+                trailing = "as of ${selectedMetric.day}",
+                vitals = vitals,
+                onVitalClick = onVitalClick,
+                footer = false,
+            )
         }
     }
 }
@@ -274,17 +306,18 @@ private fun FooterStat(label: String, value: String, modifier: Modifier = Modifi
 // MARK: - Vitals grid (uniform StatTiles)
 
 @Composable
-private fun VitalsSection(today: DailyMetric?, days: List<DailyMetric>, onVitalClick: (String) -> Unit) {
+private fun VitalsSection(
+    title: String,
+    overline: String,
+    trailing: String? = null,
+    vitals: List<Vital>,
+    onVitalClick: (String) -> Unit,
+    footer: Boolean = true,
+) {
     // Temperature display preference (D#103). Skin temp is stored in °C; the toggle re-labels it to °F.
     // Display-only — banding still runs on the stored °C value.
-    val tempUnit = UnitPrefs.temperature(LocalContext.current)
-    val vitals = vitalsFor(today, days, tempUnit)
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        SectionHeader(
-            title = "Vital Signs",
-            overline = "Today",
-            trailing = today?.day?.let { "as of $it" },
-        )
+        SectionHeader(title = title, overline = overline, trailing = trailing)
 
         // A uniform 2-column grid of fixed-height tiles. The macOS LazyVGrid is
         // adaptive(min: 168); on phones two columns is the faithful equivalent.
@@ -301,7 +334,7 @@ private fun VitalsSection(today: DailyMetric?, days: List<DailyMetric>, onVitalC
                             .semantics { contentDescription = v.accessibilityText },
                         vital = v,
                         value = v.formattedValue ?: "—",
-                        caption = v.stateCaption,
+                        caption = v.asOfLabel ?: v.stateCaption,
                         accent = v.accent,
                     )
                 }
@@ -310,14 +343,16 @@ private fun VitalsSection(today: DailyMetric?, days: List<DailyMetric>, onVitalC
             }
         }
 
-        Text(
-            text = "SpO₂, respiratory rate and skin temperature are sleep-window " +
-                "aggregates from your most recent imported day; resting HR and HRV update daily. " +
-                "Once NOOP has 14 nights of history, in-range compares each vital to your own " +
-                "baseline (approximate — not medical advice); until then typical adult ranges apply.",
-            style = NoopType.footnote,
-            color = Palette.textTertiary,
-        )
+        if (footer) {
+            Text(
+                text = "SpO₂, respiratory rate and skin temperature are sleep-window " +
+                    "aggregates from your most recent imported day; resting HR and HRV update daily. " +
+                    "Once NOOP has 14 nights of history, in-range compares each vital to your own " +
+                    "baseline (approximate — not medical advice); until then typical adult ranges apply.",
+                style = NoopType.footnote,
+                color = Palette.textTertiary,
+            )
+        }
     }
 }
 
@@ -330,6 +365,8 @@ private data class Vital(
     val value: Double?,
     val format: (Double) -> String,
     val deltaText: String? = null,
+    val readingDay: String? = null,
+    val asOfLabel: String? = null,
     /** Personal-baseline banding (population fallback until 14 trusted nights). */
     val banding: VitalBands.Result,
     /** The metric's category colour (used only when in range). */
@@ -357,7 +394,9 @@ private data class Vital(
     }
 
     val accessibilityText: String =
-        formattedValue?.let { "$label: $it, $stateCaption" } ?: "$label: no data"
+        formattedValue?.let {
+            listOfNotNull("$label: $it", asOfLabel, stateCaption).joinToString(", ")
+        } ?: "$label: no data"
 }
 
 /** Build the vitals, banded against the user's OWN trailing baseline once 14 trusted
@@ -424,6 +463,8 @@ private fun vitalsFor(
             key = "resp", label = "Resp Rate", unit = "rpm",
             value = d?.respRateBpm, format = { String.format("%.1f", it) },
             deltaText = deltaText(d?.respRateBpm, previous { it.respRateBpm }),
+            readingDay = todayKey,
+            asOfLabel = asOfLabel(todayKey),
             banding = VitalBands.band(d?.respRateBpm, series { it.respRateBpm }, 12.0..20.0, Baselines.respCfg),
             metricColor = Palette.metricCyan,
         ),
@@ -431,6 +472,8 @@ private fun vitalsFor(
             key = "spo2", label = "Blood O₂", unit = "%",
             value = d?.spo2Pct, format = { String.format("%.0f", it) },
             deltaText = deltaText(d?.spo2Pct, previous { it.spo2Pct }, decimals = 0),
+            readingDay = todayKey,
+            asOfLabel = asOfLabel(todayKey),
             // Population-only on purpose: an absolute <95% floor is meaningful regardless
             // of personal baseline (no "spo2" MetricCfg exists).
             banding = VitalBands.band(d?.spo2Pct, emptyList(), 95.0..100.0, null),
@@ -440,6 +483,8 @@ private fun vitalsFor(
             key = "rhr", label = "Resting HR", unit = "bpm",
             value = d?.restingHr?.toDouble(), format = { it.roundToInt().toString() },
             deltaText = deltaText(d?.restingHr?.toDouble(), previous { it.restingHr?.toDouble() }, decimals = 0),
+            readingDay = todayKey,
+            asOfLabel = asOfLabel(todayKey),
             banding = VitalBands.band(
                 d?.restingHr?.toDouble(), series { it.restingHr?.toDouble() }, 40.0..60.0,
                 Baselines.restingHRCfg,
@@ -450,6 +495,8 @@ private fun vitalsFor(
             key = "hrv", label = "HRV", unit = "ms",
             value = d?.avgHrv, format = { it.roundToInt().toString() },
             deltaText = deltaText(d?.avgHrv, previous { it.avgHrv }, decimals = 0),
+            readingDay = todayKey,
+            asOfLabel = asOfLabel(todayKey),
             banding = VitalBands.band(d?.avgHrv, series { it.avgHrv }, 40.0..120.0, Baselines.hrvCfg),
             metricColor = Palette.metricPurple,
         ),
@@ -457,6 +504,8 @@ private fun vitalsFor(
             key = "skin", label = "Skin Temp", unit = skinUnitLabel,
             value = skin, format = skinFormat,
             deltaText = deltaText(skin, previousSkin),
+            readingDay = todayKey,
+            asOfLabel = asOfLabel(todayKey),
             banding = skinResult, metricColor = Palette.metricAmber,
         ),
     )
@@ -512,6 +561,7 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
     val days by vm.recentDays.collectAsStateWithLifecycle()
     val tempUnit = UnitPrefs.temperature(LocalContext.current)
     val detail = remember(days, key, tempUnit) { buildVitalDetail(days, key, tempUnit) }
+    var range by remember { mutableStateOf(VitalDetailRange.MONTH) }
 
     ScreenScaffold(
         title = detail?.title ?: "Vital Signs",
@@ -525,13 +575,22 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
             return@ScreenScaffold
         }
 
-        val values = detail.points.map { it.second }
-        val latest = detail.points.last()
+        val filteredPoints = remember(detail, range) { filterVitalPoints(detail.points, range) }
+        if (filteredPoints.size < 2) {
+            DataPendingNote(
+                title = "Not enough history in this range",
+                body = "Try a longer interval like 3M, 6M, or ALL to see this vital’s trend.",
+            )
+            return@ScreenScaffold
+        }
+
+        val values = filteredPoints.map { it.second }
+        val latest = filteredPoints.last()
         val min = values.minOrNull()
         val max = values.maxOrNull()
         val avg = values.average()
 
-        SectionHeader(detail.title, overline = "Vital Signs", trailing = "${detail.points.size} readings")
+        SectionHeader(detail.title, overline = "Vital Signs", trailing = "${filteredPoints.size} readings")
         NoopCard {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(verticalAlignment = Alignment.Top) {
@@ -549,6 +608,12 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
                         )
                     }
                 }
+                SegmentedPillControl(
+                    items = VitalDetailRange.entries,
+                    selection = range,
+                    label = { it.label },
+                    onSelect = { range = it },
+                )
                 LineChart(
                     values = values,
                     modifier = Modifier.height(Metrics.chartHeight),
@@ -580,6 +645,124 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
             }
         }
     }
+}
+
+@Composable
+private fun RecentDaySelectorBar(selectedOffset: Int, onSelect: (Int) -> Unit) {
+    val base = LocalDate.now()
+    val blockShape = RoundedCornerShape(12.dp)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(2, 1, 0).forEach { offset ->
+            val day = base.minusDays(offset.toLong())
+            val selected = selectedOffset == offset
+            val label = when (offset) {
+                0 -> "Today"
+                1 -> "Yesterday"
+                else -> "2 days ago"
+            }
+            val date = day.format(DateTimeFormatter.ofPattern("d MMM", Locale.US))
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(blockShape)
+                    .background(if (selected) Palette.accent.copy(alpha = 0.12f) else Palette.surfaceInset)
+                    .border(
+                        width = 1.dp,
+                        color = if (selected) Palette.accent.copy(alpha = 0.55f) else Palette.hairline,
+                        shape = blockShape,
+                    )
+                    .clickable { onSelect(offset) }
+                    .padding(vertical = 10.dp, horizontal = 10.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    text = label,
+                    style = NoopType.caption,
+                    color = if (selected) Palette.textPrimary else Palette.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = date,
+                    style = NoopType.captionNumber,
+                    color = if (selected) Palette.accent else Palette.textTertiary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+        }
+    }
+}
+
+private fun latestVitals(days: List<DailyMetric>, tempUnit: TemperatureUnit): List<Vital> {
+    val emptyByKey = vitalsFor(null, days, tempUnit).associateBy { it.key }
+    return listOf(
+        latestVital("resp", days, tempUnit, emptyByKey) { it.respRateBpm != null },
+        latestVital("spo2", days, tempUnit, emptyByKey) { it.spo2Pct != null },
+        latestVital("rhr", days, tempUnit, emptyByKey) { it.restingHr != null },
+        latestVital("hrv", days, tempUnit, emptyByKey) { it.avgHrv != null },
+        latestVital("skin", days, tempUnit, emptyByKey) { it.skinTempDevC != null },
+    )
+}
+
+private fun latestVital(
+    key: String,
+    days: List<DailyMetric>,
+    tempUnit: TemperatureUnit,
+    emptyByKey: Map<String, Vital>,
+    hasValue: (DailyMetric) -> Boolean,
+): Vital {
+    val row = days.asReversed().firstOrNull(hasValue)
+    return row
+        ?.let { latestRow -> vitalsFor(latestRow, days, tempUnit).firstOrNull { it.key == key } }
+        ?.copy(asOfLabel = asOfLabel(row.day))
+        ?: emptyByKey.getValue(key)
+}
+
+private fun selectedDayLabel(offset: Int): String = when (offset) {
+    0 -> "Today"
+    1 -> "Yesterday"
+    else -> "2 days ago"
+}
+
+private fun missingVitalsTitle(offset: Int): String = when (offset) {
+    0 -> "We didn't get today's data"
+    1 -> "We didn't get yesterday's data"
+    else -> "We didn't get data from 2 days ago"
+}
+
+private fun asOfLabel(day: String?): String? {
+    if (day.isNullOrBlank()) return null
+    val date = runCatching { LocalDate.parse(day) }.getOrNull() ?: return "as of $day"
+    val today = LocalDate.now()
+    return when (date) {
+        today -> "as of today"
+        today.minusDays(1) -> "as of yesterday"
+        else -> "as of ${date.format(DateTimeFormatter.ofPattern("d MMM", Locale.US))}"
+    }
+}
+
+private enum class VitalDetailRange(val label: String, val days: Long?) {
+    WEEK("W", 7),
+    MONTH("M", 30),
+    THREE_MONTH("3M", 90),
+    SIX_MONTH("6M", 180),
+    ALL("ALL", null),
+}
+
+private fun filterVitalPoints(
+    points: List<Pair<String, Double>>,
+    range: VitalDetailRange,
+): List<Pair<String, Double>> {
+    val windowDays = range.days ?: return points
+    val latestDate = points.lastOrNull()?.first?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+        ?: return points.takeLast(windowDays.toInt())
+    val cutoff = latestDate.minusDays(windowDays - 1)
+    val filtered = points.filter { (day, _) ->
+        runCatching { LocalDate.parse(day) }.getOrNull()?.let { !it.isBefore(cutoff) } ?: false
+    }
+    return filtered.ifEmpty { points.takeLast(windowDays.toInt()) }
 }
 
 private fun buildVitalDetail(

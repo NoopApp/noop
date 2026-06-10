@@ -1,6 +1,7 @@
 package com.noop.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -140,15 +141,39 @@ fun LineChart(
         modifier = modifier
             .fillMaxWidth()
             .pointerInput(cleanValues) {
-                detectTapGestures { tap ->
-                    if (cleanValues.size < 2 || size.width <= 0f) return@detectTapGestures
-                    val tappedIndex = nearestIndexForX(
-                        count = cleanValues.size,
-                        width = size.width.toFloat(),
-                        x = tap.x,
-                    )
-                    selectedIndex = if (selectedIndex == tappedIndex) -1 else tappedIndex
-                }
+                detectTapGestures(
+                    onPress = { offset ->
+                        if (cleanValues.size >= 2 && size.width > 0) {
+                            selectedIndex = nearestIndexForX(
+                                count = cleanValues.size,
+                                width = size.width.toFloat(),
+                                x = offset.x,
+                            )
+                        }
+                        tryAwaitRelease()
+                    },
+                )
+            }
+            .pointerInput(cleanValues) {
+                detectHorizontalDragGestures(
+                    onDragStart = { start ->
+                        if (cleanValues.size < 2 || size.width <= 0f) return@detectHorizontalDragGestures
+                        selectedIndex = nearestIndexForX(
+                            count = cleanValues.size,
+                            width = size.width.toFloat(),
+                            x = start.x,
+                        )
+                    },
+                    onHorizontalDrag = { change, _ ->
+                        if (cleanValues.size < 2 || size.width <= 0f) return@detectHorizontalDragGestures
+                        selectedIndex = nearestIndexForX(
+                            count = cleanValues.size,
+                            width = size.width.toFloat(),
+                            x = change.position.x,
+                        )
+                        change.consume()
+                    },
+                )
             },
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
