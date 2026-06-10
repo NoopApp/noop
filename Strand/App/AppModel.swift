@@ -314,6 +314,7 @@ final class AppModel: ObservableObject {
     /// days ago) for resting HR, HRV, skin-temp deviation and respiration. Two or more anomalies →
     /// a banner. The classic early-illness signature (RHR↑ + HRV↓ + skin-temp↑). On-device only.
     private func evaluateIllness(_ days: [DailyMetric]) {
+        let previous = healthAlert
         guard behavior.illnessWatch, days.count >= 14 else { healthAlert = nil; return }
         let recent = Array(days.suffix(2))
         let base = Array(days.suffix(31).dropLast(3))    // ~28 days ending 3 days ago
@@ -337,6 +338,19 @@ final class AppModel: ObservableObject {
         healthAlert = flags.count >= 2
             ? "Your body looks strained — " + flags.joined(separator: ", ") + ". Consider taking it easy."
             : nil
+        // Banner transition (clear → raised): surface it as a system notification so the
+        // early-warning reaches the user when the window is closed (menu bar keeps us alive).
+        // IllnessNotifier rate-limits to once per local day.
+        if let alert = healthAlert, previous == nil {
+            IllnessNotifier.post(alert)
+        }
+    }
+
+    /// Re-run the illness watch over the cached history. Called when the Automations toggle
+    /// flips — the repo.$days sink only fires on data changes, so a flip would otherwise wait
+    /// for the next refresh.
+    func reevaluateIllness() {
+        evaluateIllness(repo.days)
     }
 
     /// Import a Whoop CSV export (.zip or folder) → on-device store, then refresh the dashboard.

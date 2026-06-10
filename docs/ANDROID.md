@@ -200,7 +200,8 @@ or export `ANDROID_HOME` / `ANDROID_SDK_ROOT`.
 cd android
 
 # Run the pure-Kotlin unit tests (analytics). No device needed.
-./gradlew :app:testDebugUnitTest
+# (Variant task — the full/demo flavor dimension means there is no plain testDebugUnitTest.)
+./gradlew :app:testFullDebugUnitTest
 
 # Assemble a debug APK (once the entry-point stubs exist).
 ./gradlew assembleDebug
@@ -482,8 +483,11 @@ storage; nothing is uploaded.
   else 1`), with a fallback to zone 1 when `hrMax ≤ 0`. `Zones.hrMaxTanaka(age)` = `round(208 − 0.7·age)`.
 - **`IllnessWatch.evaluate(days)`** — compares the last ~2 days against a ~28-day baseline ending 3
   days ago across resting HR, HRV, skin-temp deviation, and respiration; surfaces a banner when 2+
-  anomalies fire. Requires ≥14 days of history. The Swift `behavior.illnessWatch` UI toggle is
-  intentionally omitted from this pure function — the caller decides whether to run it.
+  anomalies fire. Requires ≥14 days of history. The pure function carries no preference gate —
+  callers gate on `NoopPrefs.illnessWatch` (opt-out, default **on**; the toggle lives in
+  Automations), and a clear→raised transition also posts a system notification via
+  `IllnessAlertNotifier` (once per local day, deduped across the app-open and background-service
+  call sites by a persisted day key).
 
 `AnalyticsTest.kt` locks these against known vectors. The heavier `StrandAnalytics` package
 (`RecoveryScorer`, `StrainScorer`, `SleepStager`, `CorrelationEngine`, `Baselines`, …) is **not yet
@@ -556,7 +560,7 @@ against a real build, a real device, and a real strap.
 - [ ] Commit the gradle wrapper (`gradlew`, `gradlew.bat`, `gradle/wrapper/gradle-wrapper.{jar,properties}`).
 - [ ] Add the missing entry points: `com/noop/NoopApplication.kt`, `com/noop/ui/MainActivity.kt`,
       `app/proguard-rules.pro`.
-- [ ] `./gradlew :app:testDebugUnitTest` is green (analytics vectors).
+- [ ] `./gradlew :app:testFullDebugUnitTest` is green (analytics vectors).
 - [ ] `./gradlew assembleDebug` produces `app-debug.apk`.
 - [ ] `./gradlew assembleRelease` succeeds with R8 full mode + resource shrinking.
 - [ ] APK declares **no `INTERNET` permission** (`aapt dump permissions app-debug.apk`).

@@ -15,6 +15,7 @@ struct AutomationsView: View {
             wearCard
             coachingCard
             alarmCard
+            illnessCard
         }
     }
 
@@ -133,6 +134,21 @@ struct AutomationsView: View {
             }
             .onChange(of: behavior.smartAlarmEnabled) { _ in model.applySmartAlarm() }
             .onChange(of: behavior.smartAlarmMinutes) { _ in model.applySmartAlarm() }
+        }
+    }
+
+    // MARK: - Illness early-warning
+
+    private var illnessCard: some View {
+        Section2(icon: "waveform.path.ecg", title: "Illness early-warning",
+                 blurb: "Watches your resting HR, HRV, skin temperature and respiration against your own 28-day baseline. On-device and approximate — informational only, not a diagnosis.") {
+            ToggleRow(label: "Watch for early-illness signs",
+                      help: "Needs at least 14 days of history. When two or more signals drift together you get a banner on Control Center and a notification — at most once a day.",
+                      isOn: $behavior.illnessWatch)
+                .onChange(of: behavior.illnessWatch) { _ in
+                    model.reevaluateIllness()
+                    if behavior.illnessWatch { IllnessNotifier.requestAuthorization() }
+                }
         }
     }
 

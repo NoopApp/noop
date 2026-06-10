@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
@@ -46,6 +47,8 @@ fun AutomationsScreen(viewModel: AppViewModel) {
     // firmware alarm. (The toggles above are still preview-only — separate follow-up.)
     val smartAlarm by viewModel.smartAlarmEnabled.collectAsStateWithLifecycle()
     val alarmMinutes by viewModel.smartAlarmMinutes.collectAsStateWithLifecycle()
+    // Illness watch is real + persisted (opt-OUT — the watch has always run on Android).
+    val illnessWatch by viewModel.illnessWatchEnabled.collectAsStateWithLifecycle()
 
     ScreenScaffold(
         title = "Automations",
@@ -139,6 +142,20 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                     style = NoopType.footnote, color = Palette.textTertiary,
                 )
             }
+        }
+
+        // Illness early-warning (real + persisted; opt-OUT — the watch has always run on Android).
+        SettingsSection(
+            icon = Icons.Filled.MonitorHeart,
+            title = "Illness early-warning",
+            blurb = "Watches your resting HR, HRV, skin temperature and respiration against your own 28-day baseline. On-device and approximate — informational only, not a diagnosis.",
+        ) {
+            ToggleRow(
+                label = "Watch for early-illness signs",
+                help = "Needs at least 14 days of history. When two or more signals drift together you get a banner on Today and a notification — at most once a day.",
+                checked = illnessWatch,
+                onChange = { viewModel.setIllnessWatchEnabled(it) },
+            )
         }
     }
 }

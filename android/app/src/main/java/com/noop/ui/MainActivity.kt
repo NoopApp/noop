@@ -196,6 +196,28 @@ object NoopPrefs {
         of(context).edit().putInt(KEY_SMART_ALARM_MINUTES, minutes).apply()
     }
 
+    /** Illness early-warning (banner + notification). Default ON — the watch has always run on
+     *  Android, so this is an opt-OUT; macOS is opt-in (behavior.illnessWatch, default off). */
+    const val KEY_ILLNESS_WATCH = "noop.illnessWatch"
+
+    fun illnessWatch(context: Context): Boolean =
+        of(context).getBoolean(KEY_ILLNESS_WATCH, true)
+
+    fun setIllnessWatch(context: Context, enabled: Boolean) {
+        of(context).edit().putBoolean(KEY_ILLNESS_WATCH, enabled).apply()
+    }
+
+    /** Last local day (ISO yyyy-MM-dd) an illness notification was posted — the once-a-day gate,
+     *  persisted so the app-open and background-service call sites can't double-post. */
+    const val KEY_ILLNESS_LAST_NOTIFIED_DAY = "noop.illnessLastNotifiedDay"
+
+    fun illnessLastNotifiedDay(context: Context): String? =
+        of(context).getString(KEY_ILLNESS_LAST_NOTIFIED_DAY, null)
+
+    fun setIllnessLastNotifiedDay(context: Context, day: String) {
+        of(context).edit().putString(KEY_ILLNESS_LAST_NOTIFIED_DAY, day).apply()
+    }
+
     /** The last strap we bonded to (address + model), persisted so NOOP can reconnect to it directly on
      *  the next launch — e.g. after an APK update restarts the process (#67). On-device only; never sent. */
     const val KEY_LAST_DEVICE_ADDR = "noop.lastDeviceAddress"

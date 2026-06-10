@@ -15,7 +15,10 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.noop.NoopApplication
 import com.noop.R
+import com.noop.analytics.IllnessWatch
+import com.noop.notif.IllnessAlertNotifier
 import com.noop.ui.MainActivity
+import com.noop.ui.NoopPrefs
 import com.noop.widget.WidgetSnapshot
 import com.noop.widget.WidgetSnapshotStore
 import kotlinx.coroutines.CoroutineScope
@@ -56,6 +59,11 @@ class WhoopConnectionService : Service() {
      *  connect, plus any OS restart), so we cancel the old one before launching a new one. */
     private var notifyJob: Job? = null
 
+    /** Last illness-watch evaluation seen by the collector — clear→raised is the notify edge.
+     *  In-memory on purpose: the persisted once-a-day gate (NoopPrefs) handles dedupe across
+     *  process restarts and the AppViewModel call site. */
+    private var lastIllnessAlert: String? = null
+
     private val ble get() = (application as NoopApplication).ble
     private val repo get() = (application as NoopApplication).repository
 
@@ -94,15 +102,28 @@ class WhoopConnectionService : Service() {
                 repo.daysMergedFlow("my-whoop").catch { emit(emptyList()) },
             ) { state, days ->
                 val todayKey = java.time.LocalDate.now().toString()
-                state to days.lastOrNull { it.day == todayKey }?.recovery
+                Triple(
+                    state,
+                    days.lastOrNull { it.day == todayKey }?.recovery,
+                    // Illness watch in the background (gated on the opt-out pref): the FGS is the
+                    // only long-lived collector, so this is what makes the early-warning reach a
+                    // user who hasn't opened the app today.
+                    if (NoopPrefs.illnessWatch(this@WhoopConnectionService)) IllnessWatch.evaluate(days) else null,
+                )
             }.catch { /* belt-and-braces: a frozen notification beats a dead process */ }
                 // conflate + collect, NOT collectLatest (#82): the widget push suspends in Glance
                 // machinery longer than the live-HR emission interval, so collectLatest cancelled
                 // every push mid-flight and the widget starved on stale data the moment HR started
                 // streaming. Conflation still processes only the latest value — just without the axe.
                 .conflate()
-                .collect { (state, recovery) ->
+                .collect { (state, recovery, illness) ->
                 postNotification(state, recovery)
+                // Banner transition (clear → raised) → real system notification; the notifier's
+                // persisted day gate dedupes against the app-open (AppViewModel) call site.
+                if (lastIllnessAlert == null && illness != null) {
+                    IllnessAlertNotifier.onEvaluated(this@WhoopConnectionService, illness)
+                }
+                lastIllnessAlert = illness
                 // Feed the home-screen widget from the same stream — this service is its heartbeat
                 // while the app UI is closed. Throttled + no-op without a placed widget (the store
                 // checks both); runCatching so a Glance hiccup never tears down the connection.

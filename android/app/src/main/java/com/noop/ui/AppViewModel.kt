@@ -15,6 +15,7 @@ import com.noop.data.DailyMetric
 import com.noop.data.WhoopRepository
 import com.noop.ingest.HealthConnectImporter
 import com.noop.ingest.HealthConnectWriter
+import com.noop.notif.IllnessAlertNotifier
 import com.noop.protocol.CommandNumber
 import com.noop.widget.WidgetSnapshot
 import com.noop.widget.WidgetSnapshotStore
@@ -133,7 +134,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 // historical data the newest import (e.g. months old) showed as today's synthesis (#23).
                 val todayKey = java.time.LocalDate.now().toString()   // ISO yyyy-MM-dd, local
                 _today.value = days.lastOrNull { it.day == todayKey }
-                _healthAlert.value = IllnessWatch.evaluate(days)
+                val previousAlert = _healthAlert.value
+                _healthAlert.value =
+                    if (_illnessWatchEnabled.value) IllnessWatch.evaluate(days) else null
+                // Banner transition (clear → raised) → real system notification; the notifier's
+                // persisted day gate dedupes against the background-service call site.
+                if (previousAlert == null) {
+                    _healthAlert.value?.let { IllnessAlertNotifier.onEvaluated(appContext, it) }
+                }
                 // Keep the home-screen widget fresh while the app is open — covers users who turned
                 // the background service off (the service is the widget's heartbeat otherwise).
                 // Throttled + no-op without a placed widget; never let a Glance hiccup kill the collector.
@@ -412,6 +420,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _smartAlarmMinutes.value = minutes.coerceIn(0, 24 * 60 - 1)
         NoopPrefs.setSmartAlarmMinutes(appContext, _smartAlarmMinutes.value)
         applySmartAlarm()
+    }
+
+    // --- Illness watch (opt-out; the evaluation itself is the pure IllnessWatch.evaluate). Port of
+    // macOS behavior.illnessWatch, but default ON here — Android has always run the watch. ---
+    private val _illnessWatchEnabled = MutableStateFlow(NoopPrefs.illnessWatch(appContext))
+    val illnessWatchEnabled: StateFlow<Boolean> = _illnessWatchEnabled.asStateFlow()
+
+    fun setIllnessWatchEnabled(enabled: Boolean) {
+        _illnessWatchEnabled.value = enabled
+        NoopPrefs.setIllnessWatch(appContext, enabled)
+        // Recompute now — the recentDays collector only fires on data changes.
+        _healthAlert.value = if (enabled) IllnessWatch.evaluate(recentDays.value) else null
     }
 
     /** Arm or clear the strap's firmware alarm from the current setting, computing the next occurrence
