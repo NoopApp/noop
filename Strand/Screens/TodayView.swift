@@ -412,6 +412,8 @@ struct TodayView: View {
                         present: !appleDays.isEmpty,
                         detail: "\(appleDays.count) days · \(workouts.filter { $0.source == "apple-health" }.count) workouts"
                     )
+                    Divider().overlay(StrandPalette.hairline)
+                    strapSyncRow
                 }
             }
         }
@@ -425,6 +427,41 @@ struct TodayView: View {
             Text(present ? detail : "Not connected")
                 .font(StrandFont.captionNumber)
                 .foregroundStyle(present ? StrandPalette.textSecondary : StrandPalette.textTertiary)
+        }
+    }
+
+    /// Honest strap-sync outcome for a cloud-free app (ports the Android Live line, ed6a31d): the
+    /// stalled-offload error when the last one died, else "History synced N ago". Hidden while an
+    /// offload runs — SyncingHistoryNote already says so. TimelineView re-renders the relative label
+    /// each minute so "5 min ago" can't go stale while the window sits open with no strap connected
+    /// (LiveState publishes nothing then).
+    @ViewBuilder
+    private var strapSyncRow: some View {
+        if !live.backfilling {
+            TimelineView(.periodic(from: .now, by: 60)) { context in
+                HStack(alignment: .top, spacing: 10) {
+                    SourceBadge("Strap sync",
+                                tint: live.lastSyncError != nil ? StrandPalette.statusWarning
+                                    : live.lastSyncedAt != nil ? StrandPalette.accent
+                                    : StrandPalette.textTertiary)
+                    Spacer()
+                    if let error = live.lastSyncError {
+                        Text(error)
+                            .font(StrandFont.captionNumber)
+                            .foregroundStyle(StrandPalette.statusWarning)
+                            .multilineTextAlignment(.trailing)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else if let at = live.lastSyncedAt {
+                        Text("History synced \(relativeAgo(at, now: context.date.timeIntervalSince1970))")
+                            .font(StrandFont.captionNumber)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                    } else {
+                        Text("Not synced yet")
+                            .font(StrandFont.captionNumber)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
+                }
+            }
         }
     }
 

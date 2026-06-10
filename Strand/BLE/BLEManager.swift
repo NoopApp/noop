@@ -540,9 +540,16 @@ public final class BLEManager: NSObject, ObservableObject {
         backfillTimeout = nil
         backfillFrameQueue.removeAll()
         log("Backfill: session ended — reason=\(reason)")
+        // Honest sync outcome for a cloud-free user (mirrors Android exitBackfilling, ed6a31d):
+        // HISTORY_COMPLETE stamps lastSyncedAt + clears any error; the idle-watchdog timeout surfaces
+        // a non-silent error. A disconnect mid-sync bypasses this path (didDisconnectPeripheral resets
+        // the flags directly) — that's not a sync failure, and the next connect re-offloads.
         if reason == "HISTORY_COMPLETE" {
             state.lastSyncedAt = Date().timeIntervalSince1970
+            state.lastSyncError = nil
             UserDefaults.standard.set(state.lastSyncedAt, forKey: "lastSyncedAt")
+        } else if reason == "timeout" {
+            state.lastSyncError = "Sync interrupted — the strap went quiet. It will retry on the next sync."
         }
         checkStrapLiveness()         // safety-net: strap ahead of us AND our frontier frozen ⇒ stuck?
     }

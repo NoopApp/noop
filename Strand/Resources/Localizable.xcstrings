@@ -2850,6 +2850,22 @@
         }
       }
     },
+    "History synced %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "History synced %@"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verlauf synchronisiert %@"
+          }
+        }
+      }
+    },
     "Hours asleep": {
       "localizations": {
         "en": {
@@ -4238,6 +4254,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Noch nicht genug aktuelle Tage, um einen Trend darzustellen. Importiere eine Historie oder trage deinen Strap weiter."
+          }
+        }
+      }
+    },
+    "Not synced yet": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not synced yet"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Noch nicht synchronisiert"
           }
         }
       }
@@ -5874,6 +5906,22 @@
         }
       }
     },
+    "Strap sync": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Strap sync"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Strap-Sync"
+          }
+        }
+      }
+    },
     "Stress": {
       "localizations": {
         "en": {
@@ -6047,6 +6095,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Die Entwicklung unterstützen"
+          }
+        }
+      }
+    },
+    "Syncing strap history…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Syncing strap history…"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Strap-Verlauf wird synchronisiert…"
           }
         }
       }

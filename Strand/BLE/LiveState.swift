@@ -46,6 +46,12 @@ public final class LiveState: ObservableObject {
     /// came — i.e. caught up). Drives the sync tile + the staleness nudge.
     @Published public var lastSyncedAt: TimeInterval?
 
+    /// Set when an offload ended abnormally (the idle watchdog fired — the strap went quiet mid-sync),
+    /// so a stalled history download isn't silent. Cleared by the next successful HISTORY_COMPLETE.
+    /// Process-local on purpose (mirrors Android, ed6a31d): the next connect / 15-min tick re-offloads
+    /// anyway, so persisting a stale error across launches would outlive its relevance.
+    @Published public var lastSyncError: String? = nil
+
     /// True while a historical offload session is running, so screens can say "Syncing strap
     /// history…" instead of presenting half-loaded data as final (#77).
     @Published public var backfilling = false
