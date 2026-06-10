@@ -1,5 +1,6 @@
 import SwiftUI
 import StrandDesign
+import StrandAnalytics
 import WhoopStore
 
 /// NOOP — Health Monitor.
@@ -61,6 +62,12 @@ private struct HeartRateSection: View {
     @EnvironmentObject var live: LiveState
     @EnvironmentObject var profile: ProfileStore
 
+    /// Rolling buffer of recently-streamed live HR (newest last), so the hero graph builds a real
+    /// continuous time-series instead of collapsing to a 2-point flat line when the strap streams HR
+    /// but little/no R-R (the #105 case — Live HR works, but the Health graph showed only 2 samples).
+    /// Capped to ~3 min @ ~1 Hz; resets when the view is recreated, which is fine for a live trace.
+    @State private var hrHistory: [Double] = []
+
     /// HR to display: reported value when >0, else derived from the latest R-R
     /// interval (the strap streams R-R even when its HR field reads 0).
     private var displayHR: Int? {
@@ -90,6 +97,10 @@ private struct HeartRateSection: View {
     /// A short HR series for the hero sparkline, derived from streamed R-R intervals
     /// (newest last). Falls back to a flat line at the current HR when R-R is sparse.
     private func hrSeries(_ hr: Int?) -> [Double] {
+        // Prefer the accumulated live HR time-series — that's what a "live" graph should show, and it
+        // keeps growing even when the strap streams HR but sparse R-R (#105). Fall back to R-R-derived
+        // beats, then a flat line at the current HR.
+        if hrHistory.count > 1 { return hrHistory }
         let beats = live.rr.suffix(60).compactMap { rr -> Double? in
             rr > 0 ? 60_000.0 / Double(rr) : nil
         }
@@ -126,6 +137,12 @@ private struct HeartRateSection: View {
                     ("State", hasLiveHR ? "STREAMING" : "IDLE"),
                 ])
             }
+        }
+        .onChange(of: displayHR) { newHR in
+            // Append each new live HR reading so the hero graph grows a continuous time-series (#105).
+            guard let v = newHR else { return }
+            hrHistory.append(Double(v))
+            if hrHistory.count > 180 { hrHistory.removeFirst(hrHistory.count - 180) }
         }
     }
 
@@ -197,6 +214,10 @@ private struct VitalsSection: View {
                     .accessibilityLabel(v.accessibilityText)
                 }
             }
+            Text("Once NOOP has 14 nights of history, in-range compares each vital to your own baseline (approximate — not medical advice); until then, typical adult ranges apply.")
+                .font(StrandFont.footnote)
+                .foregroundStyle(StrandPalette.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -206,25 +227,61 @@ private struct VitalsSection: View {
         return "as of \(day)"
     }
 
-    /// The vitals row, built from the most recent imported day.
+    /// The vitals row, built from the most recent imported day and banded against the user's
+    /// OWN trailing baseline once 14 trusted nights exist (population ranges before that —
+    /// `VitalBands` does the deciding; this just wires the history series in).
     private var vitals: [Vital] {
         let d = repo.today
+        let todayKey = d?.day
+        // History strictly before the displayed day, oldest→newest (repo.days is already
+        // oldest→newest), calendar-padded so wear gaps count as missing nights (a stale
+        // baseline then falls back to the population range).
+        let history = repo.days.filter { row in todayKey.map { row.day < $0 } ?? true }
+        func series(_ kp: (DailyMetric) -> Double?) -> [Double?] {
+            VitalBands.calendarSeries(history.map { ($0.day, kp($0)) })
+        }
+        // Skin temp is bimodal: CSV imports store ABSOLUTE °C, the on-device pipeline a ±°C
+        // DEVIATION — partition the history to the displayed value's kind and pick the matching
+        // config + population fallback (±0.6 °C mirrors the illness watch's flag threshold).
+        let skin = d?.skinTempDevC
+        let skinResult: VitalBands.Result
+        if let skin {
+            let absolute = VitalBands.isAbsoluteSkinTemp(skin)
+            skinResult = VitalBands.band(
+                value: skin,
+                history: VitalBands.skinTempHistory(matching: skin, in: series { $0.skinTempDevC }),
+                populationRange: absolute ? 33...36 : (-0.6)...0.6,
+                cfg: absolute ? Baselines.metricCfg["skin_temp"]! : VitalBands.skinTempDeviationCfg)
+        } else {
+            skinResult = VitalBands.Result(band: .noData, basis: .population, nights: 0)
+        }
         return [
             Vital(key: "resp", label: "Resp Rate", unit: "rpm",
                   value: d?.respRateBpm, format: { String(format: "%.1f", $0) },
-                  inRange: 12...20, metricColor: StrandPalette.metricCyan),
+                  banding: VitalBands.band(value: d?.respRateBpm, history: series { $0.respRateBpm },
+                                           populationRange: 12...20, cfg: Baselines.respCfg),
+                  metricColor: StrandPalette.metricCyan),
             Vital(key: "spo2", label: "Blood O₂", unit: "%",
                   value: d?.spo2Pct, format: { String(format: "%.0f", $0) },
-                  inRange: 95...100, metricColor: StrandPalette.metricCyan),
+                  // Population-only on purpose: an absolute <95% floor is meaningful regardless
+                  // of personal baseline (no "spo2" MetricCfg exists).
+                  banding: VitalBands.band(value: d?.spo2Pct, history: [],
+                                           populationRange: 95...100, cfg: nil),
+                  metricColor: StrandPalette.metricCyan),
             Vital(key: "rhr", label: "Resting HR", unit: "bpm",
                   value: d?.restingHr.map(Double.init), format: { String(Int($0.rounded())) },
-                  inRange: 40...60, metricColor: StrandPalette.metricRose),
+                  banding: VitalBands.band(value: d?.restingHr.map(Double.init),
+                                           history: series { $0.restingHr.map(Double.init) },
+                                           populationRange: 40...60, cfg: Baselines.restingHRCfg),
+                  metricColor: StrandPalette.metricRose),
             Vital(key: "hrv", label: "HRV", unit: "ms",
                   value: d?.avgHrv, format: { String(Int($0.rounded())) },
-                  inRange: 40...120, metricColor: StrandPalette.metricPurple),
+                  banding: VitalBands.band(value: d?.avgHrv, history: series { $0.avgHrv },
+                                           populationRange: 40...120, cfg: Baselines.hrvCfg),
+                  metricColor: StrandPalette.metricPurple),
             Vital(key: "skin", label: "Skin Temp", unit: "°C",
-                  value: d?.skinTempDevC, format: { String(format: "%.1f", $0) },
-                  inRange: 33...36, metricColor: StrandPalette.metricAmber),
+                  value: skin, format: { String(format: "%.1f", $0) },
+                  banding: skinResult, metricColor: StrandPalette.metricAmber),
         ]
     }
 }
@@ -237,13 +294,12 @@ private struct Vital: Identifiable {
     let unit: String
     let value: Double?
     let format: (Double) -> String
-    /// Healthy range used to compute the in-range state.
-    let inRange: ClosedRange<Double>
+    /// Personal-baseline banding (population fallback until 14 trusted nights).
+    let banding: VitalBands.Result
     /// The metric's category colour (used only when in range).
     let metricColor: Color
 
     var id: String { key }
-    var isInRange: Bool { value.map { inRange.contains($0) } ?? false }
 
     /// Value with its unit appended, or nil when no data.
     var formattedValue: String? { value.map { "\(format($0)) \(unit)" } }
@@ -251,20 +307,30 @@ private struct Vital: Identifiable {
     /// Colour communicates state: in-range = the metric's category colour,
     /// out-of-range = warning amber, no data = tertiary.
     var accent: Color {
-        guard value != nil else { return StrandPalette.textTertiary }
-        return isInRange ? metricColor : StrandPalette.statusWarning
+        switch banding.band {
+        case .noData:     return StrandPalette.textTertiary
+        case .inRange:    return metricColor
+        case .outOfRange: return StrandPalette.statusWarning
+        }
     }
 
-    /// The textual in-range caption that stands in for a StatePill inside the
-    /// fixed-height tile (keeps the row pixel-uniform).
+    /// The in-range caption that stands in for a StatePill inside the fixed-height tile
+    /// (keeps the row pixel-uniform). The wording says which yardstick judged it: your own
+    /// baseline vs the typical adult range. String(localized:) — StatTile's caption is a
+    /// plain String rendered via Text(String), which never consults the catalog on its own.
     var stateCaption: String {
-        guard value != nil else { return "No data" }
-        return isInRange ? "In range" : "Out of range"
+        switch (banding.band, banding.basis) {
+        case (.noData, _):               return String(localized: "No data")
+        case (.inRange, .personal):      return String(localized: "In your range")
+        case (.outOfRange, .personal):   return String(localized: "Off your baseline")
+        case (.inRange, .population):    return String(localized: "In typical range")
+        case (.outOfRange, .population): return String(localized: "Outside typical range")
+        }
     }
 
     var accessibilityText: String {
         guard let v = formattedValue else { return "\(label): no data" }
-        return "\(label): \(v), \(isInRange ? "in range" : "out of range")"
+        return "\(label): \(v), \(stateCaption)"
     }
 }
 

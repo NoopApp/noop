@@ -7,7 +7,7 @@ enum AppChangelog {
 
     /// Bump this when you add a release below. The "What's New" sheet shows automatically when the
     /// stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
-    static let currentVersion = "1.71"
+    static let currentVersion = "1.78"
 
     struct Release: Identifiable {
         let version: String
@@ -19,6 +19,61 @@ enum AppChangelog {
 
     /// Newest first.
     static let releases: [Release] = [
+        Release(
+            version: "1.78",
+            title: "Fewer false daytime sleeps + an Android sync button",
+            date: "June 2026",
+            items: [
+                "Fixed (Mac and Android): a long sedentary daytime stretch — at your desk, on the couch, in a long meeting — no longer gets logged as sleep. Daytime periods now need a longer, genuinely low-heart-rate window before they count, while overnight sleep and real naps are unchanged.",
+                "New (Android): a manual “Sync now” button on the Live screen, plus an honest progress indicator while your strap’s history is offloading.",
+            ]),
+        Release(
+            version: "1.77",
+            title: "First-run terms acknowledgment + an Explore chart fix",
+            date: "June 2026",
+            items: [
+                "New (Mac and Android): a one-time, plain-English terms acknowledgment on first launch — what NOOP is, that it's independent of WHOOP and that using it may breach WHOOP's Terms of Service, that it's not a medical device, and that you use it at your own risk. Standard for an independent, on-device tool — you accept once. The full terms ship in TERMS.md.",
+                "Fixed (Mac): the Explore metric charts no longer flicker to a straight line when the cursor crosses into or out of the graph.",
+            ]),
+        Release(
+            version: "1.76",
+            title: "Robust Apple Health import, marginal-radio HR mode, live HR graph",
+            date: "June 2026",
+            items: [
+                "Improved (Mac and Android): a very large Apple Health export no longer fails to import because of a single malformed byte. NOOP now skips the bad spans and imports everything else, and tells you how many it skipped — so multi-year exports that errored out before should come in fine now.",
+                "New (Mac): if your Bluetooth radio can't sustain WHOOP 4's full realtime stream (older Macs, OpenCore setups), NOOP now automatically falls back to a low-bandwidth standard heart-rate mode — so live HR keeps working instead of the connection looping on a drop.",
+                "Fixed (Mac): the Health tab's live heart-rate graph now builds a continuous trace over time, instead of getting stuck showing only two points.",
+            ]),
+        Release(
+            version: "1.75",
+            title: "Personal vital baselines + Mac analytics parity",
+            date: "June 2026",
+            items: [
+                "New (Mac and Android): the Health Monitor now judges each vital — HRV, resting heart rate, respiratory rate, skin temperature — against YOUR own learned baseline (after about 14 nights), not just a one-size-fits-all population range. So a personal normal that happens to sit outside the textbook band — say a naturally lower HRV — stops reading as \"off\" when it's perfectly fine for you. Until your baseline is established it falls back to the typical range.",
+                "New (Mac): macOS now computes steps, respiratory rate, daily calories and nightly skin temperature on-device, matching what Android already did — and nightly respiration now feeds into the recovery score on both platforms. Existing recoveries are unchanged when respiration isn't available.",
+            ]),
+        Release(
+            version: "1.74",
+            title: "Android reconnect guide + a startup-crash fix",
+            date: "June 2026",
+            items: [
+                "Android now matches the Mac: if your WHOOP 5.0 / MG can't connect after a firmware update (a Bluetooth pairing reset), NOOP detects it and shows the forget-and-re-pair steps right in the app, instead of silently retrying. (Mac got this in 1.73.)",
+                "Fixed (Android): a rare startup crash on some fast devices (e.g. Galaxy S24+) — the app could crash once on launch when a strap was already connected, then open fine on the second try. (Mac was never affected.)",
+            ]),
+        Release(
+            version: "1.73",
+            title: "Reconnect help for WHOOP 5.0 / MG after a firmware update",
+            date: "June 2026",
+            items: [
+                "If your WHOOP 5.0 / MG stopped connecting after a WHOOP firmware update, that's a Bluetooth pairing reset — not a lockout, and NOOP works fine on the new firmware. To reconnect: quit the official WHOOP app, forget the strap in your Bluetooth settings, put it in pairing mode (tap the band until the LEDs flash blue), then reconnect. On Mac, NOOP now detects this automatically and shows you these exact steps in-app instead of silently retrying. WHOOP 4.0 is unaffected.",
+            ]),
+        Release(
+            version: "1.72",
+            title: "GPS workout crash fix (Android)",
+            date: "June 2026",
+            items: [
+                "Fixed (Android): starting a GPS-tracked workout could crash the app on Android 12 and newer. GPS needs location permission, which NOOP never requested — and it was capped to older Android versions — so route tracking failed the instant it began. NOOP now asks for location permission right before a GPS workout and fails safe if it's unavailable: the workout still records heart rate and strain, just without a route. If you don't use GPS workouts, nothing changes. (Mac: version bump only.)",
+            ]),
         Release(
             version: "1.71",
             title: "GPS-tracked workouts (Android)",

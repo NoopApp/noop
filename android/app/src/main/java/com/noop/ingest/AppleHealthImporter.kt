@@ -10,7 +10,9 @@ import com.noop.data.MetricSeriesRow
 import com.noop.data.WhoopRepository
 import com.noop.data.WorkoutRow
 import org.xmlpull.v1.XmlPullParser
+import org.xmlpull.v1.XmlPullParserException
 import java.io.BufferedInputStream
+import java.io.FilterInputStream
 import java.io.InputStream
 import java.util.zip.ZipInputStream
 
@@ -50,6 +52,15 @@ object AppleHealthImporter {
 
     const val SOURCE_LABEL = "Apple Health"
     const val DEFAULT_DEVICE_ID = "apple-health"
+
+    /**
+     * Factory for the streaming pull-parser. Defaults to the Android framework's
+     * `Xml.newPullParser()`. JVM unit tests (where `android.util.Xml` is a throwing stub) swap in a
+     * kXML2 parser via `XmlPullParserFactory` so the sanitizer + tolerant-parse logic can be
+     * exercised off-device. Production code never touches this.
+     */
+    @Volatile
+    internal var newPullParser: () -> XmlPullParser = { Xml.newPullParser() }
 
     /** Health types Strand cares about (HK prefix already stripped). Mirrors `relevantTypes`. */
     private val RELEVANT_TYPES: Set<String> = setOf(
@@ -179,26 +190,56 @@ object AppleHealthImporter {
      * objects are retained.
      */
     private fun parseXml(input: InputStream, agg: Aggregator) {
-        val parser: XmlPullParser = Xml.newPullParser()
+        // SANITIZER: wrap the (possibly decade-old, possibly mojibake) byte stream so XML-1.0-illegal
+        // control bytes and broken UTF-8 are scrubbed in fixed-size chunks BEFORE the pull-parser sees
+        // them. Without this a single bad byte mid-file aborts the whole multi-year import. The
+        // sanitizer is itself a streaming FilterInputStream, so memory stays bounded. Its scrubbed-run
+        // count is folded into the import summary so a partial import is never silently presented as
+        // complete. Mirrors `SanitizingInputStream` in the macOS source of truth.
+        val sanitized = SanitizingInputStream(input)
+
+        val parser: XmlPullParser = newPullParser()
         parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
-        parser.setInput(input, null) // null encoding => parser reads the XML declaration
+        parser.setInput(sanitized, null) // null encoding => parser reads the XML declaration
 
         var correlationDepth = 0
-        var event = parser.eventType
-        while (event != XmlPullParser.END_DOCUMENT) {
-            when (event) {
-                XmlPullParser.START_TAG -> when (parser.name) {
-                    "Correlation" -> correlationDepth += 1
-                    "Record" -> if (correlationDepth == 0) handleRecord(parser, agg)
-                    "Workout" -> handleWorkout(parser, agg)
-                    else -> { /* ignore */ }
+        try {
+            var event = parser.eventType
+            while (event != XmlPullParser.END_DOCUMENT) {
+                when (event) {
+                    XmlPullParser.START_TAG -> when (parser.name) {
+                        "Correlation" -> correlationDepth += 1
+                        "Record" -> if (correlationDepth == 0) handleRecord(parser, agg)
+                        "Workout" -> handleWorkout(parser, agg)
+                        else -> { /* ignore */ }
+                    }
+                    XmlPullParser.END_TAG -> if (parser.name == "Correlation" && correlationDepth > 0) {
+                        correlationDepth -= 1
+                    }
                 }
-                XmlPullParser.END_TAG -> if (parser.name == "Correlation" && correlationDepth > 0) {
-                    correlationDepth -= 1
-                }
+                event = parser.next()
             }
-            event = parser.next()
+        } catch (e: Exception) {
+            // TOLERANT PARSE: a hard, structural XML error can still slip past the byte sanitizer
+            // (e.g. a truncated/garbled tag, not just a bad byte). The pull-parser may signal this as
+            // either an XmlPullParserException or an IOException (truncated stream) — both mean "the
+            // parser cannot continue". If we already parsed at least one record, KEEP the partial
+            // result rather than discarding a whole 15-year import over the tail; count the dropped
+            // tail as one skipped span and surface it. If nothing was parsed yet, rethrow so a
+            // completely broken file still fails loudly (the caller turns it into a failure summary).
+            if (e is XmlPullParserException || e is java.io.IOException) {
+                if (agg.hasAnyRecord()) {
+                    agg.noteSkippedSpan()
+                } else {
+                    throw e
+                }
+            } else {
+                throw e // programming errors etc. propagate unchanged
+            }
         }
+
+        // Fold in however many illegal-byte runs the sanitizer scrubbed (one per contiguous run).
+        agg.addSkippedSpans(sanitized.scrubbedRunCount)
     }
 
     private fun attr(parser: XmlPullParser, name: String): String? = parser.getAttributeValue(null, name)
@@ -382,11 +423,15 @@ object AppleHealthImporter {
         if (metricSeriesRows.isNotEmpty()) repo.upsertMetricSeries(metricSeriesRows)
         if (workoutRows.isNotEmpty()) repo.upsertWorkouts(workoutRows)
 
+        val skipped = agg.skippedSpanCount()
+
         val counts = LinkedHashMap<String, Int>()
         counts["appleDaily"] = appleDailyRows.size
         if (dailyMetricRows.isNotEmpty()) counts["dailyMetric"] = dailyMetricRows.size
         if (metricSeriesRows.isNotEmpty()) counts["metricSeries"] = metricSeriesRows.size
         if (workoutRows.isNotEmpty()) counts["workout"] = workoutRows.size
+        // Surface dropped spans honestly so a partial (tolerant) import never looks complete.
+        if (skipped > 0) counts["skippedSpans"] = skipped
 
         val firstDay = days.first().day
         val lastDay = days.last().day
@@ -402,6 +447,13 @@ object AppleHealthImporter {
                 if (workoutRows.size != 1) append("s")
             }
             append(" from Apple Health.")
+            if (skipped > 0) {
+                append(" Skipped ")
+                append(skipped)
+                append(" damaged span")
+                if (skipped != 1) append("s")
+                append(".")
+            }
         }
 
         return ImportSummary(
@@ -410,6 +462,39 @@ object AppleHealthImporter {
             firstDay = firstDay,
             lastDay = lastDay,
             message = message,
+        )
+    }
+
+    // ------------------------------------------------------------------------
+    // Test seam — JVM-runnable parse of a raw stream (no Context/Uri/Room needed).
+    // ------------------------------------------------------------------------
+
+    /** Observable result of a JVM-side parse, for unit tests of the sanitizer / tolerant parse. */
+    internal class ParseProbe(
+        /** Finalized per-day aggregates, ascending by day. */
+        val days: List<DailyAggView>,
+        val workoutCount: Int,
+        /** Dropped XML spans (sanitizer-scrubbed runs + hard-error-truncated tail). */
+        val skippedSpans: Int,
+    )
+
+    /** A read-only view of a finalized day, exposing the fields the tests assert on. */
+    internal class DailyAggView(val day: String, val avgHr: Double?, val maxHr: Double?)
+
+    /**
+     * Run the SAME sanitizer + tolerant pull-parse + per-day aggregation that production uses, over a
+     * raw [input] stream, and return an observable probe. This is the JVM entry point for tests: it
+     * avoids `Context`/`Uri`/Room while exercising the real `parseXml` choke point (sanitizer and
+     * tolerant-parse layers included). Production import goes through `importExport`, never this.
+     */
+    internal fun parseStreamForTest(input: InputStream): ParseProbe {
+        val agg = Aggregator()
+        parseXml(input, agg)
+        val days = agg.finishDays().map { DailyAggView(it.day, it.avgHr, it.maxHr) }
+        return ParseProbe(
+            days = days,
+            workoutCount = agg.finishWorkouts(DEFAULT_DEVICE_ID).size,
+            skippedSpans = agg.skippedSpanCount(),
         )
     }
 
@@ -623,6 +708,13 @@ private class Aggregator {
     private val seen = HashSet<String>()
     private val workouts = ArrayList<PendingWorkout>()
 
+    /** True once any relevant, date-valid record / workout / sleep row was dispatched. Drives the
+     * tolerant-parse decision (keep partial vs. fail). Mirrors `HealthXMLDelegate.hasAnyRecord`. */
+    private var sawAnyRecord = false
+    /** Count of XML spans dropped during a tolerant import (sanitizer-scrubbed illegal-byte runs +
+     * a hard-error-truncated tail). Surfaced in the summary so a partial import is never hidden. */
+    private var skippedSpans = 0
+
     private class PendingWorkout(
         val sport: String,
         val startTs: Long,
@@ -635,6 +727,16 @@ private class Aggregator {
     /** Returns true if [key] was not seen before (i.e. this row should be processed). */
     fun markSeen(key: String): Boolean = seen.add(key)
 
+    fun hasAnyRecord(): Boolean = sawAnyRecord
+
+    /** Account for one dropped span (a hard parse error that truncated the tail). */
+    fun noteSkippedSpan() { skippedSpans += 1 }
+
+    /** Add the number of illegal-byte runs the sanitizer scrubbed. */
+    fun addSkippedSpans(n: Int) { skippedSpans += n }
+
+    fun skippedSpanCount(): Int = skippedSpans
+
     private fun acc(day: String): DayAcc = byDay.getOrPut(day) { DayAcc() }
 
     private fun localDay(epochSecs: Double, offsetMin: Int): String {
@@ -644,6 +746,7 @@ private class Aggregator {
     }
 
     fun addSample(type: String, value: Double, unit: String?, start: HealthDate, end: HealthDate, offsetMin: Int) {
+        sawAnyRecord = true
         val day = localDay(start.epoch, offsetMin)
         val a = acc(day)
         when (type) {
@@ -678,6 +781,7 @@ private class Aggregator {
     }
 
     fun addSleep(stage: SleepStage, start: HealthDate, end: HealthDate, offsetMin: Int) {
+        sawAnyRecord = true
         val minutes = Math.max(0.0, (end.epoch - start.epoch)) / 60.0
         val day = localDay(end.epoch, offsetMin) // wake day = local day of end
         val a = acc(day)
@@ -694,6 +798,7 @@ private class Aggregator {
     }
 
     fun addWorkout(sport: String, durationS: Double?, distanceM: Double?, energyKcal: Double?, start: HealthDate, end: HealthDate) {
+        sawAnyRecord = true
         workouts += PendingWorkout(
             sport = sport,
             startTs = Math.round(start.epoch),
@@ -805,3 +910,229 @@ private class DailyAgg(
     val awakeMin: Double?,
     val inBedMin: Double?,
 )
+
+/**
+ * A streaming [FilterInputStream] that scrubs every byte XML 1.0 forbids — and every invalid UTF-8
+ * sequence — as it streams, in fixed-size chunks, before the bytes reach the pull-parser. Kotlin
+ * port of `SanitizingInputStream` in the macOS source of truth
+ * (`Packages/StrandImport/Sources/StrandImport/AppleHealthImporter.swift`).
+ *
+ * WHY: a single malformed byte in a multi-year Apple Health `export.xml` (a stray control char, or
+ * mojibake / truncated UTF-8 from a decade-old phone) makes the pull-parser abort with a hard error,
+ * discarding everything parsed up to that point. Repairing the byte stream up front lets the parse
+ * run to EOF so the import survives.
+ *
+ * It holds at most one source chunk plus the ≤ 3 trailing bytes of a UTF-8 sequence that straddles a
+ * chunk boundary, so memory stays bounded — the file is never inflated to RAM.
+ *
+ * Rules (UTF-8 only — Apple Health exports declare UTF-8):
+ *  - Bytes `< 0x20` that are not TAB (0x09), LF (0x0A) or CR (0x0D) → dropped (XML-1.0 illegal).
+ *    0x20..0x7F (incl. DEL 0x7F, which XML 1.0 permits) pass through.
+ *  - Any byte sequence that is not valid UTF-8 → replaced with U+FFFD (`EF BF BD`).
+ *  - Valid multi-byte sequences pass through byte-for-byte, including ones split across a chunk
+ *    boundary (the incomplete tail is carried into the next read).
+ *
+ * [scrubbedRunCount] counts CONTIGUOUS runs of dropped/replaced bytes (one per run, not per byte) so
+ * the import summary can report "N spans skipped" honestly.
+ */
+internal class SanitizingInputStream(
+    source: InputStream,
+    private val chunkSize: Int = 1 shl 16,
+) : FilterInputStream(source) {
+
+    /** Bytes lifted from the source but not yet sanitized — only an incomplete UTF-8 tail (≤ 3). */
+    private var carry = ByteArray(0)
+    /** Sanitized bytes ready to hand to the parser but not yet consumed. */
+    private var out = ByteArray(0)
+    private var outOffset = 0
+    private var sourceEof = false
+
+    private var inScrubRun = false
+    var scrubbedRunCount = 0
+        private set
+
+    override fun read(): Int {
+        if (!ensureOutput()) return -1
+        val b = out[outOffset].toInt() and 0xFF
+        outOffset += 1
+        compactIfDrained()
+        return b
+    }
+
+    override fun read(b: ByteArray, off: Int, len: Int): Int {
+        if (len == 0) return 0
+        if (!ensureOutput()) return -1
+        val available = out.size - outOffset
+        val n = minOf(len, available)
+        System.arraycopy(out, outOffset, b, off, n)
+        outOffset += n
+        compactIfDrained()
+        return n
+    }
+
+    override fun available(): Int = (out.size - outOffset)
+
+    /** No mark/reset across the sanitizer (the parser does not need it). */
+    override fun markSupported(): Boolean = false
+
+    /** Ensure at least one sanitized byte is available; returns false at true EOF. */
+    private fun ensureOutput(): Boolean {
+        while (outOffset >= out.size) {
+            if (sourceEof) {
+                // At EOF, a leftover partial UTF-8 sequence is itself invalid → one U+FFFD.
+                if (carry.isNotEmpty()) {
+                    scrub(holdIncompleteTail = false)
+                    if (outOffset < out.size) return true
+                }
+                return false
+            }
+            refill()
+        }
+        return true
+    }
+
+    private fun compactIfDrained() {
+        if (outOffset >= out.size) {
+            out = ByteArray(0)
+            outOffset = 0
+        }
+    }
+
+    /** Read one chunk from the source, append to carry, scrub up to the last complete UTF-8 boundary. */
+    private fun refill() {
+        val chunk = ByteArray(chunkSize)
+        val n = `in`.read(chunk, 0, chunkSize)
+        if (n <= 0) {
+            sourceEof = true
+            return
+        }
+        carry = if (carry.isEmpty()) chunk.copyOf(n) else carry + chunk.copyOf(n)
+        scrub(holdIncompleteTail = true)
+    }
+
+    /**
+     * Consume [carry], emit sanitized bytes into [out]. When [holdIncompleteTail] is true the trailing
+     * bytes of a not-yet-complete (but so-far-valid) UTF-8 sequence are left in [carry] for the next
+     * chunk. Mirrors the Swift `scrub(holdIncompleteTail:)`.
+     */
+    private fun scrub(holdIncompleteTail: Boolean) {
+        val bytes = carry
+        val count = bytes.size
+        val sink = ArrayList<Byte>(count + (out.size - outOffset))
+        // Keep any not-yet-consumed sanitized output ahead of the new bytes.
+        for (j in outOffset until out.size) sink.add(out[j])
+
+        var i = 0
+        while (i < count) {
+            val b = bytes[i].toInt() and 0xFF
+
+            // 1) ASCII fast path.
+            if (b < 0x80) {
+                if (b >= 0x20 || b == 0x09 || b == 0x0A || b == 0x0D) {
+                    sink.add(b.toByte())
+                    inScrubRun = false
+                } else {
+                    // XML-1.0-illegal C0 control char (< 0x20, not TAB/LF/CR) → drop.
+                    noteScrub()
+                }
+                i += 1
+                continue
+            }
+
+            // 2) Multi-byte UTF-8. Sequence length from the lead byte.
+            val seqLen = when {
+                b and 0xE0 == 0xC0 -> 2
+                b and 0xF0 == 0xE0 -> 3
+                b and 0xF8 == 0xF0 -> 4
+                else -> 0 // continuation byte as a lead, or 0xF8..0xFF: invalid.
+            }
+
+            if (seqLen == 0) {
+                emitReplacement(sink)
+                i += 1
+                continue
+            }
+
+            if (i + seqLen > count) {
+                if (holdIncompleteTail) {
+                    // Might still complete in the next chunk — carry it over.
+                    break
+                } else {
+                    emitReplacement(sink)
+                    i += 1
+                    continue
+                }
+            }
+
+            if (isValidUtf8Sequence(bytes, i, seqLen)) {
+                for (k in 0 until seqLen) sink.add(bytes[i + k])
+                inScrubRun = false
+                i += seqLen
+            } else {
+                // Only the lead byte is consumed; invalid continuation bytes are re-examined.
+                emitReplacement(sink)
+                i += 1
+            }
+        }
+
+        // Anything from i onward is the held-back incomplete tail (or nothing).
+        carry = if (i >= count) ByteArray(0) else bytes.copyOfRange(i, count)
+
+        out = ByteArray(sink.size)
+        for (k in sink.indices) out[k] = sink[k]
+        outOffset = 0
+    }
+
+    private fun emitReplacement(sink: ArrayList<Byte>) {
+        // U+FFFD in UTF-8.
+        sink.add(0xEF.toByte()); sink.add(0xBF.toByte()); sink.add(0xBD.toByte())
+        noteScrub()
+    }
+
+    /** Account for one scrubbed byte, collapsing consecutive bad bytes into a single counted span. */
+    private fun noteScrub() {
+        if (!inScrubRun) {
+            scrubbedRunCount += 1
+            inScrubRun = true
+        }
+    }
+
+    /**
+     * Validate a UTF-8 sequence of [length] bytes starting at [start], including overlong / surrogate
+     * / out-of-range constraints (RFC 3629), so only encodings a strict XML parser accepts pass
+     * through. Mirrors the Swift `isValidUTF8Sequence`.
+     */
+    private fun isValidUtf8Sequence(bytes: ByteArray, start: Int, length: Int): Boolean {
+        val b0 = bytes[start].toInt() and 0xFF
+        return when (length) {
+            2 -> {
+                // Valid 2-byte lead is C2..DF; C0/C1 are overlong encodings of ASCII.
+                if (b0 < 0xC2) false else isCont(bytes[start + 1])
+            }
+            3 -> {
+                val b1 = bytes[start + 1].toInt() and 0xFF
+                if (!isCont(bytes[start + 2])) {
+                    false
+                } else when (b0) {
+                    0xE0 -> b1 in 0xA0..0xBF       // exclude overlong
+                    0xED -> b1 in 0x80..0x9F       // exclude UTF-16 surrogates
+                    else -> isCont(bytes[start + 1])
+                }
+            }
+            4 -> {
+                val b1 = bytes[start + 1].toInt() and 0xFF
+                if (!isCont(bytes[start + 2]) || !isCont(bytes[start + 3])) {
+                    false
+                } else when (b0) {
+                    0xF0 -> b1 in 0x90..0xBF       // exclude overlong
+                    0xF4 -> b1 in 0x80..0x8F       // exclude > U+10FFFF
+                    in 0xF1..0xF3 -> isCont(bytes[start + 1])
+                    else -> false
+                }
+            }
+            else -> false
+        }
+    }
+
+    private fun isCont(b: Byte): Boolean = (b.toInt() and 0xC0) == 0x80
+}

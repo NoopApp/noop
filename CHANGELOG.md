@@ -17,6 +17,86 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 1.78 — Fewer false daytime sleeps + an Android sync button
+
+- **Fixed (Mac and Android):** a long sedentary daytime stretch no longer gets logged as sleep —
+  daytime periods now need a longer, genuinely low-heart-rate window, while nights and real naps stay
+  unchanged.
+- **New (Android):** a manual "Sync now" button on the Live screen + an honest progress indicator
+  while strap history offloads.
+- **Repo:** contributor guidelines, issue/PR templates, a security policy, and build-check CI added.
+
+---
+
+## 1.77 — First-run terms acknowledgment + an Explore chart fix
+
+- **New (Mac and Android):** a one-time, plain-English terms acknowledgment on first launch — what
+  NOOP is, that it's independent of WHOOP and that using it may breach WHOOP's Terms of Service, that
+  it's not a medical device, and that you use it at your own risk. You accept once; full terms in
+  `TERMS.md`.
+- **Fixed (Mac):** the Explore metric charts no longer flicker to a straight line when the cursor
+  crosses into or out of the graph.
+
+---
+
+## 1.76 — Robust Apple Health import, marginal-radio HR mode, live HR graph
+
+- **Improved (Mac and Android):** a very large Apple Health export no longer fails to import because
+  of a single malformed byte — NOOP skips the bad spans and imports everything else, reporting how
+  many it skipped. Multi-year exports that errored out before should come in fine now.
+- **New (Mac):** if your Bluetooth radio can't sustain WHOOP 4's full realtime stream (older Macs /
+  OpenCore), NOOP now falls back to a low-bandwidth standard heart-rate mode, so live HR keeps working
+  instead of looping on a dropped connection.
+- **Fixed (Mac):** the Health tab's live heart-rate graph now builds a continuous trace over time
+  instead of getting stuck on two points.
+
+---
+
+## 1.75 — Personal vital baselines + Mac analytics parity
+
+- **New (Mac and Android):** the Health Monitor now judges each vital — HRV, resting heart rate,
+  respiratory rate, skin temperature — against **your own learned baseline** (after ~14 nights),
+  not just a one-size-fits-all population range. A personal normal that sits outside the textbook
+  band (e.g. a naturally lower HRV) stops reading as "off" when it's fine for you. Falls back to the
+  typical range until your baseline is established.
+- **New (Mac):** macOS now computes steps, respiratory rate, daily calories and nightly skin
+  temperature on-device, matching Android — and nightly respiration now feeds the recovery score on
+  both platforms (existing recoveries unchanged when respiration isn't available).
+
+---
+
+## 1.74 — Android reconnect guide + a startup-crash fix
+
+- **Android reconnect guide (parity with Mac 1.73):** if your WHOOP 5.0 / MG can't connect after a
+  firmware update (a Bluetooth pairing reset), NOOP now detects it and shows the forget-and-re-pair
+  steps right in the app, instead of silently retrying.
+- **Fixed (Android):** a rare startup crash on some fast devices (e.g. Galaxy S24+) — the app could
+  crash once on launch when a strap was already connected, then open fine on the second try. Mac was
+  never affected.
+
+---
+
+## 1.73 — Reconnect help for WHOOP 5.0 / MG after a firmware update
+
+- **If your WHOOP 5.0 / MG stopped connecting after a WHOOP firmware update**, that's a Bluetooth
+  pairing reset — not a lockout, and NOOP works fine on the new firmware. To reconnect: quit the
+  official WHOOP app, forget the strap in your Bluetooth settings, put it in pairing mode (tap the
+  band until the LEDs flash blue), then reconnect. On Mac, NOOP now detects this automatically and
+  shows you these exact steps in-app instead of silently retrying. WHOOP 4.0 is unaffected.
+
+---
+
+## 1.72 — GPS workout crash fix (Android)
+
+- **Fixed (Android):** starting a GPS-tracked workout could crash the app on Android 12 and newer.
+  GPS needs location permission, which NOOP never requested — and it was capped to older Android
+  versions — so route tracking failed the instant it began. NOOP now asks for location permission
+  right before a GPS workout and fails safe if it's unavailable: the workout still records heart rate
+  and strain, just without a route. If you don't use GPS workouts, nothing changes. (Mac: version
+  bump only.)
+
+---
+
 ## 1.71 — GPS-tracked workouts (Android)
 
 A community-requested feature, built on the v1.67 manual workout tracking.

@@ -78,8 +78,17 @@ object IntelligenceEngine {
         val hrvCfg = Baselines.metricCfg["hrv"] ?: return emptyList()
         val rhrCfg = Baselines.metricCfg["resting_hr"] ?: return emptyList()
         val skinCfg = Baselines.metricCfg["skin_temp"] ?: return emptyList()
+        val respCfg = Baselines.metricCfg["resp"] ?: return emptyList()
 
         val computedId = importedDeviceId + "-noop"
+
+        // Device wall-clock offset (seconds east of UTC) for the sleep detector's daytime
+        // false-sleep guard (#90): the stager places each window's center on the LOCAL clock so
+        // only genuinely-daytime windows face the stricter nap bar. getOffset(nowMillis) folds in
+        // the current DST state (a DST boundary inside a single window is a negligible edge case
+        // for an hour-of-day band). Computed once per run.
+        val tzOffsetSeconds =
+            java.util.TimeZone.getDefault().getOffset(nowSeconds * 1_000L) / 1_000L
 
         // ── Pass 1: detect + aggregate each offloaded night, scoring against the
         // imported-only baseline. For a BLE-only user repo.days(importedDeviceId) is
@@ -106,6 +115,9 @@ object IntelligenceEngine {
         // Wear-gated nightly skin-temp means (on-device only — imported rows carry the deviation, not
         // the raw mean, so the skin-temp baseline is seeded purely from these). (PR #85)
         val nightlySkinByDay = LinkedHashMap<String, Double?>()
+        // On-device RSA respiration estimates, unioned with imported respRateBpm below to seed the
+        // resp baseline the recovery composite's wResp=0.05 term scores against.
+        val nightlyRespByDay = LinkedHashMap<String, Double?>()
 
         for (offset in 0 until maxDays) {
             val dayStart = nowSeconds - offset * SECONDS_PER_DAY
@@ -148,6 +160,7 @@ object IntelligenceEngine {
                 profile = profile,
                 baselines = baselines1,
                 maxHROverride = maxHROverride,
+                tzOffsetSeconds = tzOffsetSeconds,
             )
 
             // Harvest the baseline-independent nightly aggregates (a day with no detected
@@ -156,6 +169,7 @@ object IntelligenceEngine {
             nightlyHrvByDay[day] = res.daily.avgHrv
             nightlyRhrByDay[day] = res.daily.restingHr?.toDouble()
             nightlySkinByDay[day] = res.nightlySkinTempC
+            nightlyRespByDay[day] = res.daily.respRateBpm
             scoredNights.add(res)
         }
 
@@ -168,23 +182,40 @@ object IntelligenceEngine {
         // Chronological (oldest-first) replay: a day present in both takes the computed value.
         val histHrvByDay = LinkedHashMap<String, Double?>()
         val histRhrByDay = LinkedHashMap<String, Double?>()
+        val histRespByDay = LinkedHashMap<String, Double?>()
         for (d in hist) {
             histHrvByDay[d.day] = d.avgHrv
             histRhrByDay[d.day] = d.restingHr?.toDouble()
+            histRespByDay[d.day] = d.respRateBpm
         }
         // Imported (cloud) nightly values WIN per day (putIfAbsent): the on-device estimate
         // only fills days the import doesn't cover, so an import user's baseline is unchanged.
         for ((day, v) in nightlyHrvByDay) histHrvByDay.putIfAbsent(day, v)
         for ((day, v) in nightlyRhrByDay) histRhrByDay.putIfAbsent(day, v)
+        // NOT putIfAbsent for resp: Java's putIfAbsent treats a key mapped to NULL as absent, so
+        // an imported day whose respRateBpm is blank would be replaced by the RSA estimate —
+        // diverging from the Swift mirror (key-absence check), which keeps the imported day as a
+        // missing night. Match Swift: only fill days the import does not cover AT ALL.
+        for ((day, v) in nightlyRespByDay) if (day !in histRespByDay) histRespByDay[day] = v
         val hrvSeq = histHrvByDay.entries.sortedBy { it.key }.map { it.value }
         val rhrSeq = histRhrByDay.entries.sortedBy { it.key }.map { it.value }
+        val respSeq = histRespByDay.entries.sortedBy { it.key }.map { it.value }
         val hrvBase2 = Baselines.foldHistory(hrvSeq, hrvCfg)
         val rhrBase2 = Baselines.foldHistory(rhrSeq, rhrCfg)
+        // Resp baseline mixes imported (cloud) values with on-device RSA estimates — acceptable: the
+        // z-score is scale-tolerant, foldHistory winsorizes, and respRateBpm already carries no source
+        // flag anywhere else (the illness gate treats it the same way). Gated on `usable` because
+        // RecoveryScorer includes the resp term whenever a baseline object is present — a CALIBRATING
+        // (<4-night) baseline would let one noisy RSA night move recovery (mirrors the skin-temp
+        // use-site gate; honest cold-start).
+        val respBase2 = Baselines.foldHistory(respSeq, respCfg).takeIf { it.usable }
         // Skin-temp baseline is on-device-only (imported rows carry skinTempDevC, not the raw mean),
         // so fold purely over the pass-1 nightly means in chronological order. (PR #85)
         val skinSeq = nightlySkinByDay.entries.sortedBy { it.key }.map { it.value }
         val skinBase2 = Baselines.foldHistory(skinSeq, skinCfg)
-        val baselines2 = ProfileBaselines(hrv = hrvBase2, restingHR = rhrBase2, skinTemp = skinBase2)
+        val baselines2 = ProfileBaselines(
+            hrv = hrvBase2, restingHR = rhrBase2, resp = respBase2, skinTemp = skinBase2,
+        )
 
         // Imported workouts in the scored window, used to de-duplicate detected bouts so a
         // user who BOTH imports real WHOOP workouts AND wears the strap doesn't see the same
@@ -283,7 +314,7 @@ object IntelligenceEngine {
         return RecoveryScorer.recovery(
             hrv = hrvVal,
             rhr = rhrVal.toDouble(),
-            resp = null,
+            resp = daily.respRateBpm, // term drops + renormalizes when null / no usable baseline
             hrvBaseline = hrvBase,
             rhrBaseline = baselines.restingHR,
             respBaseline = baselines.resp,

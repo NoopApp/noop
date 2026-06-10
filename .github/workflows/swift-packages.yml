@@ -1,0 +1,49 @@
+# Compile-and-test verification for the reusable Swift packages.
+#
+# This job intentionally does NOT touch the macOS app target: that build needs
+# XcodeGen to generate Strand.xcodeproj and a wired-up test scheme, and the app
+# release is produced and anonymized by hand. The packages, by contrast, build
+# and test on their own with plain SwiftPM — no Xcode project, no signing, no
+# secrets — which makes them a safe, self-contained CI check that leaks nothing.
+name: Swift Packages CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'Packages/**'
+      - '.github/workflows/swift-packages.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'Packages/**'
+      - '.github/workflows/swift-packages.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: swift-packages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - WhoopProtocol
+          - WhoopStore
+          - StrandAnalytics
+          - StrandImport
+          - StrandDesign
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build ${{ matrix.package }}
+        run: swift build
+        working-directory: Packages/${{ matrix.package }}
+
+      - name: Test ${{ matrix.package }}
+        run: swift test
+        working-directory: Packages/${{ matrix.package }}

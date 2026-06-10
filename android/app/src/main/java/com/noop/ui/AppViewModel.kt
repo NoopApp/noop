@@ -110,21 +110,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Whether the illness early-warning runs (banner + notification). */
     val illnessWatchEnabled: StateFlow<Boolean> = _illnessWatchEnabled.asStateFlow()
 
-    // Also declared BEFORE the init blocks (same JVM declaration-order rule as above): the
-    // ble.state collector in init runs synchronously in the constructor on Main.immediate, and
-    // the process-owned client's LiveState is STICKY — `bonded` stays true while the background
-    // service holds the strap and `heartRate` keeps its last value. A relaunch into a warm
-    // process therefore takes the bonded branch (reads _smartAlarmEnabled) and the heartRate
-    // path (ingestHr → captureWorkoutSample reads _activeWorkout) on the FIRST emission, before
-    // any field declared after init exists — crashing the constructor on every warm-process
-    // launch: crash once, clean start on the cold retry (#84). The Health Connect quartet moves
-    // for the same reason: its init collector only survives today because a delay() suspends
-    // before the first _hcWriteback read — one refactor away from the same crash.
+    // Declared BEFORE the init block for the SAME reason as _illnessWatchEnabled above: the bond
+    // collector launched from init runs synchronously on Main.immediate and reads _smartAlarmEnabled on
+    // its first (cached) emission. A declaration after init is null there and NPEs the constructor on a
+    // cold start where the strap is already bonded — the #84 "crashes once, fine on the retry" race on
+    // fast devices (S24+). Port of macOS BehaviorStore (Swift two-phase init makes this safe for free).
     private val _smartAlarmEnabled = MutableStateFlow(NoopPrefs.smartAlarmEnabled(appContext))
     val smartAlarmEnabled: StateFlow<Boolean> = _smartAlarmEnabled.asStateFlow()
     private val _smartAlarmMinutes = MutableStateFlow(NoopPrefs.smartAlarmMinutes(appContext))
     val smartAlarmMinutes: StateFlow<Int> = _smartAlarmMinutes.asStateFlow()
 
+    // Also declared BEFORE the init blocks (same rule): the heartRate path of the first
+    // synchronous emission reads _activeWorkout (ingestHr → captureWorkoutSample) and the
+    // coaching state below; the Health Connect quartet moves as hardening — its init collector
+    // only survives today because a delay() suspends before the first _hcWriteback read.
     private val _activeWorkout = MutableStateFlow<ActiveWorkout?>(null)
     val activeWorkout: StateFlow<ActiveWorkout?> = _activeWorkout.asStateFlow()
     private val _lastWorkout = MutableStateFlow<WorkoutRow?>(null)
@@ -601,11 +600,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      *  proprietary command is dropped) and also fires the legacy command on WHOOP 4. */
     fun getBattery() = ble.refreshBattery()
 
+    /**
+     * User-initiated "Sync now": kick a historical offload on demand (#93). A thin pass-through to the
+     * BLE client's gated [WhoopBleClient.syncNow], which forwards to the same connected+bonded+
+     * not-already-backfilling guard the auto-kick and 900s periodic timer use — so it's a safe no-op
+     * when the strap isn't ready or a session is already running. Progress is unknowable from the
+     * protocol, so the UI shows an indeterminate indicator + live.syncChunksThisSession, never a percent. */
+    fun syncNow() = ble.syncNow()
+
     // --- Smart alarm (persisted; arms the strap's firmware alarm). Port of macOS BehaviorStore +
-    // AppModel.applySmartAlarm. The previous Android UI was a non-persisted mock-up (issue #51). ---
-    // _smartAlarmEnabled/_smartAlarmMinutes state lives next to _illnessWatchEnabled above
-    // (declaration-order constraint — the init collector's bonded branch reads it on the very
-    // first synchronous emission of a warm, still-bonded process, #84); setters stay here.
+    // AppModel.applySmartAlarm. The previous Android UI was a non-persisted mock-up (issue #51).
+    // NOTE: the _smartAlarm* state fields are declared ABOVE the init block (next to _illnessWatchEnabled)
+    // so the init bond-collector can't read them before they're initialized (#84). ---
 
     fun setSmartAlarmEnabled(enabled: Boolean) {
         _smartAlarmEnabled.value = enabled
