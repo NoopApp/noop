@@ -12,6 +12,11 @@ final class LiveActivityController {
     /// instantiating this system bridge per tick is needless allocation. ActivityKit's auth status
     /// only changes via Settings, so caching for the controller's lifetime is safe.
     private let authInfo = ActivityAuthorizationInfo()
+    /// Synchronous gate against concurrent `Activity.request` calls. The `else` branch below is
+    /// re-entered while the first request is still in flight (it hasn't assigned `self.activity`
+    /// yet), so without this guard two close-together HR samples could both fire `Activity.request`
+    /// and create duplicate Live Activities.
+    private var isStarting = false
 
     /// Drive the activity from the latest live values. Lazily starts when the strap is bonded and a
     /// heart rate is present; ends when the strap goes offline. Throttled to ~once every 2s so we
@@ -32,6 +37,11 @@ final class LiveActivityController {
             lastPush = Date()
             Task { await activity.update(ActivityContent(state: state, staleDate: nil)) }
         } else {
+            // Set the start gate SYNCHRONOUSLY before any await so a second `update` arriving on the
+            // main actor while `Activity.request` is still in flight bails here instead of issuing a
+            // second request. The 2-second throttle above only guards the update path.
+            guard !isStarting else { return }
+            isStarting = true
             do {
                 activity = try Activity.request(
                     attributes: NOOPActivityAttributes(title: "Live HR"),
@@ -42,6 +52,7 @@ final class LiveActivityController {
             } catch {
                 activity = nil
             }
+            isStarting = false
         }
     }
 
