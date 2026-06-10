@@ -39,7 +39,12 @@ class TrackFilter(
     }
 }
 
-/** Wraps platform GPS. Caller must hold ACCESS_FINE_LOCATION (already granted for BLE). */
+/**
+ * Wraps platform GPS. The caller should request ACCESS_FINE_LOCATION before starting a GPS workout
+ * (see rememberRequestLocation) — unlike BLE, fine location is NOT implicitly granted on Android 12+.
+ * Fails SAFE: if the permission isn't held or the GPS provider is unavailable, the stream just ends
+ * with no fixes instead of crashing, so the workout still records HR/strain without a route. (#101)
+ */
 class LocationTracker(private val context: Context) {
     @SuppressLint("MissingPermission")
     fun stream(minIntervalMs: Long = 2000, minDistanceM: Float = 5f): Flow<LatLng> = callbackFlow {
@@ -49,9 +54,17 @@ class LocationTracker(private val context: Context) {
             filter.accept(RawFix(loc.latitude, loc.longitude, if (loc.hasAccuracy()) loc.accuracy else 0f, loc.time))
                 ?.let { trySend(it) }
         }
-        lm.requestLocationUpdates(
-            LocationManager.GPS_PROVIDER, minIntervalMs, minDistanceM, listener, Looper.getMainLooper(),
-        )
-        awaitClose { lm.removeUpdates(listener) }
+        try {
+            lm.requestLocationUpdates(
+                LocationManager.GPS_PROVIDER, minIntervalMs, minDistanceM, listener, Looper.getMainLooper(),
+            )
+        } catch (t: Throwable) {
+            // SecurityException (ACCESS_FINE_LOCATION not held), IllegalArgumentException (no GPS
+            // provider on this device), or an OEM quirk — never propagate out of the collecting
+            // coroutine and crash the app. End the route stream cleanly. (#101)
+            close()
+            return@callbackFlow
+        }
+        awaitClose { runCatching { lm.removeUpdates(listener) } }
     }
 }

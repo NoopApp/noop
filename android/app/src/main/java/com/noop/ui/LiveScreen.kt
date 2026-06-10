@@ -167,6 +167,12 @@ fun LiveScreen(viewModel: AppViewModel) {
             var selected by remember { mutableStateOf(WorkoutSport.default) }
             var gpsOn by remember(selected) { mutableStateOf(selected.isDistanceSport) }
             val filtered = WorkoutSport.all.filter { it.name.contains(query, ignoreCase = true) }
+            // GPS needs ACCESS_FINE_LOCATION, which is NOT granted by the BLE flow on Android 12+.
+            // Request it before starting; if denied, the workout still starts (without a route). (#101)
+            val startWithGps = rememberRequestLocation { granted ->
+                viewModel.startWorkout(selected, gpsEnabled = gpsOn && granted)
+                showSportPicker = false
+            }
             AlertDialog(
                 onDismissRequest = { showSportPicker = false },
                 title = { Text("Start a workout") },
@@ -207,7 +213,14 @@ fun LiveScreen(viewModel: AppViewModel) {
                     }
                 },
                 confirmButton = {
-                    Button(onClick = { viewModel.startWorkout(selected, gpsOn); showSportPicker = false }) {
+                    Button(onClick = {
+                        if (gpsOn) {
+                            startWithGps() // requests location, then starts in the callback (#101)
+                        } else {
+                            viewModel.startWorkout(selected, gpsEnabled = false)
+                            showSportPicker = false
+                        }
+                    }) {
                         Text("Start ${selected.name}")
                     }
                 },

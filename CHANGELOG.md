@@ -17,6 +17,17 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 1.72 — GPS workout crash fix (Android)
+
+- **Fixed (Android):** starting a GPS-tracked workout could crash the app on Android 12 and newer.
+  GPS needs location permission, which NOOP never requested — and it was capped to older Android
+  versions — so route tracking failed the instant it began. NOOP now asks for location permission
+  right before a GPS workout and fails safe if it's unavailable: the workout still records heart rate
+  and strain, just without a route. If you don't use GPS workouts, nothing changes. (Mac: version
+  bump only.)
+
+---
+
 ## 1.71 — GPS-tracked workouts (Android)
 
 A community-requested feature, built on the v1.67 manual workout tracking.

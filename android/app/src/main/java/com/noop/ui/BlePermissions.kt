@@ -51,3 +51,27 @@ fun rememberRequestScan(onGranted: () -> Unit): () -> Unit {
         if (granted) onGranted() else launcher.launch(perms)
     }
 }
+
+/**
+ * Requests ACCESS_FINE_LOCATION (needed for GPS-tracked workouts) and reports the outcome. Unlike
+ * the BLE permissions, fine location is NOT implicitly granted on Android 12+ — BLE uses the granular
+ * Bluetooth permissions there — so a GPS workout must request it explicitly before starting, or
+ * `requestLocationUpdates` throws SecurityException and crashes the app. Mirrors [rememberRequestScan];
+ * the launcher must live in the Compose layer so it can raise the system dialog. (#101)
+ */
+@Composable
+fun rememberRequestLocation(onResult: (granted: Boolean) -> Unit): () -> Unit {
+    val context = LocalContext.current
+    val launcher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted -> onResult(granted) }
+    return {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
+            == PackageManager.PERMISSION_GRANTED
+        ) {
+            onResult(true)
+        } else {
+            launcher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+    }
+}
