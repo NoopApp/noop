@@ -1,3 +1,4 @@
+<!-- generated-by: gsd-doc-writer -->
 <p align="center">
   <img src="docs/assets/banner.svg" alt="NOOP — a local-first companion for WHOOP straps" width="860">
 </p>
@@ -12,6 +13,12 @@
   <img alt="Account free" src="https://img.shields.io/badge/account-free-2FE6A8?style=flat-square">
   <img alt="WHOOP 4 and 5" src="https://img.shields.io/badge/works%20with-WHOOP%204.0%20%26%205.0-8B9690?style=flat-square">
   <a href="LICENSE"><img alt="License: PolyForm Noncommercial 1.0.0" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-8B9690?style=flat-square"></a>
+</p>
+
+<p align="center">
+  <a href="../../actions/workflows/android.yml"><img alt="Android CI" src="https://github.com/NoopApp/noop/actions/workflows/android.yml/badge.svg?branch=main"></a>
+  <a href="../../actions/workflows/macos.yml"><img alt="macOS CI" src="https://github.com/NoopApp/noop/actions/workflows/macos.yml/badge.svg?branch=main"></a>
+  <a href="../../actions/workflows/ios.yml"><img alt="iOS CI" src="https://github.com/NoopApp/noop/actions/workflows/ios.yml/badge.svg?branch=main"></a>
 </p>
 
 <p align="center">
@@ -116,6 +123,8 @@ from **their own device**, on a machine **they** control.
 - [Support (optional)](#support-optional)
 - [Disclaimer](#disclaimer)
 - [License](#license)
+- [CI/CD](#cicd)
+- [Contributing](#contributing)
 - [Docs](#docs)
 
 ---
@@ -478,7 +487,30 @@ The license covers NOOP's own original code and docs. Protocol facts (frame layo
 command numbers, byte offsets) are uncopyrightable and free to reuse; bundled
 dependencies keep their own licenses (GRDB.swift and ZIPFoundation are MIT — see
 [`NOTICE`](NOTICE)). By opening a pull request you agree your contribution is licensed
-under the same terms — see [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md).
+under the same terms — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+---
+
+## CI/CD
+
+Four GitHub Actions workflows run automatically on every PR and push to `main`:
+
+| Workflow | Trigger | What it does |
+|---|---|---|
+| **Android CI** (`.github/workflows/android.yml`) | PRs/pushes touching `android/**` | Builds `assembleFullDebug` and runs `testFullDebugUnitTest` on ubuntu-latest with JDK 17. |
+| **macOS CI** (`.github/workflows/macos.yml`) | PRs/pushes touching `Strand/**`, `Packages/**`, `project.yml` | Generates the Xcode project with XcodeGen, builds and tests the Strand scheme on macos-15 (`CODE_SIGNING_ALLOWED=NO`). |
+| **iOS CI** (`.github/workflows/ios.yml`) | PRs/pushes touching `Packages/**`, `Strand/**` | Tests all five Swift packages (WhoopProtocol, WhoopStore, StrandAnalytics, StrandDesign, StrandImport) against the iOS Simulator on macos-15. |
+| **Release** (`.github/workflows/release.yml`) | Tag push matching `v*` | Builds the release APK and universal macOS app, then creates a GitHub Release with both artifacts and the matching CHANGELOG section. |
+
+Builds run without code-signing certificates (`CODE_SIGNING_ALLOWED=NO`) so no secrets are required for CI to pass.
+
+---
+
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full guide — branch conventions, coding standards, the PR checklist, and how to report issues.
+
+Security issues: see [`SECURITY.md`](SECURITY.md) — please do not open public GitHub issues for vulnerabilities.
 
 ---
 
@@ -487,5 +519,7 @@ under the same terms — see [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md).
 - [`CHANGELOG.md`](CHANGELOG.md) — release history and what to expect (also shown in-app under **What's new**).
 - [`DISCLAIMER.md`](DISCLAIMER.md) — trademark, interoperability, and medical/legal notice.
 - [`ATTRIBUTION.md`](ATTRIBUTION.md) — full credits and licensing notes.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — how to contribute, branch naming, PR process, issue reporting.
+- [`SECURITY.md`](SECURITY.md) — security policy and vulnerability reporting.
 - [`docs/DONATIONS.md`](docs/DONATIONS.md) — optional donation addresses (also in-app under **Support**).
 - [`project.yml`](project.yml) — XcodeGen project definition (source of `Strand.xcodeproj`).
