@@ -612,6 +612,7 @@ private func insightsPreviewRepo() -> Repository {
 #Preview("Insights") {
     InsightsView()
         .environmentObject(insightsPreviewRepo())
+        .environmentObject(JournalCatalogStore())   // JournalLogCard reads it
         .frame(width: 920, height: 900)
         .preferredColorScheme(.dark)
 }

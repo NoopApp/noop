@@ -211,7 +211,9 @@ final class Repository: ObservableObject {
 
     /// Union; the NATIVE row wins per (day, question) — the in-app answer is the user's most
     /// recent explicit action and stays editable, unlike the immutable imported history.
-    static func mergeJournal(imported: [JournalEntry], native: [JournalEntry]) -> [JournalEntry] {
+    /// `nonisolated`: a pure function over its parameters (the JournalCatalogStore.mergeCatalog
+    /// pattern), callable from synchronous tests and nonisolated contexts.
+    nonisolated static func mergeJournal(imported: [JournalEntry], native: [JournalEntry]) -> [JournalEntry] {
         var byKey: [String: JournalEntry] = [:]
         for e in imported { byKey[e.day + "\u{1F}" + e.question] = e }
         for e in native { byKey[e.day + "\u{1F}" + e.question] = e }
@@ -233,6 +235,9 @@ final class Repository: ObservableObject {
     }
 
     /// All workouts (Whoop + Apple Health + on-device detected bouts), newest first.
+    /// Dismissed detected spans are filtered HERE so every consumer (Workouts, Today,
+    /// Coach context) agrees — the engine re-derives detected rows each run, so a plain
+    /// delete would resurrect them; the spans list is the durable "not a workout" record.
     func workoutRows(days: Int = 4000) async -> [WorkoutRow] {
         guard let store = await ensureStore() else { return [] }
         let now = Int(Date().timeIntervalSince1970)
@@ -243,7 +248,10 @@ final class Repository: ObservableObject {
         // surfaced with an honest "Detected" badge (the source classification keeps them from
         // ever masquerading as WHOOP data).
         rows += (try? await store.workouts(deviceId: computedDeviceId, from: lo, to: hi, limit: 5000)) ?? []
-        return rows.sorted { $0.startTs > $1.startTs }
+        let spans = WorkoutSource.parseDismissedSpans(
+            UserDefaults.standard.stringArray(forKey: "workouts.dismissedDetected") ?? [])
+        return rows.filter { !WorkoutSource.isDismissed($0, spans: spans) }
+            .sorted { $0.startTs > $1.startTs }
     }
 
     /// Persist a retroactive/edited manual workout under the strap source (deviceId "my-whoop",

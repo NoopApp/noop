@@ -91,12 +91,10 @@ struct WorkoutsView: View {
     }
 
     /// Reload the list after any write (the .task gate `guard !loaded` never re-runs).
-    /// Dismissed detected spans are a read-time filter — the engine re-derives detected
-    /// rows every run, so a plain delete would resurrect them.
+    /// Dismissed detected spans are filtered centrally in Repository.workoutRows, so Today
+    /// and the Coach context agree with this screen.
     private func reload() async {
-        let spans = WorkoutSource.parseDismissedSpans(
-            UserDefaults.standard.stringArray(forKey: "workouts.dismissedDetected") ?? [])
-        allRows = (await repo.workoutRows()).filter { !WorkoutSource.isDismissed($0, spans: spans) }
+        allRows = await repo.workoutRows()
         loaded = true
     }
 
@@ -328,6 +326,14 @@ struct WorkoutsView: View {
                         }
                     }
                 }
+            }
+            // House rule: on-device computed figures are labelled APPROXIMATE in user-facing
+            // copy (the Android actions dialog carries the same sentence).
+            if rows.contains(where: { WorkoutSource.classify($0.source) == .detected }) {
+                Text("Detected entries are derived on-device from your heart rate — duration and calories are approximate.")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }

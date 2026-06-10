@@ -94,4 +94,34 @@ class WorkoutEditingTest {
         assertEquals("Activity", displaySport("detected"))
         assertEquals("Running", displaySport("Running"))
     }
+
+    @Test
+    fun preservingCaptured_keepsUnexposedFieldsOnEdit() {
+        // A v1.67 live-tracked session has captured strain/maxHr/zones the edit dialog never
+        // shows; rebuilding the row from the dialog inputs must not wipe them.
+        val live = WorkoutRow(
+            "my-whoop", 1_000, 4_000, "Running", "manual",
+            durationS = 3_000.0, energyKcal = 420.0, avgHr = 142, maxHr = 171,
+            strain = 12.4, distanceM = 5_200.0, zonesJSON = "{\"zone1\":10}", notes = "tempo",
+        )
+        val rebuilt = buildManualWorkout(
+            startSec = 1_000, durationMin = 50, sport = "Cycling",
+            avgHr = 140, energyKcal = 400.0, nowSec = 10_000,
+        )!!
+        val edited = preservingCaptured(rebuilt, live)
+        // Dialog-owned fields take the new values…
+        assertEquals("Cycling", edited.sport)
+        assertEquals(140, edited.avgHr)
+        assertEquals(400.0, edited.energyKcal!!, 1e-9)
+        // …captured fields survive verbatim.
+        assertEquals(171, edited.maxHr)
+        assertEquals(12.4, edited.strain!!, 1e-9)
+        assertEquals(5_200.0, edited.distanceM!!, 1e-9)
+        assertEquals("{\"zone1\":10}", edited.zonesJSON)
+        assertEquals("tempo", edited.notes)
+        // Fresh add (old == null) stays honest: nothing fabricated.
+        val added = preservingCaptured(rebuilt, null)
+        assertNull(added.strain)
+        assertNull(added.maxHr)
+    }
 }

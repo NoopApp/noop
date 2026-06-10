@@ -2,422 +2,6 @@
   "sourceLanguage": "en",
   "strings": {
     "": {},
-    "Add": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Add"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hinzufügen"
-          }
-        }
-      }
-    },
-    "Add a custom question…": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Add a custom question…"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Eigene Frage hinzufügen …"
-          }
-        }
-      }
-    },
-    "Add workout": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Add workout"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Training hinzufügen"
-          }
-        }
-      }
-    },
-    "Answers are about the night and day leading into this morning — the same attribution a WHOOP export uses, so logged and imported days line up.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Answers are about the night and day leading into this morning — the same attribution a WHOOP export uses, so logged and imported days line up."
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Antworten beziehen sich auf die Nacht und den Tag vor diesem Morgen — dieselbe Zuordnung wie in einem WHOOP-Export, damit protokollierte und importierte Tage zusammenpassen."
-          }
-        }
-      }
-    },
-    "Avg HR (optional)": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Avg HR (optional)"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ø HF (optional)"
-          }
-        }
-      }
-    },
-    "Calories (optional)": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Calories (optional)"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Kalorien (optional)"
-          }
-        }
-      }
-    },
-    "Cancel": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Cancel"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Abbrechen"
-          }
-        }
-      }
-    },
-    "Delete workout": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Delete workout"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Training löschen"
-          }
-        }
-      }
-    },
-    "Detected": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Detected"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Erkannt"
-          }
-        }
-      }
-    },
-    "Dismiss from the log": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Dismiss from the log"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Aus dem Log ausblenden"
-          }
-        }
-      }
-    },
-    "Duration": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Duration"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Dauer"
-          }
-        }
-      }
-    },
-    "Edit workout": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Edit workout"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Training bearbeiten"
-          }
-        }
-      }
-    },
-    "Export CSV…": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Export CSV…"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "CSV exportieren …"
-          }
-        }
-      }
-    },
-    "Importing overwrites everything currently on this Mac. Your old data is kept in a side file just in case. NOOP needs a relaunch for an import to take effect. Export CSV writes a WHOOP-format zip of your days, sleeps, workouts and journal that re-imports into NOOP on Mac or Android — on-device computed rows are marked APPROXIMATE in its Source column; the full backup stays the lossless restore path.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Importing overwrites everything currently on this Mac. Your old data is kept in a side file just in case. NOOP needs a relaunch for an import to take effect. Export CSV writes a WHOOP-format zip of your days, sleeps, workouts and journal that re-imports into NOOP on Mac or Android — on-device computed rows are marked APPROXIMATE in its Source column; the full backup stays the lossless restore path."
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Der Import überschreibt alles, was sich derzeit auf diesem Mac befindet. Deine alten Daten werden sicherheitshalber in einer separaten Datei aufbewahrt. NOOP muss neu gestartet werden, damit ein Import wirksam wird. „CSV exportieren“ schreibt ein Zip im WHOOP-Format mit deinen Tagen, Schlafphasen, Trainings und Journal-Einträgen, das sich auf Mac oder Android wieder in NOOP importieren lässt — auf dem Gerät berechnete Zeilen sind in der Source-Spalte als APPROXIMATE markiert; das vollständige Backup bleibt der verlustfreie Wiederherstellungsweg."
-          }
-        }
-      }
-    },
-    "Journal": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Journal"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Journal"
-          }
-        }
-      }
-    },
-    "Label this activity": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Label this activity"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Aktivität benennen"
-          }
-        }
-      }
-    },
-    "Log behaviours above — after a few days of answers, NOOP ranks how each one moves your recovery, HRV and sleep. Importing a WHOOP export (which includes its journal) backfills history instantly.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Log behaviours above — after a few days of answers, NOOP ranks how each one moves your recovery, HRV and sleep. Importing a WHOOP export (which includes its journal) backfills history instantly."
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Protokolliere oben deine Verhaltensweisen — nach ein paar Tagen mit Antworten bewertet NOOP, wie jede davon deine Erholung, HRV und deinen Schlaf beeinflusst. Der Import eines WHOOP-Exports (inklusive Journal) füllt die Historie sofort auf."
-          }
-        }
-      }
-    },
-    "Manual": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Manual"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Manuell"
-          }
-        }
-      }
-    },
-    "No": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Nein"
-          }
-        }
-      }
-    },
-    "Once NOOP has 14 nights of history, in-range compares each vital to your own baseline (approximate — not medical advice); until then, typical adult ranges apply.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Once NOOP has 14 nights of history, in-range compares each vital to your own baseline (approximate — not medical advice); until then, typical adult ranges apply."
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sobald NOOP 14 Nächte Verlauf hat, vergleicht „im Bereich“ jeden Vitalwert mit deiner eigenen Baseline (approximativ — kein medizinischer Rat); bis dahin gelten typische Erwachsenen-Bereiche."
-          }
-        }
-      }
-    },
-    "Save": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Save"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Speichern"
-          }
-        }
-      }
-    },
-    "Sport": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sport"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sportart"
-          }
-        }
-      }
-    },
-    "Start time": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Start time"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Startzeit"
-          }
-        }
-      }
-    },
-    "Strain isn't estimated for retroactive entries — there is no captured heart-rate window to base it on.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Strain isn't estimated for retroactive entries — there is no captured heart-rate window to base it on."
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Für nachträgliche Einträge wird keine Belastung geschätzt — es gibt kein aufgezeichnetes Herzfrequenz-Fenster als Grundlage."
-          }
-        }
-      }
-    },
-    "Yes": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Yes"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ja"
-          }
-        }
-      }
-    },
-    "Yesterday": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Yesterday"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Gestern"
-          }
-        }
-      }
-    },
     "—": {
       "localizations": {
         "en": {
@@ -1058,6 +642,38 @@
         }
       }
     },
+    "Add": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hinzufügen"
+          }
+        }
+      }
+    },
+    "Add a custom question…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add a custom question…"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eigene Frage hinzufügen …"
+          }
+        }
+      }
+    },
     "Add a metric to compare": {
       "localizations": {
         "en": {
@@ -1086,6 +702,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Metrik hinzufügen"
+          }
+        }
+      }
+    },
+    "Add workout": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add workout"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Training hinzufügen"
           }
         }
       }
@@ -1166,6 +798,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "all deine Daten, nichts in der Cloud"
+          }
+        }
+      }
+    },
+    "Answers are about the night and day leading into this morning — the same attribution a WHOOP export uses, so logged and imported days line up.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Answers are about the night and day leading into this morning — the same attribution a WHOOP export uses, so logged and imported days line up."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Antworten beziehen sich auf die Nacht und den Tag vor diesem Morgen — dieselbe Zuordnung wie in einem WHOOP-Export, damit protokollierte und importierte Tage zusammenpassen."
           }
         }
       }
@@ -1438,6 +1086,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ø"
+          }
+        }
+      }
+    },
+    "Avg HR (optional)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avg HR (optional)"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ø HF (optional)"
           }
         }
       }
@@ -1870,6 +1534,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "Kalorien"
+          }
+        }
+      }
+    },
+    "Calories (optional)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calories (optional)"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kalorien (optional)"
+          }
+        }
+      }
+    },
+    "Cancel": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abbrechen"
           }
         }
       }
@@ -2562,6 +2258,22 @@
         }
       }
     },
+    "Delete workout": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete workout"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Training löschen"
+          }
+        }
+      }
+    },
     "Depleted": {
       "localizations": {
         "en": {
@@ -2578,6 +2290,38 @@
         }
       }
     },
+    "Detected": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Detected"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erkannt"
+          }
+        }
+      }
+    },
+    "Detected entries are derived on-device from your heart rate — duration and calories are approximate.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Detected entries are derived on-device from your heart rate — duration and calories are approximate."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erkannte Einträge werden auf dem Gerät aus deiner Herzfrequenz abgeleitet — Dauer und Kalorien sind Näherungswerte."
+          }
+        }
+      }
+    },
     "Disconnect": {
       "localizations": {
         "en": {
@@ -2590,6 +2334,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Trennen"
+          }
+        }
+      }
+    },
+    "Dismiss from the log": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dismiss from the log"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aus dem Log ausblenden"
           }
         }
       }
@@ -2622,6 +2382,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "Spenden-QR-Code"
+          }
+        }
+      }
+    },
+    "Duration": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Duration"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dauer"
+          }
+        }
+      }
+    },
+    "Edit workout": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edit workout"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Training bearbeiten"
           }
         }
       }
@@ -2878,6 +2670,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Entdecken"
+          }
+        }
+      }
+    },
+    "Export CSV…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export CSV…"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CSV exportieren …"
           }
         }
       }
@@ -3458,6 +3266,22 @@
         }
       }
     },
+    "Importing overwrites everything currently on this Mac. Your old data is kept in a side file just in case. NOOP needs a relaunch for an import to take effect. Export CSV writes a WHOOP-format zip of your days, sleeps, workouts and journal that re-imports into NOOP on Mac or Android — on-device computed rows are marked APPROXIMATE in its Source column; the full backup stays the lossless restore path.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Importing overwrites everything currently on this Mac. Your old data is kept in a side file just in case. NOOP needs a relaunch for an import to take effect. Export CSV writes a WHOOP-format zip of your days, sleeps, workouts and journal that re-imports into NOOP on Mac or Android — on-device computed rows are marked APPROXIMATE in its Source column; the full backup stays the lossless restore path."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der Import überschreibt alles, was sich derzeit auf diesem Mac befindet. Deine alten Daten werden sicherheitshalber in einer separaten Datei aufbewahrt. NOOP muss neu gestartet werden, damit ein Import wirksam wird. „CSV exportieren“ schreibt ein Zip im WHOOP-Format mit deinen Tagen, Schlafphasen, Trainings und Journal-Einträgen, das sich auf Mac oder Android wieder in NOOP importieren lässt — auf dem Gerät berechnete Zeilen sind in der Source-Spalte als APPROXIMATE markiert; das vollständige Backup bleibt der verlustfreie Wiederherstellungsweg."
+          }
+        }
+      }
+    },
     "Import…": {
       "localizations": {
         "en": {
@@ -3486,6 +3310,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "Importiere…"
+          }
+        }
+      }
+    },
+    "In typical range": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In typical range"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Im typischen Bereich"
+          }
+        }
+      }
+    },
+    "In your range": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In your range"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In deinem Bereich"
           }
         }
       }
@@ -3570,6 +3426,22 @@
         }
       }
     },
+    "Journal": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Journal"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Journal"
+          }
+        }
+      }
+    },
     "Key Metrics": {
       "localizations": {
         "en": {
@@ -3582,6 +3454,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Kernmetriken"
+          }
+        }
+      }
+    },
+    "Label this activity": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Label this activity"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aktivität benennen"
           }
         }
       }
@@ -3890,6 +3778,22 @@
         }
       }
     },
+    "Log behaviours above — after a few days of answers, NOOP ranks how each one moves your recovery, HRV and sleep. Importing a WHOOP export (which includes its journal) backfills history instantly.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Log behaviours above — after a few days of answers, NOOP ranks how each one moves your recovery, HRV and sleep. Importing a WHOOP export (which includes its journal) backfills history instantly."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Protokolliere oben deine Verhaltensweisen — nach ein paar Tagen mit Antworten bewertet NOOP, wie jede davon deine Erholung, HRV und deinen Schlaf beeinflusst. Der Import eines WHOOP-Exports (inklusive Journal) füllt die Historie sofort auf."
+          }
+        }
+      }
+    },
     "low": {
       "localizations": {
         "en": {
@@ -3950,6 +3854,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Männlich"
+          }
+        }
+      }
+    },
+    "Manual": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Manual"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Manuell"
           }
         }
       }
@@ -4286,6 +4206,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Nächte"
+          }
+        }
+      }
+    },
+    "No": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nein"
           }
         }
       }
@@ -4802,6 +4738,22 @@
         }
       }
     },
+    "Off your baseline": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off your baseline"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abseits deiner Baseline"
+          }
+        }
+      }
+    },
     "Off — the coach answers generally and sends none of your metrics.": {
       "localizations": {
         "en": {
@@ -4866,6 +4818,22 @@
         }
       }
     },
+    "Once NOOP has 14 nights of history, in-range compares each vital to your own baseline (approximate — not medical advice); until then, typical adult ranges apply.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Once NOOP has 14 nights of history, in-range compares each vital to your own baseline (approximate — not medical advice); until then, typical adult ranges apply."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sobald NOOP 14 Nächte Verlauf hat, vergleicht „im Bereich“ jeden Vitalwert mit deiner eigenen Baseline (approximativ — kein medizinischer Rat); bis dahin gelten typische Erwachsenen-Bereiche."
+          }
+        }
+      }
+    },
     "Open-source BLE reverse-engineering work. Thank you.": {
       "localizations": {
         "en": {
@@ -4910,6 +4878,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ergebnismetrik"
+          }
+        }
+      }
+    },
+    "Outside typical range": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Outside typical range"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Außerhalb des typischen Bereichs"
           }
         }
       }
@@ -5746,6 +5730,22 @@
         }
       }
     },
+    "Save": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Speichern"
+          }
+        }
+      }
+    },
     "Save key": {
       "localizations": {
         "en": {
@@ -6194,6 +6194,22 @@
         }
       }
     },
+    "Sport": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sport"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sportart"
+          }
+        }
+      }
+    },
     "Stage breakdown": {
       "localizations": {
         "en": {
@@ -6258,6 +6274,22 @@
         }
       }
     },
+    "Start time": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Start time"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Startzeit"
+          }
+        }
+      }
+    },
     "State": {
       "localizations": {
         "en": {
@@ -6302,6 +6334,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Sitzung beenden"
+          }
+        }
+      }
+    },
+    "Strain isn't estimated for retroactive entries — there is no captured heart-rate window to base it on.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Strain isn't estimated for retroactive entries — there is no captured heart-rate window to base it on."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Für nachträgliche Einträge wird keine Belastung geschätzt — es gibt kein aufgezeichnetes Herzfrequenz-Fenster als Grundlage."
           }
         }
       }
@@ -7343,6 +7391,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "Die Zustellung ans Handgelenk ist noch nicht aktiv — sie benötigt einen kleinen Dienst auf dem Gerät (kommt in einem Update), um macOS-Mitteilungen zu lesen. Alles bleibt auf diesem Mac. Deine Auswahl ist jetzt gespeichert und wird automatisch angewendet, sobald die Zustellung verfügbar ist."
+          }
+        }
+      }
+    },
+    "Yes": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yes"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ja"
+          }
+        }
+      }
+    },
+    "Yesterday": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yesterday"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gestern"
           }
         }
       }

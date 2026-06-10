@@ -183,7 +183,11 @@ object IntelligenceEngine {
         // only fills days the import doesn't cover, so an import user's baseline is unchanged.
         for ((day, v) in nightlyHrvByDay) histHrvByDay.putIfAbsent(day, v)
         for ((day, v) in nightlyRhrByDay) histRhrByDay.putIfAbsent(day, v)
-        for ((day, v) in nightlyRespByDay) histRespByDay.putIfAbsent(day, v)
+        // NOT putIfAbsent for resp: Java's putIfAbsent treats a key mapped to NULL as absent, so
+        // an imported day whose respRateBpm is blank would be replaced by the RSA estimate —
+        // diverging from the Swift mirror (key-absence check), which keeps the imported day as a
+        // missing night. Match Swift: only fill days the import does not cover AT ALL.
+        for ((day, v) in nightlyRespByDay) if (day !in histRespByDay) histRespByDay[day] = v
         val hrvSeq = histHrvByDay.entries.sortedBy { it.key }.map { it.value }
         val rhrSeq = histRhrByDay.entries.sortedBy { it.key }.map { it.value }
         val respSeq = histRespByDay.entries.sortedBy { it.key }.map { it.value }
@@ -191,8 +195,11 @@ object IntelligenceEngine {
         val rhrBase2 = Baselines.foldHistory(rhrSeq, rhrCfg)
         // Resp baseline mixes imported (cloud) values with on-device RSA estimates — acceptable: the
         // z-score is scale-tolerant, foldHistory winsorizes, and respRateBpm already carries no source
-        // flag anywhere else (the illness gate treats it the same way).
-        val respBase2 = Baselines.foldHistory(respSeq, respCfg)
+        // flag anywhere else (the illness gate treats it the same way). Gated on `usable` because
+        // RecoveryScorer includes the resp term whenever a baseline object is present — a CALIBRATING
+        // (<4-night) baseline would let one noisy RSA night move recovery (mirrors the skin-temp
+        // use-site gate; honest cold-start).
+        val respBase2 = Baselines.foldHistory(respSeq, respCfg).takeIf { it.usable }
         // Skin-temp baseline is on-device-only (imported rows carry skinTempDevC, not the raw mean),
         // so fold purely over the pass-1 nightly means in chronological order. (PR #85)
         val skinSeq = nightlySkinByDay.entries.sortedBy { it.key }.map { it.value }

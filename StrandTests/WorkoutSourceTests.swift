@@ -76,4 +76,33 @@ final class WorkoutSourceTests: XCTestCase {
         let manual = row(150, 250, source: "manual", sport: "Running")
         XCTAssertFalse(WorkoutSource.isDismissed(manual, spans: [(100, 200)]))    // never hides non-detected
     }
+
+    func testPreservingCapturedKeepsUnexposedFieldsOnEdit() {
+        // A v1.67 live-tracked session has captured strain/maxHr/zones the edit sheet never
+        // shows; rebuilding the row from the sheet inputs must not wipe them. Mirrors the
+        // Android WorkoutEditingTest case value-for-value.
+        let live = WorkoutRow(startTs: 1_000, endTs: 4_000, sport: "Running", source: "manual",
+                              durationS: 3_000, energyKcal: 420, avgHr: 142, maxHr: 171,
+                              strain: 12.4, distanceM: 5_200, zonesJSON: "{\"z1\":10}",
+                              notes: "tempo")
+        let rebuilt = WorkoutSource.buildManualRow(start: Date(timeIntervalSince1970: 1_000),
+                                                   durationMin: 50, sport: "Cycling",
+                                                   avgHr: 140, energyKcal: 400,
+                                                   now: Date(timeIntervalSince1970: 10_000))!
+        let edited = WorkoutSource.preservingCaptured(rebuilt, from: live)
+        // Sheet-owned fields take the new values…
+        XCTAssertEqual(edited.sport, "Cycling")
+        XCTAssertEqual(edited.avgHr, 140)
+        XCTAssertEqual(edited.energyKcal ?? 0, 400, accuracy: 1e-9)
+        // …captured fields survive verbatim.
+        XCTAssertEqual(edited.maxHr, 171)
+        XCTAssertEqual(edited.strain ?? 0, 12.4, accuracy: 1e-9)
+        XCTAssertEqual(edited.distanceM ?? 0, 5_200, accuracy: 1e-9)
+        XCTAssertEqual(edited.zonesJSON, "{\"z1\":10}")
+        XCTAssertEqual(edited.notes, "tempo")
+        // Fresh add (old == nil) stays honest: nothing fabricated.
+        let added = WorkoutSource.preservingCaptured(rebuilt, from: nil)
+        XCTAssertNil(added.strain)
+        XCTAssertNil(added.maxHr)
+    }
 }

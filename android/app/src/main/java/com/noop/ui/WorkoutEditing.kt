@@ -52,6 +52,22 @@ internal fun buildManualWorkout(
 }
 
 /**
+ * Carry the captured fields the add/edit dialog does NOT expose (maxHr, strain, distanceM,
+ * zonesJSON, notes) over from the row being edited. A v1.67 live-tracked session has real
+ * captured strain/maxHr; rebuilding the row from the dialog's five inputs alone would silently
+ * wipe them on any edit (e.g. renaming the sport). No-op for a fresh add (old == null).
+ */
+internal fun preservingCaptured(row: WorkoutRow, old: WorkoutRow?): WorkoutRow =
+    if (old == null) {
+        row
+    } else {
+        row.copy(
+            maxHr = old.maxHr, strain = old.strain, distanceM = old.distanceM,
+            zonesJSON = old.zonesJSON, notes = old.notes,
+        )
+    }
+
+/**
  * Re-label a detected bout as a real sport: COPY it to the strap source as a manual row (the
  * detected original is deleted by the caller). Survives IntelligenceEngine.analyzeRecent: the
  * engine wipes + re-derives only sport="detected" rows under "-noop" and SKIPS any re-derived

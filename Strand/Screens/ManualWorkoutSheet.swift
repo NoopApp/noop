@@ -48,7 +48,7 @@ struct ManualWorkoutSheet: View {
                 HStack {
                     Text("Duration")
                     Spacer()
-                    Text("\(durationMin) min" as String)
+                    Text("\(durationMin) min")   // LocalizedStringKey — hits the existing "%lld min" entry
                         .font(StrandFont.number(13, weight: .regular))
                         .foregroundStyle(StrandPalette.textSecondary)
                 }
@@ -89,8 +89,11 @@ struct ManualWorkoutSheet: View {
 
     private func save() {
         guard let row = builtRow else { return }
+        // Keep the captured fields the sheet does not expose (strain/maxHr/zones/distance/
+        // notes) — editing a live-tracked session must not wipe its real measurements.
+        let merged = WorkoutSource.preservingCaptured(row, from: editing)
         Task {
-            await repo.saveManualWorkout(row, replacing: editing)
+            await repo.saveManualWorkout(merged, replacing: editing)
             onSaved()
             dismiss()
         }

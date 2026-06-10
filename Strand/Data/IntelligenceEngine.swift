@@ -140,10 +140,14 @@ final class IntelligenceEngine: ObservableObject {
         // Skin-temp baseline is on-device-only (imported rows carry skinTempDevC, not the raw mean),
         // so fold purely over the pass-1 nightly means in chronological order.
         let skinSeq = nightlySkinByDay.keys.sorted().map { nightlySkinByDay[$0]! }
+        // Resp baseline gated on `usable`: RecoveryScorer includes the resp term whenever a
+        // baseline object is present — a CALIBRATING (<4-night) baseline would let one noisy
+        // RSA night move recovery (mirrors the skin-temp use-site gate; honest cold-start).
+        let respFold = Baselines.foldHistory(respSeq, cfg: respCfg)
         let baselines2 = AnalyticsEngine.ProfileBaselines(
             hrv: Baselines.foldHistory(hrvSeq, cfg: hrvCfg),
             restingHR: Baselines.foldHistory(rhrSeq, cfg: rhrCfg),
-            resp: Baselines.foldHistory(respSeq, cfg: respCfg),
+            resp: respFold.usable ? respFold : nil,
             skinTemp: Baselines.foldHistory(skinSeq, cfg: skinCfg))
 
         // Imported workouts in the scored window, used to de-duplicate detected bouts so a user who

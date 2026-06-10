@@ -62,7 +62,14 @@ enum CsvExport {
 
             let workouts = (try await store.workouts(deviceId: deviceId, from: 0, to: hi, limit: 100_000))
                 + (try await store.workouts(deviceId: computedId, from: 0, to: hi, limit: 100_000))
-            let journal = try await store.journalEntries(deviceId: deviceId, from: fromDay, to: toDay)
+            // Imported ∪ native journal, native wins per (day, question) — exactly what Insights
+            // shows. Native answers live under "noop-journal" (the table has no source column),
+            // so an imported-only read would export an empty journal for the account-free user
+            // the in-app logging targets.
+            let importedJournal = try await store.journalEntries(deviceId: deviceId, from: fromDay, to: toDay)
+            let nativeJournal = try await store.journalEntries(deviceId: Repository.journalDeviceId,
+                                                               from: fromDay, to: toDay)
+            let journal = Repository.mergeJournal(imported: importedJournal, native: nativeJournal)
 
             // Sidecar: every metricSeries row under both sources, full fidelity.
             var sidecar: [String: [MetricPoint]] = [:]
@@ -109,6 +116,9 @@ enum CsvExport {
         }
     }
 
+    // @MainActor: Repository.localDayKey is MainActor-isolated (Repository is @MainActor);
+    // only called from `run`, which already is.
+    @MainActor
     private static func defaultName() -> String {
         "noop-export-\(Repository.localDayKey(Date())).zip"
     }

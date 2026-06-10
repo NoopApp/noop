@@ -300,13 +300,15 @@ private struct Vital: Identifiable {
     /// The textual in-range caption that stands in for a StatePill inside the
     /// fixed-height tile (keeps the row pixel-uniform). The wording says which
     /// yardstick judged it: your own baseline vs the typical adult range.
+    /// String(localized:) — StatTile's caption is a plain String rendered via
+    /// Text(String), which never consults the catalog on its own.
     var stateCaption: String {
         switch (banding.band, banding.basis) {
-        case (.noData, _):               return "No data"
-        case (.inRange, .personal):      return "In your range"
-        case (.outOfRange, .personal):   return "Off your baseline"
-        case (.inRange, .population):    return "In typical range"
-        case (.outOfRange, .population): return "Outside typical range"
+        case (.noData, _):               return String(localized: "No data")
+        case (.inRange, .personal):      return String(localized: "In your range")
+        case (.outOfRange, .personal):   return String(localized: "Off your baseline")
+        case (.inRange, .population):    return String(localized: "In typical range")
+        case (.outOfRange, .population): return String(localized: "Outside typical range")
         }
     }
 

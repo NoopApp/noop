@@ -645,7 +645,8 @@ final class AICoachEngine: ObservableObject {
         guard !rows.isEmpty else { return "Recent workouts: none recorded in the last 30 days." }
         var lines = ["Recent workouts (newest first):"]
         for w in rows.prefix(limit) {
-            var parts = ["  \(dateString(w.startTs)) \(w.sport)"]
+            // displaySport: the machine token "detected" never reaches the model raw.
+            var parts = ["  \(dateString(w.startTs)) \(WorkoutSource.displaySport(w.sport))"]
             if let dur = w.durationS { parts.append("\(Int((dur / 60).rounded())) min") }
             if let s = w.strain { parts.append("strain \(String(format: "%.1f", s))") }
             if let hr = w.avgHr { parts.append("avg HR \(hr)") }

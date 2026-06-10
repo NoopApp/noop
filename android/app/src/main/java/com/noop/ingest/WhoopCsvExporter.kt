@@ -7,6 +7,8 @@ import com.noop.data.JournalEntry
 import com.noop.data.SleepSession
 import com.noop.data.WhoopRepository
 import com.noop.data.WorkoutRow
+import com.noop.ui.JOURNAL_DEVICE_ID
+import com.noop.ui.mergeJournalEntries
 import com.noop.ui.parseZonePercents
 import org.json.JSONArray
 import org.json.JSONObject
@@ -261,7 +263,14 @@ object WhoopCsvExporter {
         val sleeps = repo.sleepSessionsMerged(deviceId, 0L, hi)
         val workouts = repo.workouts(deviceId, 0L, hi) +
             repo.workouts(computedId, 0L, hi)
-        val journal = repo.journal(deviceId, "0000-01-01", "9999-12-31")
+        // Imported ∪ native journal, native wins per (day, question) — exactly what Insights
+        // shows. Native answers live under "noop-journal" (no source column on the table), so
+        // an imported-only read would export an empty journal for the account-free user the
+        // in-app logging targets.
+        val journal = mergeJournalEntries(
+            imported = repo.journal(deviceId, "0000-01-01", "9999-12-31"),
+            native = repo.journal(JOURNAL_DEVICE_ID, "0000-01-01", "9999-12-31"),
+        )
 
         val seriesByDay = HashMap<String, MutableMap<String, Double>>()
         for (key in listOf("sleep_performance", "sleep_consistency", "sleep_need_min", "sleep_debt_min")) {
@@ -287,7 +296,11 @@ object WhoopCsvExporter {
         val zip = zipBytes(
             linkedMapOf(
                 "physiological_cycles.csv" to cyclesCsv(daily, seriesByDay, sourceByDay).toByteArray(),
-                "sleeps.csv" to sleepsCsv(sleeps).toByteArray(),
+                // On-device computed sessions carry the "-noop" device id; label them per the
+                // APPROXIMATE house rule (the Settings blurb promises exactly this marking).
+                "sleeps.csv" to sleepsCsv(sleeps) { s ->
+                    if (s.deviceId.endsWith("-noop")) "noop (APPROXIMATE)" else "import"
+                }.toByteArray(),
                 "workouts.csv" to workoutsCsv(workouts, ::workoutSource).toByteArray(),
                 "journal_entries.csv" to journalCsv(journal).toByteArray(),
                 "noop_metric_series.json" to metricSeriesJson(sidecarRows).toByteArray(),

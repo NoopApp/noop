@@ -155,7 +155,9 @@ fun WorkoutsScreen(vm: AppViewModel) {
         AddEditWorkoutDialog(
             initial = editing,
             onSave = { row ->
-                vm.saveManualWorkout(row, replacing = editing) { reloadKey++ }
+                // Keep the captured fields the dialog does not expose (strain/maxHr/zones/
+                // distance/notes) — editing a live-tracked session must not wipe them.
+                vm.saveManualWorkout(preservingCaptured(row, editing), replacing = editing) { reloadKey++ }
                 adding = false; editing = null
             },
             onCancel = { adding = false; editing = null },

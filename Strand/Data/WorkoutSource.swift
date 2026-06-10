@@ -34,6 +34,19 @@ enum WorkoutSource: Equatable {
         classify(row.source) == .detected && spans.contains { row.startTs < $0.end && $0.start < row.endTs }
     }
 
+    /// Carry the captured fields the add/edit sheet does NOT expose (maxHr, strain, distanceM,
+    /// zonesJSON, notes) over from the row being edited. A v1.67 live-tracked session has real
+    /// captured strain/maxHr; rebuilding the row from the sheet's five inputs alone would
+    /// silently wipe them on any edit. No-op for a fresh add (old == nil).
+    static func preservingCaptured(_ row: WorkoutRow, from old: WorkoutRow?) -> WorkoutRow {
+        guard let old else { return row }
+        return WorkoutRow(startTs: row.startTs, endTs: row.endTs, sport: row.sport,
+                          source: row.source, durationS: row.durationS,
+                          energyKcal: row.energyKcal, avgHr: row.avgHr,
+                          maxHr: old.maxHr, strain: old.strain, distanceM: old.distanceM,
+                          zonesJSON: old.zonesJSON, notes: old.notes)
+    }
+
     /// Build a retroactive manual workout (source "manual", persisted under deviceId "my-whoop"
     /// by the caller — where v1.67's live sessions live). Nil when the input can't make an honest
     /// row; strain/zones stay nil (no captured HR window — APPROXIMATE figures are never fabricated).
