@@ -185,5 +185,54 @@ class DecodeWiringTests(unittest.TestCase):
         self.assertEqual(self.db.state(did)["last_decoded_frame_id"], "5")
 
 
+class _FakeSync:
+    """Minimal stand-in for Sync carrying just the fields _progress_line reads."""
+    def __init__(self, anchor, last_rec, complete=0, committed=0):
+        self.sync_start_unix = anchor
+        self.last_rec_unix = last_rec
+        self.history_complete = complete
+        self.committed = committed
+
+
+class ProgressTests(unittest.TestCase):
+    def test_fmt_eta(self):
+        self.assertEqual(ws._fmt_eta(None), "—")
+        self.assertEqual(ws._fmt_eta(5), "5s")
+        self.assertEqual(ws._fmt_eta(125), "2m05s")
+        self.assertEqual(ws._fmt_eta(3725), "1h02m")
+        self.assertEqual(ws._fmt_eta(-3), "0s")          # clamped, never negative
+
+    def test_bar_endpoints(self):
+        self.assertEqual(ws._bar(0).count("█"), 0)
+        self.assertEqual(ws._bar(100).count("█"), 10)
+        self.assertEqual(ws._bar(50).count("█"), 5)
+
+    def test_progress_fraction_by_record_time(self):
+        now = 1_700_000_000
+        s = _FakeSync(anchor=now - 3600, last_rec=now - 1200, committed=100)   # 2400/3600 of backlog
+        line = ws._progress_line(s, now, rate=11.0, cover=10.0, model="whoop4")
+        self.assertIn(" 67%", line)
+        self.assertIn("ETA 2m00s", line)                 # 1200 remaining data-s / 10 cover = 120s
+        self.assertIn("sync 4C", line)
+
+    def test_progress_complete_pins_100(self):
+        now = 1_700_000_000
+        s = _FakeSync(anchor=now - 3600, last_rec=now - 1200, complete=1)       # behind, but COMPLETE
+        line = ws._progress_line(s, now, rate=0.0, cover=0.0, model="whoop5")
+        self.assertIn("100%", line)
+        self.assertIn("ETA done", line)
+        self.assertIn("sync 5", line)
+
+    def test_progress_handshaking_before_first_record(self):
+        s = _FakeSync(anchor=None, last_rec=0, committed=0)
+        self.assertIn("handshaking", ws._progress_line(s, 1_700_000_000, 0, 0, "whoop4"))
+
+    def test_progress_clamps_when_record_ahead_of_now(self):
+        now = 1_700_000_000
+        s = _FakeSync(anchor=now - 100, last_rec=now + 50)   # clock skew: record "ahead" of now
+        line = ws._progress_line(s, now, rate=5.0, cover=1.0, model="whoop4")
+        self.assertIn("100%", line)                          # done clamped to total, no >100%
+
+
 if __name__ == "__main__":
     unittest.main()
