@@ -6,9 +6,11 @@ import WhoopStore
 // MARK: - SleepView
 //
 // Whoop-sleep clarity on the locked Noop component system. Scannable in two seconds:
-//   1. HERO ChartCard "Last night" — the stage breakdown (Hypnogram if intervals
-//      reconstruct from stagesJSON, else a clean proportional stacked stage bar),
-//      trailing = total asleep, footer = REM/Deep/Light/Awake each "Xh Ym · NN%".
+//   1. HERO ChartCard "Last night" — the stage breakdown. Computed nights render the
+//      stager's REAL persisted per-epoch segments (APPROXIMATE, on-device); imported
+//      nights carry minutes only, so their Hypnogram stays the synthesized architecture;
+//      degenerate timelines fall back to the proportional stacked stage bar.
+//      Trailing = total asleep, footer = REM/Deep/Light/Awake each "Xh Ym · NN%".
 //   2. A uniform grid of fixed StatTiles, each with a sparkline and a "vs typical"
 //      caption: Performance, Efficiency, Consistency, Hours vs Needed, Restorative,
 //      Respiratory, Sleep Debt.
@@ -17,8 +19,9 @@ import WhoopStore
 //   4. A 30-day asleep-hours ChartCard trend.
 //
 // Every surface is a NoopCard / StatTile / ChartCard — no hand-sized cards, one grid,
-// equal margins. Data wiring is preserved from the previous screen (stagesJSON =
-// minutes for light/deep/rem/awake; typical = mean of repo.days).
+// equal margins. stagesJSON carries either the imported minutes dict
+// ({"light","deep","rem","awake"}) or the stager's per-epoch segment array — both decode
+// via SleepStagesDecoder; typical = mean of repo.days.
 
 struct SleepView: View {
     @EnvironmentObject var repo: Repository
@@ -87,7 +90,8 @@ struct SleepView: View {
                           trailing: "\(night.dateLabel) · \(night.onsetText)–\(night.wakeText)")
             ChartCard(
                 title: "Stage breakdown",
-                subtitle: "\(durationText(night.timeInBed)) in bed · \(efficiencyText(night)) efficiency",
+                subtitle: "\(durationText(night.timeInBed)) in bed · \(efficiencyText(night)) efficiency"
+                    + (model.isPersistedHypnogram ? " · stages approximate (on-device)" : ""),
                 trailing: durationText(s.asleep),
                 height: NoopMetrics.chartHeight,
                 chart: {
@@ -367,9 +371,12 @@ struct SleepView: View {
     /// once per render. Returns nil when there is no usable latest night (renders empty state).
     private func buildModel() -> SleepModel? {
         guard let night = latestNight else { return nil }
+        // Prefer the stager's real persisted timeline; synthesized architecture otherwise.
+        let persisted = night.persistedIntervals
         return SleepModel(
             night: night,
-            intervals: night.intervals,
+            intervals: persisted ?? night.intervals,
+            isPersistedHypnogram: persisted != nil,
             performance: performanceSeries,
             efficiency: efficiencySeries,
             consistency: consistencySeries,
@@ -386,12 +393,14 @@ struct SleepView: View {
 
     // MARK: - Derived model
 
-    /// The most recent imported sleep, decoded into stage durations.
+    /// The most recent sleep (imported or strap-computed), decoded into stage durations
+    /// plus — for computed nights — the stager's persisted per-epoch segments.
     private var latestNight: Night? {
         guard let s = repo.sleeps.last,
               let stages = decodeStages(s.stagesJSON),
               stages.total > 0 else { return nil }
-        return Night(session: s, stages: stages)
+        return Night(session: s, stages: stages,
+                     segments: SleepStagesDecoder.segments(s.stagesJSON))
     }
 
     /// Mean total sleep duration (minutes) across nights with data — the "typical".
@@ -614,19 +623,12 @@ struct SleepView: View {
 
     // MARK: - Stage decoding
 
-    /// Decode the imported stagesJSON dict of MINUTES {"light","deep","rem","awake"}.
+    /// Decode stage minutes from EITHER stagesJSON shape: the imported minutes dict
+    /// {"light","deep","rem","awake"} or the stager's persisted per-epoch segment array
+    /// (previously the dict-only cast made strap-computed nights blank the whole screen).
     private func decodeStages(_ json: String?) -> Stages? {
-        guard let json, let data = json.data(using: .utf8) else { return nil }
-        guard let obj = try? JSONSerialization.jsonObject(with: data),
-              let dict = obj as? [String: Any] else { return nil }
-        func val(_ key: String) -> Double {
-            if let n = dict[key] as? NSNumber { return n.doubleValue }
-            if let d = dict[key] as? Double { return d }
-            if let i = dict[key] as? Int { return Double(i) }
-            return 0
-        }
-        let s = Stages(awake: val("awake"), light: val("light"),
-                       deep: val("deep"), rem: val("rem"))
+        guard let m = SleepStagesDecoder.minutes(json) else { return nil }
+        let s = Stages(awake: m.awake, light: m.light, deep: m.deep, rem: m.rem)
         return s.total > 0 ? s : nil
     }
 
@@ -665,9 +667,12 @@ private struct SleepModel {
     typealias Metric = (latest: Double?, typical: Double?, series: [Double])
 
     let night: Night
-    /// Reconstructed stage intervals for the hypnogram — computed once (Night.intervals is a
-    /// computed property; it was previously re-derived on each access during render).
+    /// Stage intervals for the hypnogram — computed once (Night's interval properties are
+    /// computed; they were previously re-derived on each access during render).
     let intervals: [SleepInterval]
+    /// True when `intervals` are the stager's persisted per-epoch segments (on-device
+    /// APPROXIMATE staging), not the synthesized architecture.
+    let isPersistedHypnogram: Bool
 
     let performance: Metric
     let efficiency: Metric
@@ -699,6 +704,9 @@ private struct Stages {
 private struct Night {
     let session: CachedSleepSession
     let stages: Stages
+    /// True per-epoch segments persisted by the on-device stager (APPROXIMATE),
+    /// nil for imported minutes-dict nights.
+    let segments: [SleepStagesDecoder.Segment]?
 
     /// Total time in bed in minutes (from reconstructed stages).
     var timeInBed: Double { stages.total }
@@ -706,8 +714,21 @@ private struct Night {
     /// The wall-clock start of the night (for the Hypnogram's clock labels).
     var onsetDate: Date { Date(timeIntervalSince1970: TimeInterval(session.startTs)) }
 
+    /// Persisted intervals in Hypnogram coordinates (seconds from night start),
+    /// or nil → caller falls back to the synthesized architecture below.
+    var persistedIntervals: [SleepInterval]? {
+        guard let segments else { return nil }
+        let out: [SleepInterval] = segments.compactMap { seg in
+            guard let stage = SleepStage(persisted: seg.stage) else { return nil }
+            return SleepInterval(stage: stage,
+                                 start: TimeInterval(seg.start - session.startTs),
+                                 end: TimeInterval(seg.end - session.startTs))
+        }
+        return out.count >= 2 ? out : nil
+    }
+
     /// Stage intervals laid end-to-end across the night, in seconds from start.
-    /// Reconstructed from durations only (export has no per-epoch timeline).
+    /// Reconstructed from durations only (imported nights have no per-epoch timeline).
     var intervals: [SleepInterval] {
         var t: TimeInterval = 0
         var out: [SleepInterval] = []

@@ -31,10 +31,10 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.noop.analytics.AnalyticsEngine
 import com.noop.data.DailyMetric
 import com.noop.data.SleepSession
 import org.json.JSONArray
-import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -59,12 +59,12 @@ import kotlin.math.roundToInt
  *
  * Data wiring is faithful to the macOS screen: the "typical" is the mean across the
  * cached daily metrics; the per-night stage split comes from the latest DailyMetric's
- * deep/rem/light minutes. The macOS export carried a per-night stagesJSON minutes dict;
- * Android's sleepSession.stagesJSON is a verbatim segments array used here only for the
- * onset/wake clock labels + efficiency. Where macOS reconstructed an epoch-level
- * timeline it had none either (durations only), so the hypnogram is the same plausible
- * architecture (deep early, REM later, awake last). No data is fabricated: with no
- * nights the screen shows an honest empty state.
+ * deep/rem/light minutes. The hero hypnogram prefers the REAL per-epoch segments the
+ * on-device stager persists into sleepSession.stagesJSON ([{start,end,stage}]) when the
+ * merged session is the same night — labelled approximate (on-device staging). Imported
+ * nights carry minutes only, so they keep the reconstructed plausible architecture
+ * (deep early, REM later, awake last). No data is fabricated: with no nights the screen
+ * shows an honest empty state.
  */
 @Composable
 fun SleepScreen(vm: AppViewModel) {
@@ -117,7 +117,8 @@ private fun Hero(m: SleepModel) {
         )
         ChartCard(
             title = "Stage breakdown",
-            subtitle = "${durationText(s.total)} in bed · ${m.efficiencyText} efficiency",
+            subtitle = "${durationText(s.total)} in bed · ${m.efficiencyText} efficiency" +
+                (if (m.realSegments != null) " · approx. stages (on-device)" else ""),
             trailing = durationText(s.asleep),
             footer = {
                 ChartFooter(
@@ -130,8 +131,9 @@ private fun Hero(m: SleepModel) {
                 )
             },
         ) {
-            // Reconstructed stage architecture: light → deep → light → rem → light → awake.
-            val segments = stageSegments(s)
+            // True per-epoch segments when the stager persisted them; else the reconstructed
+            // architecture: light → deep → light → rem → light → awake.
+            val segments = m.realSegments ?: stageSegments(s)
             if (segments.isNotEmpty()) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Box(modifier = Modifier.fillMaxWidth().height(34.dp)) {
@@ -542,6 +544,9 @@ private data class SleepModel(
     val typicalRemMin: Double?,
     val typicalLightMin: Double?,
     val trendHours: List<Double>,
+    /** Persisted per-epoch segments as ordered (stage, minutes) weights — the REAL
+     *  hypnogram (on-device APPROXIMATE staging) — or null → synthesized fallback. */
+    val realSegments: List<Pair<String, Float>>?,
 )
 
 /**
@@ -605,6 +610,15 @@ private fun buildSleepModel(days: List<DailyMetric>, session: SleepSession?): Sl
     val recentHours = allHours.takeLast(14)
     val trendHours = if (recentHours.size >= 2) recentHours else allHours
 
+    // Real per-epoch timeline only when the merged session IS this night (UTC end-day
+    // match, the same attribution AnalyticsEngine uses); else synthesized fallback. Note:
+    // imported DailyMetric.day is local-tz while dayString is UTC, so a near-midnight-UTC
+    // wake can miss the match — that degrades safely to synthesis, never to a wrong night.
+    val realSegments = session
+        ?.takeIf { AnalyticsEngine.dayString(it.endTs) == latest.day }
+        ?.let { parsePersistedSegments(it.stagesJSON) }
+        ?.map { seg -> seg.stage to ((seg.end - seg.start) / 60f) }
+
     return SleepModel(
         stages = stages,
         clockLabel = clockLabel(latest, session),
@@ -621,6 +635,7 @@ private fun buildSleepModel(days: List<DailyMetric>, session: SleepSession?): Sl
         typicalRemMin = typicalRemMin,
         typicalLightMin = typicalLightMin,
         trendHours = trendHours,
+        realSegments = realSegments,
     )
 }
 
@@ -728,44 +743,32 @@ private fun clockLabel(latest: DailyMetric, session: SleepSession?): String {
     }.getOrNull() ?: latest.day
 }
 
+/** One persisted per-epoch stage segment (wall-clock unix seconds). */
+internal data class PersistedSegment(val start: Long, val end: Long, val stage: String)
+
 /**
- * Best-effort sum of a sleepSession stagesJSON. Android's stagesJSON is a verbatim
- * segments array (not the macOS minutes dict), so this is unused for the primary stage
- * split (which comes from the daily metric) but kept available for an onset-aware future.
- * Tolerant of both an object {light,deep,rem,awake} (minutes) and an array of segments.
+ * Parse the verbatim per-epoch segments array the on-device stager persists
+ * ([{"start","end","stage"}], unix seconds, stage ∈ wake|light|deep|rem — see
+ * AnalyticsEngine.encodeStages). Returns null for the imported minutes shapes
+ * (the macOS {"light",…} dict and the CSV-import [{stage,min}] array) and any
+ * malformed input, so callers keep the synthesized fallback. Pure + unit-tested
+ * (see SleepStageSegmentsTest).
  */
-@Suppress("unused")
-private fun parseStagesJson(json: String?): Stages? {
+internal fun parsePersistedSegments(json: String?): List<PersistedSegment>? {
     if (json.isNullOrBlank()) return null
+    val trimmed = json.trim()
+    if (!trimmed.startsWith("[")) return null
     return runCatching {
-        val trimmed = json.trim()
-        if (trimmed.startsWith("{")) {
-            val o = JSONObject(trimmed)
-            Stages(
-                awake = o.optDouble("awake", 0.0),
-                light = o.optDouble("light", 0.0),
-                deep = o.optDouble("deep", 0.0),
-                rem = o.optDouble("rem", 0.0),
-            ).takeIf { it.total > 0.0 }
-        } else if (trimmed.startsWith("[")) {
-            val arr = JSONArray(trimmed)
-            var a = 0.0; var l = 0.0; var d = 0.0; var r = 0.0
-            for (i in 0 until arr.length()) {
-                val seg = arr.optJSONObject(i) ?: continue
-                val stage = seg.optString("stage", seg.optString("type", "")).lowercase()
-                val durMin = (seg.optDouble("durationMin", Double.NaN)).let {
-                    if (it.isNaN()) seg.optDouble("duration", 0.0) / 60.0 else it
-                }
-                when (stage) {
-                    "awake", "wake" -> a += durMin
-                    "light" -> l += durMin
-                    "deep", "sws" -> d += durMin
-                    "rem" -> r += durMin
-                }
-            }
-            Stages(a, l, d, r).takeIf { it.total > 0.0 }
-        } else {
-            null
+        val arr = JSONArray(trimmed)
+        val out = ArrayList<PersistedSegment>(arr.length())
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: return@runCatching null
+            val start = o.optLong("start", Long.MIN_VALUE)
+            val end = o.optLong("end", Long.MIN_VALUE)
+            val stage = o.optString("stage", "")
+            if (start == Long.MIN_VALUE || end <= start || stage.isEmpty()) return@runCatching null
+            out.add(PersistedSegment(start, end, stage))
         }
+        out.takeIf { it.size >= 2 }
     }.getOrNull()
 }
