@@ -122,7 +122,7 @@ enum DataBackup {
         // left the user stranded after the relaunch (the GRDB migration bookkeeping is absent).
         // Probe the schema read-only and point the user at the path that DOES work cross-platform.
         if backupOrigin(of: sqliteTableNames(at: source)) == .android {
-            return .failure("That backup is from NOOP for Android — the two apps store data in different database layouts, so a direct restore is not possible. On the phone use Settings → Export CSV… and import the zip here under Data Sources → WHOOP Export instead.")
+            return .failure("That backup is from NOOP for Android — the two apps store data in different database layouts, so a direct restore is not possible. Restore it on an Android device, or import your original WHOOP or Apple Health exports here instead.")
         }
 
         let fm = FileManager.default

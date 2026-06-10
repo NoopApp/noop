@@ -23,6 +23,16 @@ final class HealthXMLSanitizerTests: XCTestCase {
         """
     }
 
+    func testXMLDeclarationPassesThroughUntouched() {
+        // Regression: the close-quote heuristic must never touch processing instructions —
+        // `encoding="UTF-8"?>` has its closing quote followed by `?`, which an element-tag
+        // rule reads as content. Corrupting the prolog kills EVERY import at line 1.
+        let decl = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<HealthData locale=\"en_US\">\n</HealthData>"
+        let (out, stats) = sanitize(decl)
+        XCTAssertEqual(out, decl)
+        XCTAssertEqual(stats, HealthXMLSanitizer.Stats())
+    }
+
     func testCleanInputPassesThroughByteIdentical() {
         let xml = wrap(#"<Record type="HKQuantityTypeIdentifierBodyMass" value="80.5" unit="kg" startDate="2026-01-02 08:00:00 +0000" endDate="2026-01-02 08:00:00 +0000"/>"#)
         let (out, stats) = sanitize(xml)

@@ -386,24 +386,29 @@ public final class BLEManager: NSObject, ObservableObject {
         log("→ \(command.label) payload=\(hex(payload))")
     }
 
-    /// Refresh the battery reading on demand. Source is FAMILY-SPECIFIC (#77): on a WHOOP 4.0 the
-    /// standard 0x2A19 characteristic is a STUB that reports a constant 100 — the real charge only
-    /// comes from the proprietary GET_BATTERY_LEVEL command (COMMAND_RESPONSE, u16/10). Reading both
-    /// flashed 100% before the true value corrected it (and a stub notification could revert a real
-    /// 94% back to 100%). So WHOOP 4 uses ONLY the command; WHOOP 5/MG uses ONLY 0x2A19.
     /// Point the Collector's decode at the selected family. For a 5/MG, also install the
     /// identity clock ref (live puffin timestamps are already wall-clock unix; see connect()).
     /// Idempotent; called from connect() AND after the async store bootstrap creates the
-    /// collector, so the configuration lands regardless of which finishes first. WHOOP 4.0:
-    /// family only — clockRef stays owned by the GET_CLOCK correlation.
+    /// collector, so the configuration lands regardless of which finishes first. For a
+    /// WHOOP 4.0 the collector takes the manager's GET_CLOCK correlation (nil until it lands,
+    /// which re-buffers frames — the normal WHOOP4 flow); this also evicts the stale identity
+    /// ref a prior 5/MG session installed when the user switches straps, which would otherwise
+    /// mis-stamp WHOOP4 device-epoch frames as wall-clock.
     private func configureCollectorFamily() {
         collector?.family = selectedModel.deviceFamily
         if selectedModel.deviceFamily == .whoop5 {
             let now = Int(Date().timeIntervalSince1970)
             collector?.clockRef = ClockRef(device: now, wall: now)
+        } else {
+            collector?.clockRef = clockRef   // the WHOOP4 correlation, nil until GET_CLOCK lands
         }
     }
 
+    /// Refresh the battery reading on demand. Source is FAMILY-SPECIFIC (#77): on a WHOOP 4.0 the
+    /// standard 0x2A19 characteristic is a STUB that reports a constant 100 — the real charge only
+    /// comes from the proprietary GET_BATTERY_LEVEL command (COMMAND_RESPONSE, u16/10). Reading both
+    /// flashed 100% before the true value corrected it (and a stub notification could revert a real
+    /// 94% back to 100%). So WHOOP 4 uses ONLY the command; WHOOP 5/MG uses ONLY 0x2A19.
     public func refreshBattery() {
         guard state.connected, let p = peripheral, p.state == .connected else {
             log("refreshBattery ignored — not connected")
@@ -469,6 +474,7 @@ public final class BLEManager: NSObject, ObservableObject {
         state.syncChunksThisSession = 0
         historicalAckLogCounter = 0
         rejectedFramesThisSession = 0
+        rejectedFramesUnarchived = 0
         // Payload MUST be [0x00], NOT empty: verified on-device that this strap serves type-47 only with
         // [0x00] (empty → 0 frames on a clean stable link with ~2k records pending); the Mac ground-truth
         // offload (re/sync_openwhoop.py, re/diagnose_biometrics.py) uses [0x00] too. Plain offload — the
@@ -572,11 +578,15 @@ public final class BLEManager: NSObject, ObservableObject {
         if reason == "HISTORY_COMPLETE" {
             state.lastSyncedAt = Date().timeIntervalSince1970
             // #91: a sync that completed but DISCARDED records must not read as a clean
-            // "History synced N ago" — the raw bytes are archived on-device; a strap log
-            // carries hex samples for mapping the layout.
-            state.lastSyncError = rejectedFramesThisSession > 0
-                ? "Synced, but \(rejectedFramesThisSession) record(s) could not be decoded (unrecognised strap firmware layout). The raw bytes were saved on this Mac — please share a strap log so the layout can be mapped."
-                : nil
+            // "History synced N ago" — the wording distinguishes archived bytes from
+            // cap-overflow bytes so "saved" is never claimed falsely.
+            if rejectedFramesUnarchived > 0 {
+                state.lastSyncError = "Synced, but \(rejectedFramesThisSession + rejectedFramesUnarchived) record(s) could not be decoded (unrecognised strap firmware layout), and the on-device archive is full — the newest \(rejectedFramesUnarchived) were not preserved. Please share a strap log so the layout can be mapped."
+            } else if rejectedFramesThisSession > 0 {
+                state.lastSyncError = "Synced, but \(rejectedFramesThisSession) record(s) could not be decoded (unrecognised strap firmware layout). The raw bytes were saved on this Mac — please share a strap log so the layout can be mapped."
+            } else {
+                state.lastSyncError = nil
+            }
             UserDefaults.standard.set(state.lastSyncedAt, forKey: "lastSyncedAt")
         } else if reason == "timeout" {
             state.lastSyncError = "Sync interrupted — the strap went quiet. It will retry on the next sync."
@@ -584,9 +594,13 @@ public final class BLEManager: NSObject, ObservableObject {
         checkStrapLiveness()         // safety-net: strap ahead of us AND our frontier frozen ⇒ stuck?
     }
 
-    /// Undecodable record frames archived this offload session (#77/#91); drives the honest
+    /// Undecodable record frames ARCHIVED this offload session (#77/#91); drives the honest
     /// sync status above. Reset at session start.
     private var rejectedFramesThisSession = 0
+
+    /// Rejected frames the full archive could NOT preserve this session (cap reached). Kept
+    /// separate so the status never claims "saved" for bytes that were not.
+    private var rejectedFramesUnarchived = 0
 
     /// Archive file for HISTORICAL_DATA record frames that failed decode, written BEFORE the
     /// trim ack deletes the strap's copy — the user's only remaining copy of an unmapped
@@ -609,25 +623,31 @@ public final class BLEManager: NSObject, ObservableObject {
             let url = dir.appendingPathComponent(BLEManager.rejectedArchiveFile)
             let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
             let existingSize = (attrs?[.size] as? Int) ?? 0
-            if existingSize < BLEManager.rejectedArchiveMaxBytes {
-                var lines = ""
-                let now = Int(Date().timeIntervalSince1970 * 1000)
-                for f in frames {
-                    let hex = f.map { String(format: "%02x", $0) }.joined()
-                    lines += "{\"captured_at_ms\":\(now),\"session_id\":\"rejected-trim-\(trim)\","
-                        + "\"characteristic\":\"backfill-rejected\",\"type_name\":\"HISTORICAL_DATA\","
-                        + "\"crc_ok\":null,\"offload\":true,\"size\":\(f.count),\"parsed\":{},\"hex\":\"\(hex)\"}\n"
-                }
-                let data = Data(lines.utf8)
-                if FileManager.default.fileExists(atPath: url.path) {
-                    let handle = try FileHandle(forWritingTo: url)
-                    defer { try? handle.close() }
-                    try handle.seekToEnd()
-                    try handle.write(contentsOf: data)
-                    try handle.synchronize()   // durable BEFORE the ack — the point of the archive
-                } else {
-                    try data.write(to: url, options: .atomic)
-                }
+            if existingSize >= BLEManager.rejectedArchiveMaxBytes {
+                // Cap reached: succeed WITHOUT writing (wedging the offload over a full archive
+                // would be worse; ample sample bytes exist by now), counted separately so the
+                // sync status never claims "saved" for bytes that were not.
+                rejectedFramesUnarchived += frames.count
+                log("Backfill: rejected-frame archive is FULL — \(frames.count) frame(s) NOT preserved (acking anyway so the offload can finish)")
+                return true
+            }
+            var lines = ""
+            let now = Int(Date().timeIntervalSince1970 * 1000)
+            for f in frames {
+                let hex = f.map { String(format: "%02x", $0) }.joined()
+                lines += "{\"captured_at_ms\":\(now),\"session_id\":\"rejected-trim-\(trim)\","
+                    + "\"characteristic\":\"backfill-rejected\",\"type_name\":\"HISTORICAL_DATA\","
+                    + "\"crc_ok\":null,\"offload\":true,\"size\":\(f.count),\"parsed\":{},\"hex\":\"\(hex)\"}\n"
+            }
+            let data = Data(lines.utf8)
+            if FileManager.default.fileExists(atPath: url.path) {
+                let handle = try FileHandle(forWritingTo: url)
+                defer { try? handle.close() }
+                try handle.seekToEnd()
+                try handle.write(contentsOf: data)
+                try handle.synchronize()   // durable BEFORE the ack — the point of the archive
+            } else {
+                try data.write(to: url, options: .atomic)
             }
             rejectedFramesThisSession += frames.count
             return true

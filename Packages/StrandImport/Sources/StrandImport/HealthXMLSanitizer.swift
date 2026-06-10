@@ -158,13 +158,15 @@ struct HealthXMLSanitizer {
             }
             if let q = quote {
                 if b == q {
-                    // Delimiter only when followed by an attribute terminator; otherwise the
-                    // quote is CONTENT (the libxml error-65 signature) → entity-escape it.
-                    let next: UInt8? = i + 1 < n ? line[i + 1] : nil
-                    let terminates = next == nil || next == 0x20 || next == 0x09
-                        || next == UInt8(ascii: ">") || next == UInt8(ascii: "/")
-                        || next == 0x0D || next == 0x0A
-                    if terminates {
+                    // Delimiter only when what FOLLOWS reads as the rest of a tag: the close
+                    // (`>`/`/>`/EOL) immediately or after whitespace, or whitespace followed by
+                    // another `name=` attribute. Otherwise the quote is CONTENT (the libxml
+                    // error-65 signature) → entity-escape it. The token lookahead disambiguates
+                    // `…="Joe's "smart" scale" value="…`: the quotes around `smart` and before
+                    // ` scale` are followed by content words WITHOUT `=`, the real closer by
+                    // ` value=` — lookahead-1 alone closed early on quote-then-space and
+                    // corrupted the rest of the line.
+                    if closesAttributeValue(line, afterQuoteAt: i) {
                         quote = nil
                         out.append(b)
                     } else {
@@ -191,7 +193,13 @@ struct HealthXMLSanitizer {
             }
             switch b {
             case UInt8(ascii: "<"):
-                inTag = true
+                // Quote-repair applies to ELEMENT tags only. Processing instructions and
+                // declarations (`<?xml …?>`, `<!--…-->`) pass through untracked — without this
+                // bypass the universal export prolog `encoding="UTF-8"?>` (closing quote
+                // followed by `?`, not an attribute terminator) was corrupted to
+                // `encoding="UTF-8&quot;?>`, killing EVERY import at line 1.
+                let next: UInt8? = i + 1 < n ? line[i + 1] : nil
+                inTag = next != UInt8(ascii: "?") && next != UInt8(ascii: "!")
                 out.append(b)
             case UInt8(ascii: ">"):
                 inTag = false
@@ -219,6 +227,39 @@ struct HealthXMLSanitizer {
         }
         if repaired { stats.repairedLines += 1 }
         return out
+    }
+
+    /// Does the quote at `i` (inside an attribute value) CLOSE the value? True when the bytes
+    /// after it read as the rest of a tag: end-of-line, `>`/`/` (immediately or after
+    /// whitespace), or whitespace followed by an attribute-name token and `=`. False means the
+    /// quote is content. A content quote followed by ` word=` is inherently ambiguous to any
+    /// local heuristic and reads as a closer — acceptable: that shape also defeated libxml.
+    private func closesAttributeValue(_ line: [UInt8], afterQuoteAt i: Int) -> Bool {
+        let n = line.count
+        var j = i + 1
+        if j >= n { return true }                              // EOL closes
+        let b = line[j]
+        if b == UInt8(ascii: ">") || b == UInt8(ascii: "/")
+            || b == 0x0D || b == 0x0A { return true }          // tag close / EOL
+        if b != 0x20, b != 0x09 { return false }               // content butts right up (error-65)
+        // Whitespace: skip it, then require `name=`, the tag close, or EOL.
+        while j < n, line[j] == 0x20 || line[j] == 0x09 { j += 1 }
+        if j >= n { return true }
+        let c = line[j]
+        if c == UInt8(ascii: ">") || c == UInt8(ascii: "/")
+            || c == 0x0D || c == 0x0A { return true }
+        // Attribute-name token: [A-Za-z_][A-Za-z0-9_.:-]* immediately followed by '='.
+        func isNameStart(_ x: UInt8) -> Bool {
+            (x >= 0x41 && x <= 0x5A) || (x >= 0x61 && x <= 0x7A) || x == UInt8(ascii: "_")
+        }
+        func isNameByte(_ x: UInt8) -> Bool {
+            isNameStart(x) || (x >= 0x30 && x <= 0x39) || x == UInt8(ascii: ".")
+                || x == UInt8(ascii: ":") || x == UInt8(ascii: "-")
+        }
+        guard isNameStart(c) else { return false }
+        var k = j + 1
+        while k < n, isNameByte(line[k]) { k += 1 }
+        return k < n && line[k] == UInt8(ascii: "=")
     }
 
     /// Handle a `&` at `i`: copy a valid entity/charref verbatim, neutralise an illegal

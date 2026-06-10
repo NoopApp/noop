@@ -393,7 +393,10 @@ final class AICoachEngine: ObservableObject {
             case .gemini:
                 guard let name = row["name"] as? String, !name.isEmpty else { return nil }
                 let id = name.hasPrefix("models/") ? String(name.dropFirst("models/".count)) : name
-                return id.hasPrefix("gemini") ? id : nil
+                // Exclude the non-chat gemini-* ids (embeddings, AQA) from the picker.
+                guard id.hasPrefix("gemini"),
+                      !id.contains("embedding"), !id.contains("aqa") else { return nil }
+                return id
             }
         }
         guard !ids.isEmpty else {
@@ -602,10 +605,18 @@ final class AICoachEngine: ObservableObject {
         let body: [String: Any] = [
             "system_instruction": ["parts": [["text": systemPrompt]]],
             "contents": contents,
-            "generationConfig": ["temperature": 0.6, "maxOutputTokens": 900]
+            // Gemini 2.5 counts THINKING tokens against maxOutputTokens; 900 (the other
+            // providers' visible-reply cap) starves the thinking models into empty replies
+            // (finishReason MAX_TOKENS, no text parts). 4096 leaves room for both; the system
+            // prompt keeps visible replies short.
+            "generationConfig": ["temperature": 0.6, "maxOutputTokens": 4096]
         ]
 
-        let url = AIProvider.gemini.endpoint.appendingPathComponent("\(model):generateContent")
+        // Built via URL(string:) — appendingPathComponent percent-encodes the ":" in
+        // ":generateContent" on some Foundation versions, and the API rejects %3A.
+        guard let url = URL(string: "\(AIProvider.gemini.endpoint.absoluteString)/\(model):generateContent") else {
+            throw AICoachError.network("invalid model id")
+        }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue(key, forHTTPHeaderField: "x-goog-api-key")

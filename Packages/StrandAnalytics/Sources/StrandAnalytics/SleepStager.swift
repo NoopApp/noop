@@ -89,6 +89,12 @@ public enum SleepStager {
     /// awake reference (all-still window, a genuine all-night read) the old day-median ×1.05
     /// gate still applies, so quiet full nights keep detecting. APPROXIMATE, like all staging.
     public static let hrSleepDropFrac: Double = 0.05
+    /// The awake-drop gate applies only to spans SHORTER than this (minutes). The #90 false
+    /// positives are short sedentary stretches (an hour in a chair); a genuine multi-hour
+    /// night whose sleeping HR is ELEVATED near awake levels (fever, alcohol — exactly the
+    /// nights the illness watch needs) must not be suppressed, so long spans keep the
+    /// original not-elevated day-median gate.
+    public static let hrAwakeGateMaxMin: Int = 180
     /// Consecutive sleep epochs required to declare onset.
     public static let onsetPersistEpochs: Int = 3
 
@@ -275,9 +281,12 @@ public enum SleepStager {
         let seg = rowsBetween(hr, start: p.start, end: p.end) { $0.ts }
         if seg.count < hrRefineMinSamples { return true }   // too few samples: trust gravity
         let meanHR = Double(seg.reduce(0) { $0 + $1.bpm }) / Double(seg.count)
-        // With an awake reference: require a genuine drop below awake resting (the #90 gate).
-        if let awake { return meanHR <= awake * (1.0 - hrSleepDropFrac) }
-        // Fallback (no active runs in the window): the original not-elevated day-median gate.
+        // SHORT spans with an awake reference: require a genuine drop below awake resting (the
+        // #90 gate — a chair hour shows none). LONG spans keep the original not-elevated gate
+        // so a multi-hour night with elevated sleeping HR (fever, alcohol) still detects.
+        if let awake, (p.end - p.start) < hrAwakeGateMaxMin * 60 {
+            return meanHR <= awake * (1.0 - hrSleepDropFrac)
+        }
         if let baseline { return meanHR <= baseline * hrSleepBaselineMult }
         return true
     }

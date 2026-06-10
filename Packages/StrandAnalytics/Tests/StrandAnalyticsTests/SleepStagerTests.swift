@@ -116,6 +116,21 @@ final class SleepStagerTests: XCTestCase {
         XCTAssertEqual(sessions.count, 1)
     }
 
+    func testDetectSleepKeepsLongElevatedHRNight() {
+        // A genuine multi-hour night whose sleeping HR sits NEAR awake levels (fever/alcohol —
+        // exactly the nights the illness watch needs) must NOT be suppressed by the awake-drop
+        // gate: spans ≥ hrAwakeGateMaxMin keep the original not-elevated day-median gate.
+        let start = 7_000_000
+        let dayDur = 4 * 60 * 60
+        let nightDur = 7 * 60 * 60
+        let dayGrav = activeGravity(start: start, durationS: dayDur)
+        let dayHR = hrStream(start: start, durationS: dayDur, bpm: 70)
+        let nightGrav = stillGravity(start: start + dayDur, durationS: nightDur)
+        let nightHR = hrStream(start: start + dayDur, durationS: nightDur, bpm: 68)
+        let sessions = SleepStager.detectSleep(hr: dayHR + nightHR, gravity: dayGrav + nightGrav)
+        XCTAssertEqual(sessions.count, 1)
+    }
+
     // MARK: - Staging output integrity
 
     func testStagesTileSessionExactly() {

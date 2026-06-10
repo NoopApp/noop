@@ -88,6 +88,13 @@ object SleepStager {
      *  gate still applies, so quiet full nights keep detecting. APPROXIMATE, like all staging. */
     const val hrSleepDropFrac: Double = 0.05
 
+    /** The awake-drop gate applies only to spans SHORTER than this (minutes). The #90 false
+     *  positives are short sedentary stretches (an hour in a chair); a genuine multi-hour
+     *  night whose sleeping HR is ELEVATED near awake levels (fever, alcohol — exactly the
+     *  nights the illness watch needs) must not be suppressed, so long spans keep the
+     *  original not-elevated day-median gate. */
+    const val hrAwakeGateMaxMin: Int = 180
+
     /** Consecutive sleep epochs required to declare onset. */
     const val onsetPersistEpochs: Int = 3
 
@@ -299,9 +306,12 @@ object SleepStager {
         val seg = rowsBetween(hr, p.start, p.end) { it.ts }
         if (seg.size < hrRefineMinSamples) return true   // too few samples: trust gravity
         val meanHR = seg.sumOf { it.bpm }.toDouble() / seg.size.toDouble()
-        // With an awake reference: require a genuine drop below awake resting (the #90 gate).
-        if (awake != null) return meanHR <= awake * (1.0 - hrSleepDropFrac)
-        // Fallback (no active runs in the window): the original not-elevated day-median gate.
+        // SHORT spans with an awake reference: require a genuine drop below awake resting (the
+        // #90 gate — a chair hour shows none). LONG spans keep the original not-elevated gate
+        // so a multi-hour night with elevated sleeping HR (fever, alcohol) still detects.
+        if (awake != null && (p.end - p.start) < hrAwakeGateMaxMin * 60L) {
+            return meanHR <= awake * (1.0 - hrSleepDropFrac)
+        }
         if (baseline != null) return meanHR <= baseline * hrSleepBaselineMult
         return true
     }

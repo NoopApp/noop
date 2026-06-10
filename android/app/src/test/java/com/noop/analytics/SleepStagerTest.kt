@@ -109,6 +109,21 @@ class SleepStagerTest {
     }
 
     @Test
+    fun detectSleep_keepsLongElevatedHrNight() {
+        // A genuine multi-hour night whose sleeping HR sits NEAR awake levels (fever/alcohol —
+        // exactly the nights the illness watch needs) must NOT be suppressed by the awake-drop
+        // gate: spans >= hrAwakeGateMaxMin keep the original not-elevated day-median gate.
+        val start = 7_000_000L
+        val dayDur = 4 * 60 * 60
+        val nightDur = 7 * 60 * 60
+        val sessions = SleepStager.detectSleep(
+            hr = hrStream(start, dayDur, 70) + hrStream(start + dayDur, nightDur, 68),
+            gravity = activeGravity(start, dayDur) + stillGravity(start + dayDur, nightDur),
+        )
+        assertEquals(1, sessions.size)
+    }
+
+    @Test
     fun awakeHR_medianOverActiveRunsOnly() {
         // The reference comes from HR inside "active" periods only, and is null when an
         // all-still window has no active runs.

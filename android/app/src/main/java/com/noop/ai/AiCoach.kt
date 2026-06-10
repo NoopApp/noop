@@ -126,7 +126,9 @@ class AiCoach(private val repo: WhoopRepository) {
                 val keep = when (provider) {
                     AiProvider.OPENAI -> id.startsWith("gpt") || id.startsWith("o")
                     AiProvider.ANTHROPIC -> true
-                    AiProvider.GEMINI -> id.startsWith("gemini")
+                    // Exclude the non-chat gemini-* ids (embeddings, AQA) from the picker.
+                    AiProvider.GEMINI -> id.startsWith("gemini") &&
+                        !id.contains("embedding") && !id.contains("aqa")
                 }
                 if (keep) ids.add(id)
             }
@@ -338,7 +340,11 @@ class AiCoach(private val repo: WhoopRepository) {
             .put("contents", contents)
             .put(
                 "generationConfig",
-                JSONObject().put("temperature", 0.6).put("maxOutputTokens", 900),
+                // Gemini 2.5 counts THINKING tokens against maxOutputTokens; 900 (the other
+                // providers' visible-reply cap) starves the thinking models into empty replies
+                // (finishReason MAX_TOKENS, no text parts). 4096 leaves room for both; the
+                // system prompt keeps visible replies short.
+                JSONObject().put("temperature", 0.6).put("maxOutputTokens", 4096),
             )
             .toString()
 
