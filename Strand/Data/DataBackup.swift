@@ -91,9 +91,13 @@ enum DataBackup {
             return .failure("Export failed: \(error.localizedDescription)")
         }
         #else
-        // iOS: stage a copy in a temp dir, then hand it to the system document picker so the user
-        // can save it into Files / iCloud Drive. (Sidecars aren't carried — the checkpoint above
-        // has almost always folded the WAL into the single file by this point.)
+        // iOS: DocumentPicker.export only carries a single file, so we cannot fall back to copying
+        // the -wal/-shm sidecars the way macOS does. If the checkpoint above didn't fold the WAL
+        // into the main file, the staged copy would silently omit everything written since the last
+        // automatic checkpoint. Fail loudly instead of producing a partial backup.
+        guard checkpointed else {
+            return .failure("Couldn't safely export right now — recent changes are still in the database's write-ahead log. Close any in-flight sync, then try again.")
+        }
         let fm = FileManager.default
         let staged = fm.temporaryDirectory.appendingPathComponent(defaultBackupName())
         do {
