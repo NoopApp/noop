@@ -1,7 +1,73 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "" : {},
+    "" : {
+
+    },
+    "—" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "—"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "—"
+          }
+        }
+      }
+    },
+    "·" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "·"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "·"
+          }
+        }
+      }
+    },
+    "· %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "· %@"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "· %@"
+          }
+        }
+      }
+    },
+    "/ %lld" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "/ %lld"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "/ %lld"
+          }
+        }
+      }
+    },
     "% Max" : {
       "localizations" : {
         "de" : {
@@ -34,18 +100,50 @@
         }
       }
     },
-    "%@ %@" : {
+    "%@ – %@" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ %@"
+            "value" : "%@ – %@"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ %@"
+            "value" : "%@ – %@"
+          }
+        }
+      }
+    },
+    "%@ · %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · %@"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · %@"
+          }
+        }
+      }
+    },
+    "%@ · n = %lld" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · n = %lld"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · n = %lld"
           }
         }
       }
@@ -62,6 +160,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ / %@"
+          }
+        }
+      }
+    },
+    "%@ %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ %@"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ %@"
+          }
+        }
+      }
+    },
+    "%@ ↔ %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ ↔ %@"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ ↔ %@"
           }
         }
       }
@@ -110,86 +240,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ wrist alerts"
-          }
-        }
-      }
-    },
-    "%@ · %@" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ · %@"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ · %@"
-          }
-        }
-      }
-    },
-    "%@ · n = %lld" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ · n = %lld"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ · n = %lld"
-          }
-        }
-      }
-    },
-    "%@ – %@" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ – %@"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ – %@"
-          }
-        }
-      }
-    },
-    "%@ ↔ %@" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ ↔ %@"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ ↔ %@"
-          }
-        }
-      }
-    },
-    "%@%@" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@%@"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@%@"
           }
         }
       }
@@ -254,6 +304,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@: %@ last night%@"
+          }
+        }
+      }
+    },
+    "%@%@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@%@"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@%@"
           }
         }
       }
@@ -376,16 +442,16 @@
     },
     "%lld of %lld nights" : {
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld of %lld nights"
-          }
-        },
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld von %lld Nächten"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld of %lld nights"
           }
         }
       }
@@ -422,18 +488,38 @@
         }
       }
     },
-    "/ %lld" : {
+    "%lld%%" : {
+      "comment" : "A percentage of time spent in a specific heart rate zone.",
+      "isCommentAutoGenerated" : true
+    },
+    "•" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "/ %lld"
+            "value" : "•"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "/ %lld"
+            "value" : "•"
+          }
+        }
+      }
+    },
+    "✓" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "✓"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "✓"
           }
         }
       }
@@ -466,38 +552,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "A standalone companion for your WHOOP. Everything stays on this device — your history, your live stream, your numbers. Nothing is uploaded. NOOP is an independent, experimental project, not the WHOOP app."
-          }
-        }
-      }
-    },
-    "ALL YOUR DATA · NONE OF THE CLOUD" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ALL DEINE DATEN · NICHTS IN DER CLOUD"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ALL YOUR DATA · NONE OF THE CLOUD"
-          }
-        }
-      }
-    },
-    "API key" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "API-Schlüssel"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "API key"
           }
         }
       }
@@ -678,6 +732,38 @@
         }
       }
     },
+    "ALL YOUR DATA · NONE OF THE CLOUD" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ALL DEINE DATEN · NICHTS IN DER CLOUD"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ALL YOUR DATA · NONE OF THE CLOUD"
+          }
+        }
+      }
+    },
+    "all your data, none of the cloud" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "all deine Daten, nichts in der Cloud"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "all your data, none of the cloud"
+          }
+        }
+      }
+    },
     "Any amount helps. Thank you — genuinely." : {
       "localizations" : {
         "de" : {
@@ -690,6 +776,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Any amount helps. Thank you — genuinely."
+          }
+        }
+      }
+    },
+    "API key" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "API-Schlüssel"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "API key"
           }
         }
       }
@@ -730,22 +832,6 @@
         }
       }
     },
-    "Ask Coach about your data…" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Frage den Coach zu deinen Daten…"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ask Coach about your data…"
-          }
-        }
-      }
-    },
     "Ask about your recovery, strain, sleep and workouts — grounded in your own numbers." : {
       "localizations" : {
         "de" : {
@@ -758,6 +844,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ask about your recovery, strain, sleep and workouts — grounded in your own numbers."
+          }
+        }
+      }
+    },
+    "Ask Coach about your data…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Frage den Coach zu deinen Daten…"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ask Coach about your data…"
           }
         }
       }
@@ -954,38 +1056,6 @@
         }
       }
     },
-    "BMI" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "BMI"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "BMI"
-          }
-        }
-      }
-    },
-    "BPM" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "BPM"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "BPM"
-          }
-        }
-      }
-    },
     "Back" : {
       "localizations" : {
         "de" : {
@@ -1036,16 +1106,16 @@
     },
     "Battery %lld%% · Charging" : {
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Battery %lld%% · Charging"
-          }
-        },
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Akku %lld%% · Lädt"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Battery %lld%% · Charging"
           }
         }
       }
@@ -1070,6 +1140,22 @@
         }
       }
     },
+    "Blood oxygen" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Blutsauerstoff"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Blood oxygen"
+          }
+        }
+      }
+    },
     "Blood Oxygen" : {
       "localizations" : {
         "de" : {
@@ -1086,18 +1172,18 @@
         }
       }
     },
-    "Blood oxygen" : {
+    "BMI" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Blutsauerstoff"
+            "value" : "BMI"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Blood oxygen"
+            "value" : "BMI"
           }
         }
       }
@@ -1122,22 +1208,6 @@
         }
       }
     },
-    "Body Fat" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Körperfett"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Body Fat"
-          }
-        }
-      }
-    },
     "Body fat" : {
       "localizations" : {
         "de" : {
@@ -1154,6 +1224,22 @@
         }
       }
     },
+    "Body Fat" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Körperfett"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Body Fat"
+          }
+        }
+      }
+    },
     "Bond your strap on the Live screen to feel the transitions hands-free." : {
       "localizations" : {
         "de" : {
@@ -1166,6 +1252,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bond your strap on the Live screen to feel the transitions hands-free."
+          }
+        }
+      }
+    },
+    "bpm" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "bpm"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "bpm"
+          }
+        }
+      }
+    },
+    "BPM" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BPM"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BPM"
           }
         }
       }
@@ -1218,10 +1336,6 @@
         }
       }
     },
-    "Buzz Strap" : {
-      "comment" : "The title of the \"Buzz Strap\" intent.",
-      "isCommentAutoGenerated" : true
-    },
     "Buzz cues on" : {
       "localizations" : {
         "de" : {
@@ -1253,6 +1367,10 @@
           }
         }
       }
+    },
+    "Buzz Strap" : {
+      "comment" : "The title of the \"Buzz Strap\" intent.",
+      "isCommentAutoGenerated" : true
     },
     "Buzz your strap when these apps notify you. Everything runs on this Mac." : {
       "localizations" : {
@@ -1320,16 +1438,16 @@
     },
     "Calibrating" : {
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Calibrating"
-          }
-        },
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kalibrierung"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Calibrating"
           }
         }
       }
@@ -1398,24 +1516,14 @@
         }
       }
     },
-    "Check for updates" : {},
-    "Checking…" : {},
-    "Checks GitHub for the latest version when you tap — nothing else is sent." : {},
-    "Choose export.zip…" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "export.zip wählen…"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Choose export.zip…"
-          }
-        }
-      }
+    "Check for updates" : {
+
+    },
+    "Checking…" : {
+
+    },
+    "Checks GitHub for the latest version when you tap — nothing else is sent." : {
+
     },
     "Choose export…" : {
       "localizations" : {
@@ -1429,6 +1537,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Choose export…"
+          }
+        }
+      }
+    },
+    "Choose export.zip…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "export.zip wählen…"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose export.zip…"
           }
         }
       }
@@ -1897,7 +2021,9 @@
         }
       }
     },
-    "Couldn't check. Try again." : {},
+    "Couldn't check. Try again." : {
+
+    },
     "Crunching your raw streams…" : {
       "localizations" : {
         "de" : {
@@ -1998,22 +2124,6 @@
         }
       }
     },
-    "Day Strain" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Tagesbelastung"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Day Strain"
-          }
-        }
-      }
-    },
     "Day strain" : {
       "localizations" : {
         "de" : {
@@ -2026,6 +2136,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Day strain"
+          }
+        }
+      }
+    },
+    "Day Strain" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tagesbelastung"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Day Strain"
           }
         }
       }
@@ -2126,22 +2252,8 @@
         }
       }
     },
-    "Download" : {},
-    "EXPLORATORY" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "EXPLORATIV"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "EXPLORATORY"
-          }
-        }
-      }
+    "Download" : {
+
     },
     "Effect size" : {
       "localizations" : {
@@ -2223,6 +2335,10 @@
         }
       }
     },
+    "End workout" : {
+      "comment" : "A button that ends a workout.",
+      "isCommentAutoGenerated" : true
+    },
     "Enter a model id" : {
       "localizations" : {
         "de" : {
@@ -2255,7 +2371,7 @@
         }
       }
     },
-    "Estimate only — a higher RMSSD while paced usually means your parasympathetic \"rest\" branch is engaging. It is not a clinical reading; trends over a session matter more than any single number.": {
+    "Estimate only — a higher RMSSD while paced usually means your parasympathetic \"rest\" branch is engaging. It is not a clinical reading; trends over a session matter more than any single number." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -2367,6 +2483,22 @@
         }
       }
     },
+    "EXPLORATORY" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EXPLORATIV"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EXPLORATORY"
+          }
+        }
+      }
+    },
     "Explore" : {
       "localizations" : {
         "de" : {
@@ -2448,21 +2580,21 @@
       }
     },
     "Find it in the sidebar under Data Sources." : {
+      "extractionState" : "stale",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Find it in the sidebar under Data Sources."
-          }
-        },
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Du findest es in der Seitenleiste unter Datenquellen."
           }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Find it in the sidebar under Data Sources."
+          }
         }
-      },
-      "extractionState" : "stale"
+      }
     },
     "Fire a single haptic pulse on the strap (requires a bonded connection)" : {
       "localizations" : {
@@ -2577,17 +2709,18 @@
       }
     },
     "Get the latest release" : {
+      "extractionState" : "stale",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Get the latest release"
-          }
-        },
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Neueste Version laden"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Get the latest release"
           }
         }
       }
@@ -2604,54 +2737,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Got it"
-          }
-        }
-      }
-    },
-    "HEART RATE" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "HERZFREQUENZ"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "HEART RATE"
-          }
-        }
-      }
-    },
-    "HR Zones" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "HR Zones"
-          }
-        },
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "HF-Zonen"
-          }
-        }
-      }
-    },
-    "HRV" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "HRV"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "HRV"
           }
         }
       }
@@ -2752,6 +2837,22 @@
         }
       }
     },
+    "HEART RATE" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HERZFREQUENZ"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HEART RATE"
+          }
+        }
+      }
+    },
     "Heart rate %lld beats per minute" : {
       "localizations" : {
         "de" : {
@@ -2800,6 +2901,22 @@
         }
       }
     },
+    "high" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "hoch"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "high"
+          }
+        }
+      }
+    },
     "History" : {
       "localizations" : {
         "de" : {
@@ -2818,16 +2935,16 @@
     },
     "History synced %@" : {
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "History synced %@"
-          }
-        },
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Verlauf synchronisiert %@"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "History synced %@"
           }
         }
       }
@@ -2912,6 +3029,38 @@
         }
       }
     },
+    "HR Zones" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HF-Zonen"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HR Zones"
+          }
+        }
+      }
+    },
+    "HRV" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HRV"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HRV"
+          }
+        }
+      }
+    },
     "I keep this project anonymous, so crypto is the only way to chip in — no Patreon, no PayPal, no name attached. Quick, global, and private for both of us." : {
       "localizations" : {
         "de" : {
@@ -2944,6 +3093,22 @@
         }
       }
     },
+    "Import…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Importieren…"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import…"
+          }
+        }
+      }
+    },
     "Importing overwrites everything currently on this Mac. Your old data is kept in a side file just in case. NOOP needs a relaunch for an import to take effect." : {
       "localizations" : {
         "de" : {
@@ -2972,22 +3137,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Importing…"
-          }
-        }
-      }
-    },
-    "Import…" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Importieren…"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Import…"
           }
         }
       }
@@ -3104,22 +3253,6 @@
         }
       }
     },
-    "Last Workouts" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Letzte Workouts"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Last Workouts"
-          }
-        }
-      }
-    },
     "Last night" : {
       "localizations" : {
         "de" : {
@@ -3148,6 +3281,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Last night, read in two seconds."
+          }
+        }
+      }
+    },
+    "Last Workouts" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Letzte Workouts"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last Workouts"
           }
         }
       }
@@ -3184,22 +3333,6 @@
         }
       }
     },
-    "Lean Mass" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Magermasse"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Lean Mass"
-          }
-        }
-      }
-    },
     "Lean body mass" : {
       "localizations" : {
         "de" : {
@@ -3216,18 +3349,34 @@
         }
       }
     },
-    "Learning your baseline — %lld of %lld nights." : {
+    "Lean Mass" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Magermasse"
+          }
+        },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Learning your baseline — %lld of %lld nights."
+            "value" : "Lean Mass"
           }
-        },
+        }
+      }
+    },
+    "Learning your baseline — %lld of %lld nights." : {
+      "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Deine Baseline wird gelernt — %lld von %lld Nächten."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Learning your baseline — %lld of %lld nights."
           }
         }
       }
@@ -3265,6 +3414,7 @@
       }
     },
     "Light-sleep window" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -3296,10 +3446,6 @@
         }
       }
     },
-    "Live HR works — free the strap to unlock buzz, alarms & sync" : {
-      "comment" : "A hint to pair the Live HR strap.",
-      "isCommentAutoGenerated" : true
-    },
     "Live heart rate already works on a WHOOP 5/MG strap. These probes go further and try to coax more out of it. They are guesses, off by default, and only ever touch a 5/MG strap — WHOOP 4.0 is never affected." : {
       "localizations" : {
         "de" : {
@@ -3315,6 +3461,10 @@
           }
         }
       }
+    },
+    "Live HR works — free the strap to unlock buzz, alarms & sync" : {
+      "comment" : "A hint to pair the Live HR strap.",
+      "isCommentAutoGenerated" : true
     },
     "Live now. Your scores are building." : {
       "localizations" : {
@@ -3344,6 +3494,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Live vitals, streamed from the strap."
+          }
+        }
+      }
+    },
+    "load %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last %@"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "load %@"
           }
         }
       }
@@ -3408,6 +3574,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Log"
+          }
+        }
+      }
+    },
+    "low" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "niedrig"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "low"
           }
         }
       }
@@ -3528,22 +3710,6 @@
         }
       }
     },
-    "Max HR" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Max. HF"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Max HR"
-          }
-        }
-      }
-    },
     "Max heart rate" : {
       "localizations" : {
         "de" : {
@@ -3588,6 +3754,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Max heart rate override, %@"
+          }
+        }
+      }
+    },
+    "Max HR" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Max. HF"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Max HR"
           }
         }
       }
@@ -3652,6 +3834,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Metrics"
+          }
+        }
+      }
+    },
+    "mid" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "mittel"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "mid"
           }
         }
       }
@@ -3744,146 +3942,18 @@
         }
       }
     },
-    "NO DATA" : {
+    "n.s." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "KEINE DATEN"
+            "value" : "n.s."
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "NO DATA"
-          }
-        }
-      }
-    },
-    "NOOP" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "NOOP"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "NOOP"
-          }
-        }
-      }
-    },
-    "NOOP %@" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "NOOP %@"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "NOOP %@"
-          }
-        }
-      }
-    },
-    "NOOP is free and always will be, nothing is locked. It cost real money and a lot of unpaid hours to build, and there's a Windows app, an Android app and an iOS app I want to ship next. If it's useful to you and you want to help with the development and testing costs, even a few quid in crypto genuinely keeps it moving, and honestly it keeps me motivated to keep building." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "NOOP ist kostenlos und bleibt es, nichts ist gesperrt. Es hat echtes Geld und viele unbezahlte Stunden gekostet, und es gibt eine Windows-App, eine Android-App und eine iOS-App, die ich als Nächstes veröffentlichen möchte. Wenn es dir nützt und du bei den Entwicklungs- und Testkosten helfen möchtest, hält es schon mit ein paar Euro in Krypto wirklich am Laufen — und ehrlich gesagt motiviert es mich, weiterzubauen."
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "NOOP is free and always will be, nothing is locked. It cost real money and a lot of unpaid hours to build, and there's a Windows app, an Android app and an iOS app I want to ship next. If it's useful to you and you want to help with the development and testing costs, even a few quid in crypto genuinely keeps it moving, and honestly it keeps me motivated to keep building."
-          }
-        }
-      }
-    },
-    "NOOP is not a medical device. It is for informational and personal-insight purposes only and is not intended to diagnose, treat, cure or prevent any condition. Talk to a clinician for medical advice." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "NOOP ist kein medizinisches Gerät. Es dient nur zu Informations- und persönlichen Erkenntniszwecken und ist nicht dazu bestimmt, Erkrankungen zu diagnostizieren, zu behandeln, zu heilen oder zu verhindern. Wende dich für medizinischen Rat an eine Fachperson."
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "NOOP is not a medical device. It is for informational and personal-insight purposes only and is not intended to diagnose, treat, cure or prevent any condition. Talk to a clinician for medical advice."
-          }
-        }
-      }
-    },
-    "NOOP pairs directly with your WHOOP over Bluetooth — no WHOOP app, no cloud." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "NOOP koppelt sich direkt über Bluetooth mit deinem WHOOP — keine WHOOP-App, keine Cloud."
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "NOOP pairs directly with your WHOOP over Bluetooth — no WHOOP app, no cloud."
-          }
-        }
-      }
-    },
-    "NOOP scores your recovery, strain and sleep itself — on-device, no cloud." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "NOOP berechnet deine Erholung, Belastung und deinen Schlaf selbst — auf dem Gerät, ohne Cloud."
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "NOOP scores your recovery, strain and sleep itself — on-device, no cloud."
-          }
-        }
-      }
-    },
-    "NOOP — all your data, none of the cloud." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "NOOP — all deine Daten, nichts in der Cloud."
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "NOOP — all your data, none of the cloud."
-          }
-        }
-      }
-    },
-    "NOOP-computed" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Von NOOP berechnet"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "NOOP-computed"
+            "value" : "n.s."
           }
         }
       }
@@ -3948,6 +4018,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "No data"
+          }
+        }
+      }
+    },
+    "NO DATA" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "KEINE DATEN"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "NO DATA"
           }
         }
       }
@@ -4044,6 +4130,134 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Non-binary"
+          }
+        }
+      }
+    },
+    "NOOP" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "NOOP"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "NOOP"
+          }
+        }
+      }
+    },
+    "NOOP — all your data, none of the cloud." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "NOOP — all deine Daten, nichts in der Cloud."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "NOOP — all your data, none of the cloud."
+          }
+        }
+      }
+    },
+    "NOOP %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "NOOP %@"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "NOOP %@"
+          }
+        }
+      }
+    },
+    "NOOP is free and always will be, nothing is locked. It cost real money and a lot of unpaid hours to build, and there's a Windows app, an Android app and an iOS app I want to ship next. If it's useful to you and you want to help with the development and testing costs, even a few quid in crypto genuinely keeps it moving, and honestly it keeps me motivated to keep building." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "NOOP ist kostenlos und bleibt es, nichts ist gesperrt. Es hat echtes Geld und viele unbezahlte Stunden gekostet, und es gibt eine Windows-App, eine Android-App und eine iOS-App, die ich als Nächstes veröffentlichen möchte. Wenn es dir nützt und du bei den Entwicklungs- und Testkosten helfen möchtest, hält es schon mit ein paar Euro in Krypto wirklich am Laufen — und ehrlich gesagt motiviert es mich, weiterzubauen."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "NOOP is free and always will be, nothing is locked. It cost real money and a lot of unpaid hours to build, and there's a Windows app, an Android app and an iOS app I want to ship next. If it's useful to you and you want to help with the development and testing costs, even a few quid in crypto genuinely keeps it moving, and honestly it keeps me motivated to keep building."
+          }
+        }
+      }
+    },
+    "NOOP is not a medical device. It is for informational and personal-insight purposes only and is not intended to diagnose, treat, cure or prevent any condition. Talk to a clinician for medical advice." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "NOOP ist kein medizinisches Gerät. Es dient nur zu Informations- und persönlichen Erkenntniszwecken und ist nicht dazu bestimmt, Erkrankungen zu diagnostizieren, zu behandeln, zu heilen oder zu verhindern. Wende dich für medizinischen Rat an eine Fachperson."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "NOOP is not a medical device. It is for informational and personal-insight purposes only and is not intended to diagnose, treat, cure or prevent any condition. Talk to a clinician for medical advice."
+          }
+        }
+      }
+    },
+    "NOOP pairs directly with your WHOOP over Bluetooth — no WHOOP app, no cloud." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "NOOP koppelt sich direkt über Bluetooth mit deinem WHOOP — keine WHOOP-App, keine Cloud."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "NOOP pairs directly with your WHOOP over Bluetooth — no WHOOP app, no cloud."
+          }
+        }
+      }
+    },
+    "NOOP scores your recovery, strain and sleep itself — on-device, no cloud." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "NOOP berechnet deine Erholung, Belastung und deinen Schlaf selbst — auf dem Gerät, ohne Cloud."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "NOOP scores your recovery, strain and sleep itself — on-device, no cloud."
+          }
+        }
+      }
+    },
+    "NOOP-computed" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Von NOOP berechnet"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "NOOP-computed"
           }
         }
       }
@@ -4178,16 +4392,16 @@
     },
     "Not synced yet" : {
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Not synced yet"
-          }
-        },
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Noch nicht synchronisiert"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not synced yet"
           }
         }
       }
@@ -4256,18 +4470,18 @@
         }
       }
     },
-    "OK" : {
+    "of 3 · %@" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "OK"
+            "value" : "von 3 · %@"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "OK"
+            "value" : "of 3 · %@"
           }
         }
       }
@@ -4304,18 +4518,18 @@
         }
       }
     },
-    "On a 5/MG connection NOOP will send a puffin realtime-stream request after the handshake, and log what comes back. If you have a 5/MG strap, turning this on and sharing your strap log helps map the protocol. No effect on WHOOP 4.0." : {
+    "OK" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Bei einer 5/MG-Verbindung sendet NOOP nach dem Handshake eine Puffin-Echtzeitstream-Anfrage und protokolliert die Antwort. Wenn du einen 5/MG-Strap hast, hilft das Aktivieren und Teilen deines Strap-Protokolls, das Protokoll zu kartieren. Keine Auswirkung auf WHOOP 4.0."
+            "value" : "OK"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "On a 5/MG connection NOOP will send a puffin realtime-stream request after the handshake, and log what comes back. If you have a 5/MG strap, turning this on and sharing your strap log helps map the protocol. No effect on WHOOP 4.0."
+            "value" : "OK"
           }
         }
       }
@@ -4336,6 +4550,26 @@
         }
       }
     },
+    "On a 5/MG connection NOOP will send a puffin realtime-stream request after the handshake, and log what comes back. If you have a 5/MG strap, turning this on and sharing your strap log helps map the protocol. No effect on WHOOP 4.0." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bei einer 5/MG-Verbindung sendet NOOP nach dem Handshake eine Puffin-Echtzeitstream-Anfrage und protokolliert die Antwort. Wenn du einen 5/MG-Strap hast, hilft das Aktivieren und Teilen deines Strap-Protokolls, das Protokoll zu kartieren. Keine Auswirkung auf WHOOP 4.0."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On a 5/MG connection NOOP will send a puffin realtime-stream request after the handshake, and log what comes back. If you have a 5/MG strap, turning this on and sharing your strap log helps map the protocol. No effect on WHOOP 4.0."
+          }
+        }
+      }
+    },
+    "On WHOOP 5/MG this is experimental — arming is confirmed, but a strap-driven wake-up hasn't been verified yet, so don't rely on it as your only alarm there. WHOOP 4 is the proven path." : {
+      "comment" : "A description of the smart alarm feature.",
+      "isCommentAutoGenerated" : true
+    },
     "Open-source BLE reverse-engineering work. Thank you." : {
       "localizations" : {
         "de" : {
@@ -4353,17 +4587,18 @@
       }
     },
     "Opens the GitHub releases page in your browser. NOOP itself makes no network connections — the macOS sandbox has no network entitlement." : {
+      "extractionState" : "stale",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Opens the GitHub releases page in your browser. NOOP itself makes no network connections — the macOS sandbox has no network entitlement."
-          }
-        },
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Öffnet die GitHub-Releases-Seite in deinem Browser. NOOP selbst stellt keine Netzwerkverbindungen her — die macOS-Sandbox hat keine Netzwerk-Berechtigung."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Opens the GitHub releases page in your browser. NOOP itself makes no network connections — the macOS sandbox has no network entitlement."
           }
         }
       }
@@ -4428,6 +4663,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Overlay signals, draw conclusions."
+          }
+        }
+      }
+    },
+    "p < 0.05" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "p < 0,05"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "p < 0.05"
           }
         }
       }
@@ -4532,22 +4783,6 @@
         }
       }
     },
-    "Pearson r over the visible window · |r| ≥ 0.30, n ≥ 10" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Pearson r über den sichtbaren Bereich · |r| ≥ 0,30, n ≥ 10"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Pearson r over the visible window · |r| ≥ 0.30, n ≥ 10"
-          }
-        }
-      }
-    },
     "Pearson r · %@" : {
       "localizations" : {
         "de" : {
@@ -4560,6 +4795,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Pearson r · %@"
+          }
+        }
+      }
+    },
+    "Pearson r over the visible window · |r| ≥ 0.30, n ≥ 10" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pearson r über den sichtbaren Bereich · |r| ≥ 0,30, n ≥ 10"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pearson r over the visible window · |r| ≥ 0.30, n ≥ 10"
           }
         }
       }
@@ -4692,34 +4943,18 @@
         }
       }
     },
-    "REM" : {
+    "r = %@" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "REM"
+            "value" : "r = %@"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "REM"
-          }
-        }
-      }
-    },
-    "ROUND" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "RUNDE"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ROUND"
+            "value" : "r = %@"
           }
         }
       }
@@ -4920,6 +5155,10 @@
         }
       }
     },
+    "RECORDING WORKOUT" : {
+      "comment" : "A label displayed in a workout card.",
+      "isCommentAutoGenerated" : true
+    },
     "Recovery" : {
       "localizations" : {
         "de" : {
@@ -4980,6 +5219,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Refresh models from provider"
+          }
+        }
+      }
+    },
+    "REM" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "REM"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "REM"
           }
         }
       }
@@ -5112,22 +5367,6 @@
         }
       }
     },
-    "Resting HR" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ruhe-HF"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Resting HR"
-          }
-        }
-      }
-    },
     "Resting heart rate" : {
       "localizations" : {
         "de" : {
@@ -5140,6 +5379,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Resting heart rate"
+          }
+        }
+      }
+    },
+    "Resting HR" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ruhe-HF"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Resting HR"
           }
         }
       }
@@ -5176,6 +5431,22 @@
         }
       }
     },
+    "ROUND" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RUNDE"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ROUND"
+          }
+        }
+      }
+    },
     "Running" : {
       "localizations" : {
         "de" : {
@@ -5188,70 +5459,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Running"
-          }
-        }
-      }
-    },
-    "SECONDS" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "SEKUNDEN"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "SECONDS"
-          }
-        }
-      }
-    },
-    "SESSION DONE" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "SITZUNG FERTIG"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "SESSION DONE"
-          }
-        }
-      }
-    },
-    "SIGNIFICANT" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "SIGNIFIKANT"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "SIGNIFICANT"
-          }
-        }
-      }
-    },
-    "STRAP LOG" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "STRAP-PROTOKOLL"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "STRAP LOG"
           }
         }
       }
@@ -5272,22 +5479,6 @@
         }
       }
     },
-    "Saves every raw 5/MG frame (with a timestamp and the live heart rate) to a JSON file you can share to help map the biometric layout. This only records frames the strap already sent — it never writes to your strap — so it is safe to leave on. Export the file and attach it to a protocol-mapping issue." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Speichert jeden rohen 5/MG-Frame (mit Zeitstempel und Live-Herzfrequenz) in einer JSON-Datei, die du teilen kannst, um das biometrische Layout zu kartieren. Dies zeichnet nur Frames auf, die der Strap bereits gesendet hat — es schreibt nie auf deinen Strap — daher ist es sicher, es aktiviert zu lassen. Exportiere die Datei und hänge sie an ein Protokoll-Mapping-Issue an."
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Saves every raw 5/MG frame (with a timestamp and the live heart rate) to a JSON file you can share to help map the biometric layout. This only records frames the strap already sent — it never writes to your strap — so it is safe to leave on. Export the file and attach it to a protocol-mapping issue."
-          }
-        }
-      }
-    },
     "Save…" : {
       "localizations" : {
         "de" : {
@@ -5304,22 +5495,38 @@
         }
       }
     },
-    "Scan" : {
+    "Saves every raw 5/MG frame (with a timestamp and the live heart rate) to a JSON file you can share to help map the biometric layout. This only records frames the strap already sent — it never writes to your strap — so it is safe to leave on. Export the file and attach it to a protocol-mapping issue." : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speichert jeden rohen 5/MG-Frame (mit Zeitstempel und Live-Herzfrequenz) in einer JSON-Datei, die du teilen kannst, um das biometrische Layout zu kartieren. Dies zeichnet nur Frames auf, die der Strap bereits gesendet hat — es schreibt nie auf deinen Strap — daher ist es sicher, es aktiviert zu lassen. Exportiere die Datei und hänge sie an ein Protokoll-Mapping-Issue an."
+          }
+        },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Scan"
+            "value" : "Saves every raw 5/MG frame (with a timestamp and the live heart rate) to a JSON file you can share to help map the biometric layout. This only records frames the strap already sent — it never writes to your strap — so it is safe to leave on. Export the file and attach it to a protocol-mapping issue."
           }
-        },
+        }
+      }
+    },
+    "Scan" : {
+      "extractionState" : "stale",
+      "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Suchen"
           }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scan"
+          }
         }
-      },
-      "extractionState" : "stale"
+      }
     },
     "Scan & Connect" : {
       "localizations" : {
@@ -5389,6 +5596,22 @@
         }
       }
     },
+    "SECONDS" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SEKUNDEN"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SECONDS"
+          }
+        }
+      }
+    },
     "Send" : {
       "localizations" : {
         "de" : {
@@ -5421,6 +5644,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Session"
+          }
+        }
+      }
+    },
+    "SESSION DONE" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SITZUNG FERTIG"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SESSION DONE"
           }
         }
       }
@@ -5475,16 +5714,16 @@
     },
     "Share of imported zone time, duration-weighted across sessions — approximate." : {
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Share of imported zone time, duration-weighted across sessions — approximate."
-          }
-        },
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Anteil der importierten Zonenzeit, zeitgewichtet über alle Einheiten — Näherungswert."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Share of imported zone time, duration-weighted across sessions — approximate."
           }
         }
       }
@@ -5521,6 +5760,22 @@
         }
       }
     },
+    "SIGNIFICANT" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SIGNIFIKANT"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SIGNIFICANT"
+          }
+        }
+      }
+    },
     "Silent haptic HIIT — the strap buzzes the transitions" : {
       "localizations" : {
         "de" : {
@@ -5538,21 +5793,21 @@
       }
     },
     "Skip for now" : {
+      "extractionState" : "stale",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Skip for now"
-          }
-        },
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Vorerst überspringen"
           }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skip for now"
+          }
         }
-      },
-      "extractionState" : "stale"
+      }
     },
     "Sleep" : {
       "localizations" : {
@@ -5730,6 +5985,10 @@
         }
       }
     },
+    "Start workout" : {
+      "comment" : "A button that starts a workout.",
+      "isCommentAutoGenerated" : true
+    },
     "State" : {
       "localizations" : {
         "de" : {
@@ -5810,6 +6069,22 @@
         }
       }
     },
+    "STRAP LOG" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "STRAP-PROTOKOLL"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "STRAP LOG"
+          }
+        }
+      }
+    },
     "Strap not connected" : {
       "localizations" : {
         "de" : {
@@ -5828,16 +6103,16 @@
     },
     "Strap sync" : {
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Strap sync"
-          }
-        },
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Strap-Sync"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Strap sync"
           }
         }
       }
@@ -5858,6 +6133,39 @@
         }
       }
     },
+    "Stress · %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stress · %@"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stress · %@"
+          }
+        }
+      }
+    },
+    "Stress · M" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stress · M"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stress · M"
+          }
+        }
+      }
+    },
     "Stress %@ of 3, %@" : {
       "localizations" : {
         "de" : {
@@ -5870,22 +6178,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Stress %@ of 3, %@"
-          }
-        }
-      }
-    },
-    "Stress Trend" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Stress-Trend"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Stress Trend"
           }
         }
       }
@@ -5922,35 +6214,18 @@
         }
       }
     },
-    "Stress · %@" : {
+    "Stress Trend" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Stress · %@"
+            "value" : "Stress-Trend"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Stress · %@"
-          }
-        }
-      }
-    },
-    "Stress · M" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Stress · M"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Stress · M"
+            "value" : "Stress Trend"
           }
         }
       }
@@ -6021,16 +6296,16 @@
     },
     "Syncing strap history…" : {
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Syncing strap history…"
-          }
-        },
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Strap-Verlauf wird synchronisiert…"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Syncing strap history…"
           }
         }
       }
@@ -6195,6 +6470,22 @@
         }
       }
     },
+    "to" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "bis"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "to"
+          }
+        }
+      }
+    },
     "Today" : {
       "localizations" : {
         "de" : {
@@ -6211,22 +6502,6 @@
         }
       }
     },
-    "Today's value is your recorded daily stress score (0–3)." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Der heutige Wert ist dein aufgezeichneter täglicher Stresswert (0–3)."
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Today's value is your recorded daily stress score (0–3)."
-          }
-        }
-      }
-    },
     "Today’s Synthesis" : {
       "localizations" : {
         "de" : {
@@ -6239,6 +6514,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Today’s Synthesis"
+          }
+        }
+      }
+    },
+    "Today's value is your recorded daily stress score (0–3)." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der heutige Wert ist dein aufgezeichneter täglicher Stresswert (0–3)."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Today's value is your recorded daily stress score (0–3)."
           }
         }
       }
@@ -6307,6 +6598,10 @@
         }
       }
     },
+    "Track a workout manually — records heart rate and strain until you end it." : {
+      "comment" : "A description of the workout button.",
+      "isCommentAutoGenerated" : true
+    },
     "Trend" : {
       "localizations" : {
         "de" : {
@@ -6355,22 +6650,6 @@
         }
       }
     },
-    "Try WHOOP 5/MG protocol probes" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "WHOOP 5/MG-Protokolltests ausprobieren"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Try WHOOP 5/MG protocol probes"
-          }
-        }
-      }
-    },
     "Try again" : {
       "localizations" : {
         "de" : {
@@ -6383,6 +6662,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Try again"
+          }
+        }
+      }
+    },
+    "Try WHOOP 5/MG protocol probes" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "WHOOP 5/MG-Protokolltests ausprobieren"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Try WHOOP 5/MG protocol probes"
           }
         }
       }
@@ -6419,23 +6714,25 @@
         }
       }
     },
-    "VO₂ Max" : {
+    "v%@" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "VO₂max"
+            "value" : "v%@"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "VO₂ Max"
+            "value" : "v%@"
           }
         }
       }
     },
-    "Version %@ is available" : {},
+    "Version %@ is available" : {
+
+    },
     "Visual only" : {
       "localizations" : {
         "de" : {
@@ -6468,34 +6765,18 @@
         }
       }
     },
-    "WHAT TO EXPECT" : {
+    "VO₂ Max" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "WAS DICH ERWARTET"
+            "value" : "VO₂max"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "WHAT TO EXPECT"
-          }
-        }
-      }
-    },
-    "WHOOP straps don't appear in macOS System Settings → Bluetooth. They advertise on a custom profile that only apps like NOOP can find — so there's nothing to pair there, and you shouldn't try." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "WHOOP-Straps erscheinen nicht in den macOS-Systemeinstellungen → Bluetooth. Sie senden über ein eigenes Profil, das nur Apps wie NOOP finden können — dort gibt es also nichts zu koppeln, und du solltest es nicht versuchen."
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "WHOOP straps don't appear in macOS System Settings → Bluetooth. They advertise on a custom profile that only apps like NOOP can find — so there's nothing to pair there, and you shouldn't try."
+            "value" : "VO₂ Max"
           }
         }
       }
@@ -6517,6 +6798,7 @@
       }
     },
     "Wake up to this many minutes early if the Mac stays awake & connected and a light phase is detected." : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -6592,6 +6874,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "What moves your %@"
+          }
+        }
+      }
+    },
+    "WHAT TO EXPECT" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "WAS DICH ERWARTET"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "WHAT TO EXPECT"
           }
         }
       }
@@ -6678,16 +6976,32 @@
     },
     "Whoop import" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Whoop-Import"
+          }
+        },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Whoop import"
           }
-        },
+        }
+      }
+    },
+    "WHOOP straps don't appear in macOS System Settings → Bluetooth. They advertise on a custom profile that only apps like NOOP can find — so there's nothing to pair there, and you shouldn't try." : {
+      "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Whoop-Import"
+            "value" : "WHOOP-Straps erscheinen nicht in den macOS-Systemeinstellungen → Bluetooth. Sie senden über ein eigenes Profil, das nur Apps wie NOOP finden können — dort gibt es also nichts zu koppeln, und du solltest es nicht versuchen."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "WHOOP straps don't appear in macOS System Settings → Bluetooth. They advertise on a custom profile that only apps like NOOP can find — so there's nothing to pair there, and you shouldn't try."
           }
         }
       }
@@ -6756,6 +7070,10 @@
         }
       }
     },
+    "Workout saved · %@" : {
+      "comment" : "A workout saved row. The text is a list of workout details.",
+      "isCommentAutoGenerated" : true
+    },
     "Workouts" : {
       "localizations" : {
         "de" : {
@@ -6820,7 +7138,9 @@
         }
       }
     },
-    "You're on the latest (%@)." : {},
+    "You're on the latest (%@)." : {
+
+    },
     "Your live heart rate is working from the strap, and recovery, strain and sleep build from it over your next few nights of wear, sharpening as it learns your baseline. Want your full history instantly? Import your WHOOP export in Data Sources and it backfills in about a minute." : {
       "localizations" : {
         "de" : {
@@ -6901,230 +7221,6 @@
         }
       }
     },
-    "all your data, none of the cloud" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "all deine Daten, nichts in der Cloud"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "all your data, none of the cloud"
-          }
-        }
-      }
-    },
-    "bpm" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "bpm"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "bpm"
-          }
-        }
-      }
-    },
-    "high" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "hoch"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "high"
-          }
-        }
-      }
-    },
-    "load %@" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Last %@"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "load %@"
-          }
-        }
-      }
-    },
-    "low" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "niedrig"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "low"
-          }
-        }
-      }
-    },
-    "mid" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "mittel"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "mid"
-          }
-        }
-      }
-    },
-    "n.s." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "n.s."
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "n.s."
-          }
-        }
-      }
-    },
-    "of 3 · %@" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "von 3 · %@"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "of 3 · %@"
-          }
-        }
-      }
-    },
-    "p < 0.05" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "p < 0,05"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "p < 0.05"
-          }
-        }
-      }
-    },
-    "r = %@" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "r = %@"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "r = %@"
-          }
-        }
-      }
-    },
-    "to" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "bis"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "to"
-          }
-        }
-      }
-    },
-    "v%@" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "v%@"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "v%@"
-          }
-        }
-      }
-    },
-    "·" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "·"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "·"
-          }
-        }
-      }
-    },
-    "· %@" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "· %@"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "· %@"
-          }
-        }
-      }
-    },
     "Δ vs prev" : {
       "localizations" : {
         "de" : {
@@ -7137,54 +7233,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Δ vs prev"
-          }
-        }
-      }
-    },
-    "—" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "—"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "—"
-          }
-        }
-      }
-    },
-    "•" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "•"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "•"
-          }
-        }
-      }
-    },
-    "✓" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "✓"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "✓"
           }
         }
       }
