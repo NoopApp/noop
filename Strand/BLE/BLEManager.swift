@@ -238,21 +238,33 @@ public final class BLEManager: NSObject, ObservableObject {
         self.collector = nil
         super.init()
         state.lastSyncedAt = UserDefaults.standard.object(forKey: "lastSyncedAt") as? Double
-        // Restore identifier + background-capable central (foundation for M3 state restoration).
+        central = BLEManager.makeCentral(delegate: self)
+        // Strap-as-clock: an incoming EVENT packet kicks a rate-limited catch-up sync.
+        router.onSyncTrigger = { [weak self] in self?.requestSync(.strap) }
+    }
+
+    /// Single source of truth for `CBCentralManager` construction. iOS passes the state-restoration
+    /// identifier so the system can relaunch us into the background for BLE events and call
+    /// `willRestoreState` with the previously-connected peripheral; macOS does not have that
+    /// background-launch path so the option is omitted.
+    ///
+    /// IMPORTANT (iOS): `CoreBluetooth` only honours state restoration when the `CBCentralManager`
+    /// is constructed eagerly during `application(_:didFinishLaunchingWithOptions:)` — equivalently,
+    /// synchronously from the app's `init` on a SwiftUI lifecycle. If `BLEManager` is built lazily
+    /// inside a `.task`, iOS drops the restored state and `willRestoreState` never fires on a cold
+    /// background relaunch. `StrandiOSApp.init` constructs `AppModel` (which owns `BLEManager`)
+    /// synchronously to satisfy this.
+    private static func makeCentral(delegate: CBCentralManagerDelegate) -> CBCentralManager {
         #if os(iOS)
-        // iOS: pass the restoration identifier so the system can relaunch us into the background
-        // for BLE events and call `willRestoreState` with the previously-connected peripheral.
-        central = CBCentralManager(
-            delegate: self,
+        return CBCentralManager(
+            delegate: delegate,
             queue: .main,
             options: [CBCentralManagerOptionRestoreIdentifierKey: BLEManager.restoreID]
         )
         #else
         // Strand (macOS desktop): no state-restoration identifier (iOS background feature).
-        central = CBCentralManager(delegate: self, queue: .main)
+        return CBCentralManager(delegate: delegate, queue: .main)
         #endif
-        // Strap-as-clock: an incoming EVENT packet kicks a rate-limited catch-up sync.
-        router.onSyncTrigger = { [weak self] in self?.requestSync(.strap) }
     }
 
     /// Build the WhoopStore + Collector + Backfiller asynchronously. Safe to call multiple
@@ -284,16 +296,7 @@ public final class BLEManager: NSObject, ObservableObject {
         self.collector = collector
         super.init()
         state.lastSyncedAt = UserDefaults.standard.object(forKey: "lastSyncedAt") as? Double
-        #if os(iOS)
-        central = CBCentralManager(
-            delegate: self,
-            queue: .main,
-            options: [CBCentralManagerOptionRestoreIdentifierKey: BLEManager.restoreID]
-        )
-        #else
-        // Strand (macOS desktop): no state-restoration identifier (iOS background feature).
-        central = CBCentralManager(delegate: self, queue: .main)
-        #endif
+        central = BLEManager.makeCentral(delegate: self)
         // Strap-as-clock: an incoming EVENT packet kicks a rate-limited catch-up sync.
         router.onSyncTrigger = { [weak self] in self?.requestSync(.strap) }
     }
