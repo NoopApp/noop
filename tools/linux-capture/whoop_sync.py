@@ -320,6 +320,7 @@ class Sync:
         # stream oldest→newest, so (last_rec_unix - anchor) / (now - anchor) is the backlog fraction.
         self.sync_start_unix = None
         self.last_rec_unix = 0
+        self.type_counts = {}     # inner_type -> count seen this run (for the realtime progress line)
 
     def on_hr(self, _s, data):
         hr = wf.parse_standard_hr(bytes(data))
@@ -335,6 +336,7 @@ class Sync:
             t = self.fam.inner_type(frame)
             if t is None:
                 continue
+            self.type_counts[t] = self.type_counts.get(t, 0) + 1
             ru = self.fam.rec_unix(frame)
             self.chunk.append((now, char, t, ru, self.fam.rec_hr(frame), frame.hex()))
             if self.fam.is_offload(frame):
@@ -500,6 +502,162 @@ async def _session(client, s, db, fam, args, stop_all):
     return outcome["v"], s.committed - start
 
 
+# --- realtime capture session ---------------------------------------------------------------------
+
+async def _realtime_session(client, s, db, fam, args, stop_all):
+    """One connected REALTIME session: enable the live streams (type-40 REALTIME_DATA = HR + R-R,
+    type-43 raw IMU), persist every frame continuously, and hold the link open with a keep-alive
+    re-arm. Returns (outcome, frames_committed_this_session).
+
+    Why the keep-alive: a one-shot realtime enable makes the 4C stream a short burst then go quiet,
+    after which the idle BLE link hits supervision timeout and drops (observed in
+    SENSOR_DECODE_FINDINGS.md Exp 3). Periodically re-issuing SEND_R10_R11_REALTIME + TOGGLE_REALTIME_HR
+    both keeps the stream flowing and keeps the link warm."""
+    try:
+        await client.start_notify(HR_MEASUREMENT, s.on_hr)         # 2A37 — the app keeps this up too
+    except Exception:
+        pass
+    for u in fam.notify:
+        try:
+            await client.start_notify(u, s.on_frame_notify)
+        except Exception as e:
+            print(f"  could not subscribe {u}: {e}", flush=True)
+
+    async def w(frame, response=False, name=""):
+        try:
+            await client.write_gatt_char(fam.cmd_write, frame, response=response)
+        except Exception as e:
+            print(f"  write {name} failed: {e}", flush=True)
+
+    if fam.opener is not None:                                     # whoop5: CLIENT_HELLO opens puffin
+        await w(fam.opener, response=True, name="CLIENT_HELLO")
+        await asyncio.sleep(0.8)
+
+    async def arm(seq):
+        await w(fam.cmd(CMD_SEND_R10_R11_REALTIME, seq=seq, payload=b"\x01"), name="R10_R11_REALTIME(on)")
+        await w(fam.cmd(CMD_TOGGLE_REALTIME_HR, seq=seq + 1, payload=b"\x01"), name="TOGGLE_REALTIME_HR(on)")
+    await arm(1)
+
+    outcome = {"v": "dropped"}
+    sess_stop = asyncio.Event()
+    start = s.committed
+
+    async def committer():
+        while not sess_stop.is_set():
+            await asyncio.sleep(args.flush)
+            if s.chunk:
+                frames, s.chunk = s.chunk, []
+                try:
+                    await asyncio.to_thread(db.commit_chunk, s.device_id, frames, None, False)
+                    s.committed += len(frames)
+                except Exception as e:
+                    print(f"  commit failed: {e}", flush=True)
+
+    async def keepalive():
+        seq = 10
+        while not sess_stop.is_set():
+            await asyncio.sleep(args.keepalive)
+            if sess_stop.is_set() or not client.is_connected:
+                continue
+            await arm(seq)
+            seq = (seq + 2) & 0xFF
+
+    async def watchdog():
+        last_report = 0
+        while not sess_stop.is_set():
+            await asyncio.sleep(1.0)
+            if not client.is_connected:
+                outcome["v"] = "dropped"; sess_stop.set(); return
+            if stop_all.is_set():
+                outcome["v"] = "stopped"; sess_stop.set(); return
+            now = int(time.time() * 1000)
+            if now - last_report >= 5000:
+                last_report = now
+                c = s.type_counts
+                print(f"  …live: type40(R-R)={c.get(40, 0)} type43(IMU)={c.get(43, 0)} "
+                      f"stored={s.committed + len(s.chunk)} hr={s.latest_hr}", flush=True)
+
+    tasks = [asyncio.create_task(t()) for t in (committer, keepalive, watchdog)]
+    await sess_stop.wait()
+    for t in tasks:
+        t.cancel()
+    await asyncio.sleep(0.2)
+    if s.chunk:                                                    # final flush of the tail
+        try:
+            await asyncio.to_thread(db.commit_chunk, s.device_id, s.chunk, None, False)
+            s.committed += len(s.chunk); s.chunk = []
+        except Exception:
+            pass
+    return outcome["v"], s.committed - start
+
+
+async def run_realtime(args):
+    """Capture the live realtime stream (HR + R-R + IMU) into the durable store, reconnecting on drops
+    until --duration elapses, then decode → feat_rr so HRV/RSA can run. The realtime counterpart of the
+    offload `run()`; reuses the same _acquire + MTU-negotiated reconnect loop + WhoopDB."""
+    from bleak import BleakClient
+    from bleak.exc import BleakError
+    fam = Family(args.model)
+    db = WhoopDB(args.db)
+    dev = await _acquire(args.address, tries=args.tries)
+    if dev is None:
+        print("could not find the strap advertising — wear/tap it (phone BT OFF) and retry.", flush=True)
+        return
+    did = db.upsert_device(args.address, name=dev.name, subject=args.subject, model=args.model)
+    info = db.device_info(did)
+    print(f"realtime: {info[0]} name={info[1]!r} subject={info[2]!r} model={info[3]} — "
+          f"capturing {args.duration:.0f}s", flush=True)
+    print("  NOTE: R-R (type-40) only streams from a WORN strap once the optical sensor locks a pulse "
+          "(~30-60s of good skin contact); type-43 IMU streams regardless.", flush=True)
+
+    s = Sync(db, did, fam)
+    stop_all = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, stop_all.set)
+        except NotImplementedError:
+            pass
+
+    deadline = time.time() + args.duration
+    while not stop_all.is_set() and time.time() < deadline:
+        if dev is None:
+            dev = await _acquire(args.address, tries=args.tries)
+            if dev is None:
+                print("  strap not advertising — retrying…", flush=True)
+                await asyncio.sleep(2.0)
+                continue
+        try:
+            async with BleakClient(dev) as client:
+                try:
+                    if getattr(client, "mtu_size", 23) <= 23 and hasattr(client._backend, "_acquire_mtu"):
+                        await client._backend._acquire_mtu()
+                except Exception:
+                    pass
+                print(f"connected: {client.is_connected}  ATT MTU={getattr(client, 'mtu_size', '?')}", flush=True)
+                outcome, got = await _realtime_session(client, s, db, fam, args, stop_all)
+                print(f"  session ended: {outcome} (+{got} frames; {s.committed} total this run)", flush=True)
+        except (BleakError, asyncio.TimeoutError, EOFError) as e:
+            print(f"  connect/session error: {e} — reconnecting", flush=True)
+        dev = None
+        if not stop_all.is_set() and time.time() < deadline:
+            await asyncio.sleep(1.0)
+
+    cnts = db.counts(did)
+    print(f"\nrealtime done: {s.committed} frames stored  db={args.db}  device={info[0]} ({args.model})", flush=True)
+    print(f"  by type: {cnts}  (40=REALTIME_DATA w/ R-R, 43=raw IMU)", flush=True)
+    if args.out:
+        print(f"  exported {db.export_json(did, args.out)} frames → {args.out}", flush=True)
+    try:
+        res = decode_features.decode_new(db, did)
+        rr = db.db.execute("SELECT COUNT(*) FROM feat_rr WHERE device_id=?", (did,)).fetchone()[0]
+        print(f"  decoded: {res['decoded']} new frames into feat_* ({res['frames']} seen); "
+              f"feat_rr now holds {rr} R-R intervals.", flush=True)
+        print(f"  → HRV: whoop-sleep-bridge/python/hrv.py run --db {args.db} --device {did}", flush=True)
+    except Exception as e:
+        print(f"  decode skipped ({e}); run `whoop_sync.py decode --db {args.db}`.", flush=True)
+
+
 async def run(args):
     from bleak import BleakClient
     from bleak.exc import BleakError
@@ -656,6 +814,18 @@ def main():
     sp.add_argument("--max", type=float, default=3000.0)
     sp.add_argument("--tries", type=int, default=6)
 
+    rp = sub.add_parser("realtime", help="capture the live HR + R-R + IMU stream into the store")
+    rp.add_argument("--model", choices=["whoop4", "whoop5"], default="whoop4")
+    rp.add_argument("--address", required=True, help="strap BLE MAC (from `bluetoothctl devices`)")
+    rp.add_argument("--subject", default=None, help="person wearing this strap (e.g. me, partner)")
+    rp.add_argument("--db", default="captures/whoop.db")
+    rp.add_argument("--duration", type=float, default=300.0, help="capture seconds (overnight = e.g. 36000)")
+    rp.add_argument("--keepalive", type=float, default=2.0,
+                    help="re-arm the realtime stream every N s (holds the link open; lower if it drops)")
+    rp.add_argument("--flush", type=float, default=2.0, help="persist buffered frames to the DB every N s")
+    rp.add_argument("--tries", type=int, default=8, help="acquire/advertise retries per (re)connect")
+    rp.add_argument("--out", default=None, help="also export this device's whole store to capture.json")
+
     ep = sub.add_parser("export")
     ep.add_argument("--db", default="captures/whoop.db")
     ep.add_argument("--address", default=None)
@@ -689,6 +859,11 @@ def main():
     if cmd == "sync":
         try:
             asyncio.run(run(args))
+        except KeyboardInterrupt:
+            pass
+    elif cmd == "realtime":
+        try:
+            asyncio.run(run_realtime(args))
         except KeyboardInterrupt:
             pass
     elif cmd == "export":
