@@ -80,6 +80,11 @@ def feature_to_rows(rec):
     p = rec.get("parsed") or {}
     itype = rec.get("inner_type")
     unix = rec.get("unix")
+    # Realtime (type-40) frames carry their unix in the decoded `timestamp` field, not the frames.unix
+    # column (the capture's rec_unix only maps historical type-47). Fall back to it so realtime R-R
+    # actually reaches feat_rr instead of being dropped as "no unix".
+    if unix is None and itype == 40 and isinstance(p.get("timestamp"), int):
+        unix = p["timestamp"]
 
     if itype in _DATA_TYPES:
         if unix is None:
@@ -182,6 +187,12 @@ def normalize_decode_record(raw, src_frame, device_id):
     raw = raw if isinstance(raw, dict) else {}
     frame = raw.get("frame") or {}
     parsed = _flatten_fields(frame)
+    # The R-R interval ARRAY lives only in the decoder's frame.parsed — the per-interval values appear
+    # as rr[i] FIELDS, but the array itself is parsed-only, so _flatten_fields misses it. Carry it
+    # through so feat_rr / rmssd populate (realtime type-40 and historical alike).
+    rr = (frame.get("parsed") or {}).get("rr_intervals")
+    if rr is not None:
+        parsed["rr_intervals"] = rr
     crc_ok = bool(frame.get("crcOK", True))
     version = parsed.get("hist_version")
     if version is None and raw.get("family") == "whoop4":

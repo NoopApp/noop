@@ -170,6 +170,26 @@ class NormalizeTests(unittest.TestCase):
         self.assertEqual(rec["version"], 18)
         self.assertTrue(rec["crc_ok"])
 
+    def test_carries_rr_intervals_from_parsed(self):
+        # The R-R array is parsed-only (per-interval values are rr[i] FIELDS, the array is not a field),
+        # so normalize must carry frame.parsed["rr_intervals"] through or feat_rr/rmssd stay empty.
+        raw = {"family": "whoop5", "frame": {"crcOK": True, "fields": [_fld("rr_count", 2, "rr")],
+                                             "parsed": {"rr_intervals": [602, 613]}}}
+        src = (1, "aa", "fd4b0005", 0, 1700000000, None, 47)
+        rec = df.normalize_decode_record(raw, src, 1)
+        self.assertEqual(rec["parsed"].get("rr_intervals"), [602, 613])
+
+    def test_realtime_type40_timestamp_supplies_unix_and_rr(self):
+        # Realtime (type-40) frames have no frames.unix; the decoded `timestamp` field supplies it, and
+        # the carried rr_intervals must flow into feat_rr (the realtime-capture path).
+        raw = {"family": "whoop5", "frame": {"crcOK": True,
+               "fields": [_fld("timestamp", 1781084150, "time"), _fld("rr_count", 1, "rr")],
+               "parsed": {"timestamp": 1781084150, "rr_intervals": [963]}}}
+        src = (1, "aa", "fd4b0005", 1781084150307, None, None, 40)   # frames.unix = None
+        m = df.feature_to_rows(df.normalize_decode_record(raw, src, 1))
+        self.assertEqual(m["second"]["unix"], 1781084150)
+        self.assertEqual(m["rr"], [{"unix": 1781084150, "idx": 0, "rr_ms": 963}])
+
     def test_crcOK_false(self):
         raw = _decoded([_fld("heart_rate", 90, "hr")], crcOK=False)
         src = (1, "aa", "c", 0, 100, None, 47)
