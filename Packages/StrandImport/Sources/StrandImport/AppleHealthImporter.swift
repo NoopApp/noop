@@ -74,17 +74,26 @@ public struct AppleHealthImporter {
 
     /// Stream-parse a raw `export.xml` file.
     public func importXML(at xmlURL: URL) throws -> AppleHealthImportResult {
+        // Sanitize first (#100): NSXMLParser cannot recover from a single malformed byte, and
+        // multi-source exports are known to contain them (unescaped quotes from legacy third-party
+        // apps → libxml error 65, control bytes, bad charrefs, malformed DTD subsets). The
+        // sanitizer streams disk→disk so RAM stays bounded; clean input passes byte-identical.
+        let clean = FileManager.default.temporaryDirectory
+            .appendingPathComponent("noop-health-clean-\(UUID().uuidString).xml")
+        defer { try? FileManager.default.removeItem(at: clean) }
+        try HealthXMLSanitizer().sanitize(input: xmlURL, output: clean)
         // Stream from disk via an InputStream rather than XMLParser(contentsOf:), which would load
         // the entire (multi-hundred-MB) file into memory before parsing.
-        guard let stream = InputStream(url: xmlURL) else {
-            throw ImportError.fileNotFound(xmlURL.path)
+        guard let stream = InputStream(url: clean) else {
+            throw ImportError.fileNotFound(clean.path)
         }
         return try runParser(XMLParser(stream: stream))
     }
 
     /// Parse a `Data` blob of XML (used for the zip-streaming path and tests).
     public func importXML(data: Data) throws -> AppleHealthImportResult {
-        let parser = XMLParser(data: data)
+        let (clean, _) = HealthXMLSanitizer().sanitize(data: data)   // same tolerance as the file path
+        let parser = XMLParser(data: clean)
         return try runParser(parser)
     }
 
@@ -145,9 +154,12 @@ public struct AppleHealthImporter {
         parser.shouldProcessNamespaces = false
         let ok = parser.parse()
         if !ok || delegate.parseError != nil {
-            let msg = delegate.parseError?.localizedDescription
+            let base = delegate.parseError?.localizedDescription
                 ?? parser.parserError?.localizedDescription
                 ?? "unknown error"
+            // Line/column make a mid-file failure in a multi-GB export diagnosable from the
+            // user's screenshot alone (#100) — previously both were discarded.
+            let msg = "\(base) (line \(parser.lineNumber), column \(parser.columnNumber))"
             throw ImportError.xmlParseFailed(msg)
         }
         return delegate.makeResult()
