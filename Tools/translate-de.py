@@ -465,7 +465,9 @@ DE: dict[str, str] = {
 
 
 def main() -> int:
-    catalog = json.loads(CATALOG.read_text())
+    # encoding="utf-8" is load-bearing: without it Windows defaults to cp1252 and a run
+    # mojibakes every umlaut in the catalog (empirically: 82 German strings corrupted).
+    catalog = json.loads(CATALOG.read_text(encoding="utf-8"))
     strings = catalog["strings"]
 
     missing: list[str] = []
@@ -479,7 +481,8 @@ def main() -> int:
         locs = entry.setdefault("localizations", {})
         locs["de"] = {"stringUnit": {"state": "translated", "value": de}}
 
-    CATALOG.write_text(json.dumps(catalog, indent=2, ensure_ascii=False) + "\n")
+    CATALOG.write_text(json.dumps(catalog, indent=2, ensure_ascii=False) + "\n",
+                       encoding="utf-8")
 
     translated = sum(
         1 for k, v in strings.items()
