@@ -42,7 +42,7 @@ and on-device data model, not a wrapper around the Swift code.
 - [Storage with Room](#storage-with-room)
 - [Analytics](#analytics)
 - [Compose UI](#compose-ui)
-- [Permissions and the no-internet posture](#permissions-and-the-no-internet-posture)
+- [Permissions and the network posture](#permissions-and-the-network-posture)
 - [Donations](#donations)
 - [Verification checklist](#verification-checklist)
 - [Credits](#credits)
@@ -116,8 +116,9 @@ bump forces matching KSP and Compose-compiler bumps:
 | `sourceCompatibility` / `jvmTarget` | `17` | JDK 17 |
 | `applicationId` | `com.noop.whoop` | `.debug` suffix on debug builds |
 
-The app declares **no `INTERNET` permission** by design (see
-[Permissions](#permissions-and-the-no-internet-posture)) and sets `android:allowBackup="false"`.
+The app declares a **single `INTERNET` permission**, used only by the opt-in BYOK AI Coach and
+the user-tapped update check (see
+[Permissions](#permissions-and-the-network-posture)), and sets `android:allowBackup="false"`.
 
 ---
 
@@ -468,7 +469,8 @@ does not contain — and why logcat is opt-in — is covered in `PRIVACY_SECURIT
 Some Swift tables are not yet represented as Room entities (`rawBatch`, `cursors`, `journal`,
 `workout`, `appleDaily`) — add them when the collector / importer / journal features are ported.
 
-The database is created **without** an `INTERNET` permission and lives entirely in the app's private
+The database is never touched by network code (the single `INTERNET` permission serves only the
+opt-in Coach and the tapped update check) and lives entirely in the app's private
 storage; nothing is uploaded.
 
 ---
@@ -510,13 +512,17 @@ the spec for tokens and chart styles, re-expressed as a Compose theme — do not
 
 ---
 
-## Permissions and the no-internet posture
+## Permissions and the network posture
 
-The manifest is deliberately minimal and **declares no `INTERNET` permission** — nothing leaves the
-device. Permissions, straight from `android/app/src/main/AndroidManifest.xml`:
+The manifest is deliberately minimal. It declares a **single `INTERNET` permission**, used only by
+the opt-in BYOK AI Coach and the user-tapped update check — the biometric pipeline never touches
+the network. (The macOS build goes further: no networking code and no network entitlement at all —
+see `docs/PRIVACY_SECURITY.md`.) Permissions, straight from
+`android/app/src/main/AndroidManifest.xml`:
 
 | Permission | API range | Why |
 | --- | --- | --- |
+| `INTERNET` | all | opt-in BYOK AI Coach + user-tapped update check only |
 | `BLUETOOTH_SCAN` (`neverForLocation`) | 31+ | scan for the strap; opt out of location coupling |
 | `BLUETOOTH_CONNECT` | 31+ | connect / bond / GATT I/O |
 | `BLUETOOTH`, `BLUETOOTH_ADMIN` | ≤30 | legacy install-time BLE perms |
@@ -563,7 +569,7 @@ against a real build, a real device, and a real strap.
 - [ ] `./gradlew :app:testFullDebugUnitTest` is green (analytics vectors).
 - [ ] `./gradlew assembleDebug` produces `app-debug.apk`.
 - [ ] `./gradlew assembleRelease` succeeds with R8 full mode + resource shrinking.
-- [ ] APK declares **no `INTERNET` permission** (`aapt dump permissions app-debug.apk`).
+- [ ] `aapt dump permissions app-debug.apk` shows only `INTERNET` (Coach + update check) plus the Bluetooth/FGS set.
 
 **Protocol parity (JVM, no device)**
 

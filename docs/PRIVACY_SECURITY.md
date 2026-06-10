@@ -34,18 +34,21 @@ Data enters NOOP two ways:
 | Live collection | Bluetooth LE, strap → device | Read-only from the strap |
 | File import | User-selected files on disk | Read-only from disk |
 
-The only outbound path is the opt-in AI Coach; the biometric pipeline produces no network
-traffic of any kind.
+On macOS there is no outbound path at all; on Android the only outbound paths are the
+opt-in AI Coach and the user-tapped update check. The biometric pipeline produces no
+network traffic of any kind on either platform.
 
-### 1.1 Network code: only the optional AI Coach
+### 1.1 Network code: none on macOS
 
-The biometric pipeline and all five Swift packages
+The **entire macOS app target** (`Strand/`) and all five Swift packages
 (`WhoopProtocol`, `WhoopStore`, `StrandAnalytics`, `StrandImport`, `StrandDesign`)
 contain **no** use of `URLSession`, `URLRequest`, `NWConnection`, `dataTask`, or any
-other networking API. The **only** networking anywhere in the app is the AI Coach
-(`Strand/AI/AICoach.swift` on macOS, `com.noop.ai.AiCoach` on Android), described in
-§1.1a. The package manifests reference dependency *download* URLs that Swift Package
-Manager resolves at build time, never at runtime:
+other networking API — a one-line grep over `Strand/ Packages/` verifies it. The only
+networking anywhere in the project is on Android: the opt-in BYOK AI Coach
+(`com.noop.ai.AiCoach`, described in §1.1a) and the user-tapped release check
+(`com.noop.update.UpdateCheck`, a single GET to GitHub's public releases API when you
+tap the button — nothing about you is sent). The package manifests reference dependency
+*download* URLs that Swift Package Manager resolves at build time, never at runtime:
 
 ```
 Packages/WhoopStore/Package.swift   → https://github.com/groue/GRDB.swift.git
@@ -55,10 +58,12 @@ Packages/StrandImport/Package.swift → https://github.com/weichsel/ZIPFoundatio
 GRDB.swift is the SQLite layer; ZIPFoundation is the archive reader used by the
 importers. Neither opens a socket.
 
-### 1.1a The AI Coach (optional, off by default, bring your own key)
+### 1.1a The AI Coach (Android only; optional, off by default, bring your own key)
 
-The AI Coach lets you ask questions about your data in plain language. It is the one
-feature that uses the network, and only on your terms:
+The AI Coach lets you ask questions about your data in plain language. It exists only
+on Android — the macOS build removed its surface entirely because the sandbox (which
+ships without a network entitlement, §1.2) could never let it connect. Where it runs,
+it uses the network only on your terms:
 
 - **Off until you enable it.** You enter your own API key for the provider you choose
   (OpenAI or Anthropic). No key, no network calls, ever.
@@ -72,9 +77,11 @@ feature that uses the network, and only on your terms:
   provider you picked, under your own account. NOOP runs no server in between and keeps
   no copy.
 
-If you never enable the AI Coach, NOOP makes zero network connections.
+On macOS, NOOP makes zero network connections, full stop. On Android, if you never
+enable the AI Coach and never tap "Check for updates", NOOP makes zero network
+connections.
 
-### 1.2 The macOS sandbox (and what it means for the AI Coach)
+### 1.2 The macOS sandbox
 
 On macOS the App Sandbox is the backstop. The app ships with a deliberately minimal
 entitlement set (`Strand/Resources/Strand.entitlements`):
@@ -99,12 +106,11 @@ That is the entire entitlement file. Three keys:
 Notably **absent**:
 
 - `com.apple.security.network.client` — **no outbound network entitlement.** The macOS
-  sandbox will refuse any socket the app tries to open, **including the AI Coach's**. So
-  on the sandboxed macOS build the AI Coach cannot reach the network as currently
-  shipped — the whole macOS app, Coach included, is offline. (Android has no equivalent
-  sandbox restriction, so the AI Coach's call works there with your own key.) Turning the
-  macOS Coach on would mean adding this entitlement; until that's a deliberate choice, it
-  stays out and macOS stays fully offline.
+  sandbox will refuse any socket the app tries to open — and since the macOS target
+  contains no networking code at all (§1.1), there is nothing that would even try. The
+  whole macOS app is offline, by construction and by OS enforcement. (Android has no
+  equivalent sandbox restriction, so the BYOK AI Coach and the tapped update check work
+  there.)
 - `com.apple.security.network.server` — no inbound listener.
 - No `files.downloads`, `files.documents`, or any broad filesystem entitlement —
   the app cannot wander the disk; it sees only what the user hands it through the
@@ -400,7 +406,7 @@ bundle of CSV files, but the same defensive posture applies.
 
 | Surface | Risk | Mitigation | Where |
 |---------|------|------------|-------|
-| Process | Data exfiltration / network egress | Only the opt-in AI Coach networks (your key, to your chosen provider, a text summary — §1.1a); on macOS even that is blocked by the sandbox (**no network entitlement**) | `Strand/AI/AICoach.swift`, `Strand/Resources/Strand.entitlements`, `project.yml` |
+| Process | Data exfiltration / network egress | macOS: **none** — no networking code in the target and no network entitlement in the sandbox (§1.1, §1.2). Android: only the opt-in BYOK AI Coach (your key, to your chosen provider, a text summary — §1.1a) and the user-tapped update check | `Strand/Resources/Strand.entitlements`, `project.yml`, `android/.../ai/AiCoach.kt`, `android/.../update/UpdateCheck.kt` |
 | Filesystem | Broad disk access | Only `files.user-selected.read-write`; data stays in the sandbox container | `Strand.entitlements`, `Strand/Collect/StorePaths.swift` |
 | BLE frames | Malformed / adversarial packets | CRC8 + CRC32 (+ CRC16 for v5) gating; reject on failure | `WhoopProtocol/Framing.swift`, `Strand/BLE/FrameRouter.swift` |
 | BLE frames | Out-of-bounds reads from short/lying length | `nil`-returning bounds-checked readers; slice clamping; min-length guards | `WhoopProtocol/Interpreter.swift` |

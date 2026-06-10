@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import Security
 import WhoopProtocol
 import WhoopStore
 
@@ -35,8 +36,6 @@ final class AppModel: ObservableObject {
     let behavior = BehaviorStore()
     /// On-device WHOOP-style recovery/strain/sleep computation from raw strap streams.
     let intelligence: IntelligenceEngine
-    /// Opt-in AI coach (bring-your-own-key) — the one networked feature, off until the user enables it.
-    let coach: AICoachEngine
 
     /// Timestamps of moments marked via a double-tap (persisted).
     @Published var moments: [Date] = []
@@ -89,7 +88,6 @@ final class AppModel: ObservableObject {
         self.ble = BLEManager(state: live, deviceId: "my-whoop")
         self.repo = Repository(deviceId: "my-whoop")
         self.intelligence = IntelligenceEngine(repo: repo, profile: profile, deviceId: "my-whoop")
-        self.coach = AICoachEngine(repo: repo)
         // Smooth HR centrally so it's solid everywhere it's shown.
         live.$heartRate.sink { [weak self] _ in self?.ingestHR() }.store(in: &hrCancellables)
         live.$rr.sink { [weak self] _ in self?.ingestHR() }.store(in: &hrCancellables)
@@ -124,6 +122,15 @@ final class AppModel: ObservableObject {
             .map { Date(timeIntervalSince1970: $0) }
 
         AppModel.shared = self   // publish for App Intents (Shortcuts) — see the static above (#42)
+
+        // One-time cleanup: forget any AI-Coach key saved by builds ≤1.62 — the macOS Coach is
+        // gone (the sandbox never allowed its network call), so don't leave a credential behind.
+        let staleCoachKey: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "com.noop.aicoach",
+            kSecAttrAccount as String: "api-key"
+        ]
+        SecItemDelete(staleCoachKey as CFDictionary)
 
         // Turn the strap's offloaded raw data into dashboard scores on launch and every 15
         // minutes, so recovery / strain / sleep populate from the strap itself with no import.

@@ -4,7 +4,6 @@ import StrandDesign
 enum NavItem: String, CaseIterable, Identifiable, Hashable {
     case today = "Today"
     case intelligence = "Intelligence"
-    case coach = "Coach"
     case live = "Live"
     case breathe = "Breathe"
     case intervals = "Intervals"
@@ -31,7 +30,6 @@ enum NavItem: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .today: return "Today"
         case .intelligence: return "Intelligence"
-        case .coach: return "Coach"
         case .live: return "Live"
         case .breathe: return "Breathe"
         case .intervals: return "Intervals"
@@ -56,7 +54,6 @@ enum NavItem: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .today: return "circle.hexagongrid.fill"
         case .intelligence: return "brain.head.profile"
-        case .coach: return "sparkles"
         case .live: return "waveform.path.ecg"
         case .breathe: return "lungs.fill"
         case .intervals: return "timer"
@@ -122,7 +119,6 @@ struct RootView: View {
         switch selection ?? .today {
         case .today: TodayView()
         case .intelligence: IntelligenceView()
-        case .coach: CoachView()
         case .live: LiveView()
         case .breathe: BreathingView()
         case .intervals: IntervalTimerView()

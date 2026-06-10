@@ -13,7 +13,6 @@ struct StrandApp: App {
                 .environmentObject(model.profile)
                 .environmentObject(model.behavior)
                 .environmentObject(model.intelligence)
-                .environmentObject(model.coach)
                 .frame(minWidth: 1000, minHeight: 700)
                 .preferredColorScheme(.dark)
         }

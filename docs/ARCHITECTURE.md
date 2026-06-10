@@ -373,8 +373,10 @@ computed locally.
 
 ## 11. Design principles, restated
 
-1. **Offline by construction.** There is no network client anywhere in the data path. The strap, the
-   SQLite file, and the UI are the whole system.
+1. **Offline by construction.** On macOS there is no network client anywhere in the app at all (and
+   the sandbox ships without a network entitlement); on Android the two opt-in/user-tapped exceptions
+   (BYOK AI Coach, update check) sit outside the data path. The strap, the SQLite file, and the UI
+   are the whole system.
 2. **Decoded-first durability.** Metrics are committed before raw is queued; the raw outbox is a
    prunable convenience, never the source of truth.
 3. **Resumable safe-trim.** The strap forgets historical data only after NOOP has it durably and has
