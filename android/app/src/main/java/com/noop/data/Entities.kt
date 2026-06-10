@@ -261,6 +261,26 @@ data class WorkoutRow(
     val distanceM: Double? = null,
     val zonesJSON: String? = null,
     val notes: String? = null,
+    val routePolyline: String? = null, // Encoded GPS route (RouteMath polyline); null = no GPS.
+)
+
+/**
+ * Durable "this detected bout is not a workout" marker (#107). The IntelligenceEngine wipes +
+ * re-derives sport="detected" rows under "<deviceId>-noop" every run, so a plain delete only hides a
+ * bout until the next re-detect recreates it. This table is INDEPENDENT of that churn: a detected row
+ * is filtered out at read time whenever it OVERLAPS a marker's [startTs, endTs] span, so dismissal is
+ * permanent — and span-overlap (not an exact-key match) survives the small startTs DRIFT a bout's
+ * boundary can take as more HR arrives, matching the macOS dismissed-span semantics exactly.
+ *
+ * PK (deviceId, startTs) — one marker per detected start; `endTs` is the span end. Android-only table
+ * (no GRDB twin): the macOS read model can't add a column to its shared workout struct, so macOS
+ * persists the equivalent as a UserDefaults "startTs:endTs" span list. Added by MIGRATION_4_5.
+ */
+@Entity(tableName = "dismissedWorkout", primaryKeys = ["deviceId", "startTs"])
+data class DismissedWorkout(
+    val deviceId: String,
+    val startTs: Long,
+    val endTs: Long,
 )
 
 /**

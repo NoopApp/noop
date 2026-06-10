@@ -225,6 +225,14 @@ interface WhoopDao {
     suspend fun journal(deviceId: String, from: String, to: String): List<JournalEntry>
 
     /**
+     * Delete one journal answer by natural key (the native logging card's "clear"). Source-scoped
+     * by deviceId, so clearing a native ("noop-journal") answer never removes an identical imported
+     * row. Port of JournalWorkoutAppleCache.swift deleteJournal(deviceId:day:question:).
+     */
+    @Query("DELETE FROM journal WHERE deviceId = :deviceId AND day = :day AND question = :question")
+    suspend fun deleteJournalEntry(deviceId: String, day: String, question: String)
+
+    /**
      * Workouts whose startTs falls in [from, to] (unix seconds), oldest first, row-limited.
      * Port of JournalWorkoutAppleCache.swift workouts(deviceId:from:to:limit:).
      */
@@ -248,6 +256,21 @@ interface WhoopDao {
      *  (makes detected-workout re-derivation idempotent). (#78) */
     @Query("DELETE FROM workout WHERE deviceId = :deviceId AND sport = :sport AND startTs >= :from AND startTs <= :to")
     suspend fun deleteWorkoutsBySport(deviceId: String, sport: String, from: Long, to: Long)
+
+    /** Delete ONE workout by its full natural key (deviceId, startTs, sport). Used by the Workouts
+     *  screen to remove a single manual / re-labelled session. (#107) */
+    @Query("DELETE FROM workout WHERE deviceId = :deviceId AND startTs = :startTs AND sport = :sport")
+    suspend fun deleteWorkoutByKey(deviceId: String, startTs: Long, sport: String)
+
+    // MARK: - Dismissed detected bouts (durable #107 marker; survives engine re-detection)
+
+    /** Record a dismissed detected bout. IGNORE so re-dismissing the same bout is a no-op. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertDismissed(rows: List<DismissedWorkout>)
+
+    /** All dismissed markers for a [deviceId] (the computed "<id>-noop" source the detector writes). */
+    @Query("SELECT * FROM dismissedWorkout WHERE deviceId = :deviceId")
+    suspend fun dismissedWorkouts(deviceId: String): List<DismissedWorkout>
 
     // MARK: - Frontier / stats (Reads.swift)
 

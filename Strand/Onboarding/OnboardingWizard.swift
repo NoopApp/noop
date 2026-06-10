@@ -649,6 +649,11 @@ private struct BondedStep: View {
 private struct ProfileStep: View {
     @EnvironmentObject private var profile: ProfileStore
 
+    // Imperial/Metric display preference (D#103). The stored profile is always SI; the steppers keep
+    // operating in SI (0.5 kg / 1 cm) and only the DISPLAYED value re-labels to lb / ft-in.
+    @AppStorage(UnitPrefs.systemKey) private var unitSystemRaw = UnitSystem.metric.rawValue
+    private var unitSystem: UnitSystem { UnitSystem(rawValue: unitSystemRaw) ?? .metric }
+
     private let sexes: [(String, String)] = [
         ("male", "Male"), ("female", "Female"), ("nonbinary", "Other")
     ]
@@ -682,13 +687,15 @@ private struct ProfileStep: View {
                         // profile editor (same ranges/steps), so every numeric profile field is
                         // consistent across onboarding and Settings on both platforms.
                         Stepper(value: $profile.weightKg, in: 30...250, step: 0.5) {
-                            FieldRow(label: "Weight", value: "\(String(format: "%.1f", profile.weightKg)) kg")
+                            FieldRow(label: "Weight",
+                                     value: UnitFormatter.massFromKilograms(profile.weightKg, system: unitSystem))
                         }
 
                         Divider().overlay(StrandPalette.hairline)
 
                         Stepper(value: $profile.heightCm, in: 120...230, step: 1) {
-                            FieldRow(label: "Height", value: "\(String(format: "%.0f", profile.heightCm)) cm")
+                            FieldRow(label: "Height",
+                                     value: UnitFormatter.heightFromCentimeters(profile.heightCm, system: unitSystem))
                         }
                     }
                 }

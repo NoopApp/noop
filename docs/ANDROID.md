@@ -37,6 +37,7 @@ and on-device data model, not a wrapper around the Swift code.
 - [What exists vs. what is missing](#what-exists-vs-what-is-missing)
 - [Build prerequisites](#build-prerequisites)
 - [Building](#building)
+- [Installing the APK (sideload & Play Protect)](#installing-the-apk-sideload--play-protect)
 - [The protocol module (Kotlin port of `WhoopProtocol`)](#the-protocol-module-kotlin-port-of-whoopprotocol)
 - [Android BLE layer](#android-ble-layer)
 - [Storage with Room](#storage-with-room)
@@ -216,6 +217,30 @@ adb shell am start -n com.noop.whoop.debug/com.noop.ui.MainActivity
 
 Open `android/` directly in Android Studio (**File ▸ Open ▸ android/**) and let Gradle sync; run
 the `app` configuration on a physical device.
+
+---
+
+## Installing the APK (sideload & Play Protect)
+
+The released `NOOP-full.apk` (and `NOOP-demo.apk`) is an **unsigned, source-available APK** — there
+is no Play Store listing, because the project is anonymous and has no paid Play identity to publish
+or sign under. That's deliberate, but it means Android treats NOOP as an "unknown app" and **Google
+Play Protect** may warn or block on install — most stubbornly on stock Pixel / recent Android.
+Nothing is wrong with the file; it's just missing a Play signature. To get it on:
+
+1. **Tap "Install anyway."** When the warning appears, choose **More details → Install anyway**.
+2. **If that button is missing** — it can vanish after a first install + uninstall — grant the source
+   directly: **Settings → Apps → Special app access → Install unknown apps → [the browser or file
+   manager you're installing from] → Allow from this source**, then reopen the APK.
+3. **If Play Protect still refuses**, it's your call for an unsigned app you trust: **Play Store →
+   profile icon → Play Protect → ⚙ Settings → "Scan apps with Play Protect" off**, install NOOP,
+   then switch it **back on**.
+4. **Reinstalling is safe.** The app sets `android:allowBackup="false"` and keeps everything in
+   private on-device storage, so uninstalling and reinstalling simply starts fresh — there's no cloud
+   copy to lose, and nothing leaves the device either way.
+
+The demo APK installs alongside the full app (distinct `applicationId`), so you can keep both; the
+same Play Protect prompts apply to each.
 
 ---
 

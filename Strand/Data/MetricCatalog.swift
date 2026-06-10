@@ -17,6 +17,39 @@ struct MetricDescriptor: Identifiable, Hashable {
         let n = decimals == 0 ? String(Int(v.rounded())) : String(format: "%.\(decimals)f", v)
         return unit.isEmpty ? n : "\(n) \(unit)"
     }
+
+    /// Unit-aware format: for the three SI-stored metrics that have a non-metric counterpart
+    /// (weight/lean_mass in kg, skin_temp in °C) convert + relabel via `UnitFormatter`. Every other
+    /// metric (%, bpm, ms, min, …) is unit-agnostic and falls through to the plain `format` above, so
+    /// the imperial toggle only ever touches the values that actually have an imperial form.
+    func format(_ v: Double, system: UnitSystem, temperature: TemperatureUnit) -> String {
+        switch unit {
+        case "kg":  return UnitFormatter.massFromKilograms(v, system: system)
+        case "°C":  return UnitFormatter.temperatureFromCelsius(v, unit: temperature, decimals: decimals)
+        default:    return format(v)
+        }
+    }
+
+    /// Like `format`, but for a DIFFERENCE between two values (e.g. the Δ StatTile). A temperature
+    /// delta scales by 9/5 with NO +32 offset; mass/distance deltas scale by their plain factor. The
+    /// caller supplies the magnitude (sign is rendered separately).
+    func formatDelta(_ v: Double, system: UnitSystem, temperature: TemperatureUnit) -> String {
+        switch unit {
+        case "kg":  return UnitFormatter.massFromKilograms(v, system: system)
+        case "°C":  return UnitFormatter.temperatureDeltaFromCelsius(v, unit: temperature, decimals: decimals)
+        default:    return format(v)
+        }
+    }
+
+    /// The unit LABEL as displayed (e.g. the trailing chip in the Metric Explorer list), mapped to the
+    /// active system. Only the convertible units change; everything else returns its stored label.
+    func displayUnit(system: UnitSystem, temperature: TemperatureUnit) -> String {
+        switch unit {
+        case "kg":  return UnitFormatter.massUnit(system)
+        case "°C":  return UnitFormatter.temperatureUnit(temperature)
+        default:    return unit
+        }
+    }
 }
 
 /// Canonical catalog — mirrors the WHOOP "Trend View" plus Apple Health body metrics.

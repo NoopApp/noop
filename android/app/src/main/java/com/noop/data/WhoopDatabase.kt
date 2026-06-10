@@ -38,9 +38,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MetricSeriesRow::class,
         JournalEntry::class,
         WorkoutRow::class,
+        DismissedWorkout::class,
         AppleDaily::class,
     ],
-    version = 3,
+    version = 5,
     exportSchema = false,
 )
 abstract class WhoopDatabase : RoomDatabase() {
@@ -90,12 +91,40 @@ abstract class WhoopDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v3 -> v4: ADDITIVE — adds `workout.routePolyline` (nullable TEXT) for GPS routes. Nullable so
+         * existing workouts migrate untouched; the SQL must match Room's generated schema for a `String?`
+         * column exactly (TEXT, no NOT NULL, no default). Mirrors MIGRATION_2_3's additive form.
+         */
+        internal val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `workout` ADD COLUMN `routePolyline` TEXT")
+            }
+        }
+
+        /**
+         * v4 -> v5: ADDITIVE — adds the `dismissedWorkout` table (#107): a durable marker that keeps a
+         * dismissed auto-detected bout hidden after the engine re-derives it. CREATE TABLE only (no
+         * data touched), so existing workouts/history are untouched. The SQL MUST match Room's
+         * generated schema for the [DismissedWorkout] entity exactly — all three PK columns NOT NULL,
+         * composite PRIMARY KEY in declaration order. Guarded by MigrationRoundTripTest like the others.
+         */
+        internal val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `dismissedWorkout` (`deviceId` TEXT NOT NULL, " +
+                        "`startTs` INTEGER NOT NULL, `endTs` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`deviceId`, `startTs`))",
+                )
+            }
+        }
+
         private fun build(appContext: Context): WhoopDatabase =
             Room.databaseBuilder(appContext, WhoopDatabase::class.java, DB_NAME)
                 // Real additive migration — NO destructive fallback (see the class doc): with
                 // exportSchema=false a silent rebuild would lose already-acked, non-resendable strap
                 // history on any schema mismatch. Room throws loudly instead; CI guards the SQL.
-                .addMigrations(MIGRATION_2_3)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build()
     }
 }

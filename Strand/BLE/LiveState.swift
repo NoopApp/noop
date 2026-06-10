@@ -80,6 +80,19 @@ public final class LiveState: ObservableObject {
     /// the official WHOOP app. Surfaced as actionable pairing-mode guidance; cleared once the link bonds.
     @Published public var pairingHint: String? = nil
 
+    /// Set when a connect attempt fails because the strap wiped its bond ("Peer removed pairing
+    /// information") — a firmware update, or the official WHOOP app re-bonding it. macOS keeps re-presenting
+    /// the now-stale pairing key, so reconnects loop on the same error with no recovery. Carries an
+    /// actionable forget-and-re-pair guide; cleared on the next successful connect. (5/MG firmware reset, 2026-06)
+    @Published public var reconnectGuide: String? = nil
+
+    /// Set when NOOP detects a marginal Bluetooth radio that can't sustain the WHOOP 4 R10/R11 raw realtime
+    /// stream (#80 — a 2016 Mac / OpenCore drops the link the instant that high-bandwidth burst is armed).
+    /// After repeated arm-then-timeout cycles NOOP stops arming the heavy stream and falls back to the
+    /// low-bandwidth 0x2A37 standard Heart Rate profile, so live HR can still flow on a radio that otherwise
+    /// looped forever. Informational note for the Live screen; cleared on a clean reconnect or Live re-open.
+    @Published public var standardHRMode: String? = nil
+
     public init() {}
 
     /// Single funnel for battery readings — updates the published value AND notifies the hook,

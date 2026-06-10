@@ -18,6 +18,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.noop.data.AppleDaily
 import com.noop.data.MetricSeriesRow
@@ -253,6 +254,9 @@ private enum class Aggregate { Latest, Mean }
 
 @Composable
 private fun TileGrid(data: AppleData, range: AppleRange) {
+    // Imperial/Metric display preference (D#103). Weight + lean mass (stored kg) re-label to lb; every
+    // other Apple Health metric is unit-agnostic. Display-only.
+    val unitSystem = UnitPrefs.system(LocalContext.current)
     // Two columns of equal-width fixed-height tiles, mirroring the macOS adaptive grid.
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
         TileRow {
@@ -268,16 +272,16 @@ private fun TileGrid(data: AppleData, range: AppleRange) {
             }
         }
         TileRow {
-            MetricTile(Modifier.weight(1f), data, range, "weight", "Weight", Palette.accent, "kg") {
-                String.format(Locale.US, "%.1f", it)
+            MetricTile(Modifier.weight(1f), data, range, "weight", "Weight", Palette.accent) {
+                UnitFormatter.massFromKilograms(it, unitSystem)
             }
             MetricTile(Modifier.weight(1f), data, range, "body_fat", "Body Fat", Palette.metricAmber, "%") {
                 String.format(Locale.US, "%.1f", it)
             }
         }
         TileRow {
-            MetricTile(Modifier.weight(1f), data, range, "lean_mass", "Lean Mass", Palette.accent, "kg") {
-                String.format(Locale.US, "%.1f", it)
+            MetricTile(Modifier.weight(1f), data, range, "lean_mass", "Lean Mass", Palette.accent) {
+                UnitFormatter.massFromKilograms(it, unitSystem)
             }
             MetricTile(
                 Modifier.weight(1f), data, range, "asleep_min", "Asleep avg", Palette.metricPurple,
@@ -373,15 +377,17 @@ private fun ActivitySection(data: AppleData, range: AppleRange) {
 
 @Composable
 private fun BodySection(data: AppleData, range: AppleRange) {
+    // Weight + lean mass (stored kg) re-label to lb under the imperial preference.
+    val unitSystem = UnitPrefs.system(LocalContext.current)
     ChartSection("Body Composition", "Slow threads", range) {
         MetricChartCard(data, range, "weight", "Weight", Palette.accent) {
-            String.format(Locale.US, "%.1f kg", it)
+            UnitFormatter.massFromKilograms(it, unitSystem)
         }
         MetricChartCard(data, range, "body_fat", "Body fat", Palette.metricAmber) {
             String.format(Locale.US, "%.1f%%", it)
         }
         MetricChartCard(data, range, "lean_mass", "Lean body mass", Palette.accent) {
-            String.format(Locale.US, "%.1f kg", it)
+            UnitFormatter.massFromKilograms(it, unitSystem)
         }
         MetricChartCard(data, range, "bmi", "BMI", Palette.metricPurple) {
             String.format(Locale.US, "%.1f", it)

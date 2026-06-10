@@ -18,8 +18,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -34,9 +36,20 @@ import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
+import com.noop.analytics.Sport
+import com.noop.analytics.WorkoutSport
 import com.noop.ble.WhoopModel
 
 /**
@@ -52,6 +65,10 @@ fun LiveScreen(viewModel: AppViewModel) {
     val selectedModel by viewModel.selectedModel.collectAsStateWithLifecycle()
     val activeWorkout by viewModel.activeWorkout.collectAsStateWithLifecycle()
     val lastWorkout by viewModel.lastWorkout.collectAsStateWithLifecycle()
+
+    // Imperial/Metric display preference (D#103). Live distance/pace are computed from metres + sec/km
+    // and re-labelled here. Display-only.
+    val unitSystem = UnitPrefs.system(LocalContext.current)
 
     // The runtime Bluetooth permission gates scanning. If it isn't granted, the Connect button
     // REQUESTS it (rather than silently doing nothing), then connects once allowed. Shared with
@@ -94,16 +111,51 @@ fun LiveScreen(viewModel: AppViewModel) {
             )
         }
 
+        // Strap wiped its Bluetooth bond (firmware reset / official WHOOP app re-bond): show the forget+
+        // re-pair steps in-app instead of looping a dead reconnect — parity with the macOS v1.73 banner.
+        live.reconnectGuide?.let { guide ->
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Palette.surfaceRaised, RoundedCornerShape(12.dp))
+                    .border(1.dp, Palette.statusWarning.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Text(
+                    "Can't connect — your strap's pairing was reset",
+                    style = NoopType.subhead,
+                    color = Palette.textPrimary,
+                )
+                Text(guide, style = NoopType.footnote, color = Palette.textSecondary)
+            }
+        }
+
         // Honest sync outcome for a cloud-free app. While offloading, say so plainly — the brief
         // "· syncing" pill suffix is easy to miss (#91/#93). Otherwise: a non-silent error if the
         // last offload stalled, else a relative "history synced N ago". (PR #85; sync-visibility v1.70)
         if (live.backfilling) {
-            Text(
-                "Syncing your strap history…",
-                style = NoopType.footnote,
-                color = Palette.textSecondary,
+            // INDETERMINATE on purpose: the strap never tells us how many records remain, so a percent
+            // would be a lie. A small spinner + the live acked-chunk count is the honest "it's working"
+            // signal. The chunk count only appears once the first chunk lands (0 reads as "starting"). (#93)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth(),
-            )
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(13.dp),
+                    strokeWidth = 2.dp,
+                    color = Palette.accent,
+                )
+                Text(
+                    if (live.syncChunksThisSession > 0)
+                        "Syncing your strap history… ${live.syncChunksThisSession} chunks pulled"
+                    else "Syncing your strap history…",
+                    style = NoopType.footnote,
+                    color = Palette.textSecondary,
+                )
+            }
         } else {
             val syncError = live.lastSyncError
             if (syncError != null) {
@@ -150,6 +202,76 @@ fun LiveScreen(viewModel: AppViewModel) {
             )
         }
 
+        // GPS workout sport picker — pick a sport (searchable) + GPS toggle, then start.
+        var showSportPicker by remember { mutableStateOf(false) }
+        if (showSportPicker) {
+            var query by remember { mutableStateOf("") }
+            var selected by remember { mutableStateOf(WorkoutSport.default) }
+            var gpsOn by remember(selected) { mutableStateOf(selected.isDistanceSport) }
+            val filtered = WorkoutSport.all.filter { it.name.contains(query, ignoreCase = true) }
+            // GPS needs ACCESS_FINE_LOCATION, which is NOT granted by the BLE flow on Android 12+.
+            // Request it before starting; if denied, the workout still starts (without a route). (#101)
+            val startWithGps = rememberRequestLocation { granted ->
+                viewModel.startWorkout(selected, gpsEnabled = gpsOn && granted)
+                showSportPicker = false
+            }
+            AlertDialog(
+                onDismissRequest = { showSportPicker = false },
+                title = { Text("Start a workout") },
+                text = {
+                    Column {
+                        OutlinedTextField(
+                            value = query, onValueChange = { query = it },
+                            label = { Text("Search sport") }, singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Column(modifier = Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState())) {
+                            filtered.forEach { sp ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth()
+                                        .clickable { selected = sp; gpsOn = sp.isDistanceSport }
+                                        .padding(vertical = 10.dp),
+                                ) {
+                                    Text(
+                                        sp.name, style = NoopType.body,
+                                        color = if (sp == selected) Palette.accent else Palette.textPrimary,
+                                    )
+                                    if (sp.isDistanceSport) {
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("· GPS", style = NoopType.footnote, color = Palette.textTertiary)
+                                    }
+                                }
+                            }
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        ) {
+                            Text("Track GPS route", style = NoopType.body, color = Palette.textPrimary)
+                            Spacer(Modifier.weight(1f))
+                            Switch(checked = gpsOn, onCheckedChange = { gpsOn = it })
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        if (gpsOn) {
+                            startWithGps() // requests location, then starts in the callback (#101)
+                        } else {
+                            viewModel.startWorkout(selected, gpsEnabled = false)
+                            showSportPicker = false
+                        }
+                    }) {
+                        Text("Start ${selected.name}")
+                    }
+                },
+                dismissButton = {
+                    OutlinedButton(onClick = { showSportPicker = false }) { Text("Cancel") }
+                },
+            )
+        }
+
         // Manual workout — start/stop a session yourself; records HR + strain until you end it.
         val w = activeWorkout
         if (w != null) {
@@ -161,7 +283,7 @@ fun LiveScreen(viewModel: AppViewModel) {
             NoopCard {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                        Text("● RECORDING WORKOUT", style = NoopType.overline, color = Palette.statusCritical)
+                        Text("● ${w.sport.name.uppercase()}", style = NoopType.overline, color = Palette.statusCritical)
                         Spacer(Modifier.weight(1f))
                         Text(
                             String.format("%d:%02d", elapsedS / 60, elapsedS % 60),
@@ -173,6 +295,12 @@ fun LiveScreen(viewModel: AppViewModel) {
                         StatTile(modifier = Modifier.weight(1f), label = "Avg", value = if (w.avgHr > 0) "${w.avgHr}" else "—")
                         StatTile(modifier = Modifier.weight(1f), label = "Peak", value = if (w.peakHr > 0) "${w.peakHr}" else "—")
                         StatTile(modifier = Modifier.weight(1f), label = "Strain", value = String.format("%.1f", w.liveStrain))
+                    }
+                    if (w.gpsEnabled) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(Metrics.gap)) {
+                            StatTile(modifier = Modifier.weight(1f), label = "Distance", value = liveDistance(w.distanceM, unitSystem))
+                            StatTile(modifier = Modifier.weight(1f), label = "Pace", value = w.paceSecPerKm?.let { livePace(it, unitSystem) } ?: "—")
+                        }
                     }
                     Button(
                         onClick = { viewModel.endWorkout() },
@@ -187,7 +315,7 @@ fun LiveScreen(viewModel: AppViewModel) {
         } else {
             if (live.bonded) {
                 Button(
-                    onClick = { viewModel.startWorkout() },
+                    onClick = { showSportPicker = true },
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                     colors = ButtonDefaults.buttonColors(
@@ -199,13 +327,15 @@ fun LiveScreen(viewModel: AppViewModel) {
                 val mins = ((row.durationS ?: 0.0) / 60).toInt()
                 val parts = listOfNotNull(
                     "$mins min",
+                    row.distanceM?.let { liveDistance(it, unitSystem) },
                     row.avgHr?.let { "$it avg bpm" },
                     row.strain?.let { String.format("strain %.1f", it) },
                 )
                 Text(
-                    "✓ Workout saved · ${parts.joinToString(" · ")}",
+                    "✓ ${row.sport} saved · ${parts.joinToString(" · ")}",
                     style = NoopType.footnote, color = Palette.textSecondary,
                 )
+                row.routePolyline?.let { RouteCanvas(it, modifier = Modifier.padding(top = 8.dp)) }
             }
         }
 
@@ -311,6 +441,47 @@ fun LiveScreen(viewModel: AppViewModel) {
             }
         }
 
+        // Manual "Sync now" — kick a historical offload on demand instead of waiting for the 15-min
+        // periodic timer (#93). Only meaningful once bonded (the offload needs the command channel), and
+        // disabled mid-session so a double-tap can't fight the in-flight offload — viewModel.syncNow()
+        // also no-ops in that case, this is just the matching UI state. While syncing, the button shows
+        // an INDETERMINATE spinner (NEVER a percent — total pending records are unknowable from the
+        // protocol); the "Syncing your strap history… N chunks pulled" line above carries the live count.
+        if (live.bonded) {
+            OutlinedButton(
+                onClick = { viewModel.syncNow() },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !live.backfilling,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Palette.accent),
+            ) {
+                if (live.backfilling) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .size(18.dp)
+                            .padding(end = 4.dp),
+                        strokeWidth = 2.dp,
+                        color = Palette.accent,
+                    )
+                } else {
+                    Icon(
+                        Icons.Filled.Sync,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(18.dp)
+                            .padding(end = 4.dp),
+                    )
+                }
+                Text(
+                    if (live.backfilling) "Syncing…" else "Sync now",
+                    style = NoopType.captionNumber,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Clip,
+                )
+            }
+        }
+
         // Foolproof connection walkthrough — detects each blocker (WHOOP app, Bluetooth,
         // permission) and offers a one-tap fix. Hidden once the strap is bonded.
         if (!live.bonded) {
@@ -375,4 +546,19 @@ internal fun relativeAgo(epochSec: Long, nowSec: Long = System.currentTimeMillis
         d < 86_400L -> "${d / 3600L} h ago"
         else -> "${d / 86_400L} d ago"
     }
+}
+
+/** Live workout distance from metres, 2-decimal precision, re-labelled to the active system (km / mi). */
+private fun liveDistance(distanceM: Double, system: UnitSystem): String = when (system) {
+    UnitSystem.METRIC -> java.lang.String.format(java.util.Locale.US, "%.2f km", distanceM / 1000.0)
+    UnitSystem.IMPERIAL ->
+        java.lang.String.format(java.util.Locale.US, "%.2f mi", UnitFormatter.kmToMiles(distanceM / 1000.0))
+}
+
+/** Live pace from seconds-per-km, re-labelled to minutes per km / per mile. A per-mile pace is per-km
+ *  divided by miles-per-km (a mile is longer, so the time per unit is larger). */
+private fun livePace(secPerKm: Double, system: UnitSystem): String {
+    val sec = if (system == UnitSystem.IMPERIAL) secPerKm / UnitFormatter.MILES_PER_KILOMETER else secPerKm
+    val unit = if (system == UnitSystem.IMPERIAL) "/mi" else "/km"
+    return java.lang.String.format(java.util.Locale.US, "%d:%02d %s", (sec / 60).toInt(), (sec % 60).toInt(), unit)
 }

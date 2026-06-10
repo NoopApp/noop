@@ -308,19 +308,28 @@ public struct ImportSummary: Sendable, Equatable {
     /// Per-category counts (e.g. `["HeartRate": 1200, "SleepAnalysis": 88]` for
     /// Apple Health, or `["cycles": 30, "workouts": 12]` for Whoop).
     public var countsByCategory: [String: Int]
+    /// Number of XML spans dropped during a tolerant import: either a single
+    /// hard parse error after which we kept the partial result (counts as 1), or
+    /// the number of illegal-byte runs the pre-parse sanitizer scrubbed. Surfaced
+    /// honestly in the UI so a partial import never silently looks complete.
+    /// `0` for a fully clean import. Defaulted so other sources (Whoop) and older
+    /// call sites stay source-compatible.
+    public var skippedSpans: Int
 
     public init(
         sourceKind: DataSourceKind,
         recordCount: Int,
         earliest: Date?,
         latest: Date?,
-        countsByCategory: [String: Int]
+        countsByCategory: [String: Int],
+        skippedSpans: Int = 0
     ) {
         self.sourceKind = sourceKind
         self.recordCount = recordCount
         self.earliest = earliest
         self.latest = latest
         self.countsByCategory = countsByCategory
+        self.skippedSpans = skippedSpans
     }
 }
 

@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -90,6 +91,28 @@ data class CompareMetric(
             java.lang.String.format(Locale.US, "%.${decimals}f", v)
         }
         return if (unit.isEmpty()) n else "$n $unit"
+    }
+
+    /** Unit-aware format (D#103): weight/lean_mass (kg) and skin_temp (°C) convert + relabel via
+     *  [UnitFormatter]; everything else (%, bpm, ms, min, …) is unit-agnostic and falls through. */
+    fun format(v: Double, system: UnitSystem, temperature: TemperatureUnit): String = when (unit) {
+        "kg" -> UnitFormatter.massFromKilograms(v, system)
+        "°C" -> UnitFormatter.temperatureFromCelsius(v, temperature, decimals)
+        else -> format(v)
+    }
+
+    /** Like [format] but for a DIFFERENCE: a temperature delta omits the +32 offset. */
+    fun formatDelta(v: Double, system: UnitSystem, temperature: TemperatureUnit): String = when (unit) {
+        "kg" -> UnitFormatter.massFromKilograms(v, system)
+        "°C" -> UnitFormatter.temperatureDeltaFromCelsius(v, temperature, decimals)
+        else -> format(v)
+    }
+
+    /** Displayed unit LABEL mapped to the active system (kg→lb, °C→°F); others unchanged. */
+    fun displayUnit(system: UnitSystem, temperature: TemperatureUnit): String = when (unit) {
+        "kg" -> UnitFormatter.massUnit(system)
+        "°C" -> UnitFormatter.temperatureUnit(temperature)
+        else -> unit
     }
 }
 
@@ -744,6 +767,11 @@ private fun OverlayChart(series: List<CompareSeries>, modifier: Modifier) {
 
 @Composable
 private fun Legend(series: List<CompareSeries>) {
+    // Imperial/Metric display preference (D#103). Only weight/lean mass (kg) and skin temp (°C) in the
+    // catalog carry a convertible unit; the min–max labels re-label under the toggle. Display-only.
+    val context = LocalContext.current
+    val unitSystem = UnitPrefs.system(context)
+    val tempUnit = UnitPrefs.temperature(context)
     Column {
         series.forEachIndexed { idx, s ->
             Row(
@@ -769,7 +797,8 @@ private fun Legend(series: List<CompareSeries>) {
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    "${s.metric.format(s.realMin)} – ${s.metric.format(s.realMax)}",
+                    "${s.metric.format(s.realMin, unitSystem, tempUnit)} – " +
+                        s.metric.format(s.realMax, unitSystem, tempUnit),
                     style = NoopType.captionNumber,
                     color = Palette.textSecondary,
                 )

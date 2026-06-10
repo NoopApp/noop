@@ -26,6 +26,10 @@ struct TodayView: View {
     @EnvironmentObject var repo: Repository
     @EnvironmentObject var live: LiveState
 
+    // Imperial/Metric display preference (D#103). Only the Weight tile carries a convertible unit here.
+    @AppStorage(UnitPrefs.systemKey) private var unitSystemRaw = UnitSystem.metric.rawValue
+    private var unitSystem: UnitSystem { UnitSystem(rawValue: unitSystemRaw) ?? .metric }
+
     // 14-day sparkline series, keyed by metric key. Loaded once in .task.
     @State private var sparks: [String: [Double]] = [:]
     @State private var workouts: [WorkoutRow] = []
@@ -349,7 +353,7 @@ struct TodayView: View {
                 )
                 StatTile(
                     label: "Weight",
-                    value: aLatest?.weightKg.map { String(format: "%.1f kg", $0) } ?? latestString("weight", decimals: 1, unit: "kg"),
+                    value: weightString(aLatest?.weightKg),
                     caption: "latest",
                     accent: StrandPalette.accent,
                     sparkline: sparks["weight"],
@@ -519,6 +523,14 @@ struct TodayView: View {
         guard let last = sparks[key]?.last else { return "—" }
         let n = decimals == 0 ? intString(last) : String(format: "%.\(decimals)f", last)
         return unit.isEmpty ? n : "\(n) \(unit)"
+    }
+
+    /// Weight in kg → the active mass unit. Prefers the Apple Health latest reading, falling back to the
+    /// "weight" series' newest point so a sparse-but-recent value still renders.
+    private func weightString(_ appleWeightKg: Double?) -> String {
+        let kg = appleWeightKg ?? sparks["weight"]?.last
+        guard let kg else { return "—" }
+        return UnitFormatter.massFromKilograms(kg, system: unitSystem)
     }
 
     // MARK: - Derived text

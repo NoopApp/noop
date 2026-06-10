@@ -112,6 +112,9 @@ object NoopPrefs {
     const val NAME = "noop_prefs"
     const val KEY_ONBOARDED = "noop.onboarded"
     const val KEY_LAST_SEEN_CHANGELOG = "noop.lastSeenChangelogVersion"
+    /** Terms-of-use version the user last accepted. Empty until the first-run gate is accepted; a
+     *  material terms change bumps [Terms.CURRENT_VERSION] and re-prompts. Mirrors macOS @AppStorage. */
+    const val KEY_ACCEPTED_TERMS_VERSION = "noop.acceptedTermsVersion"
 
     /** "Keep connected in the background" — drives [com.noop.ble.WhoopConnectionService]. Default on. */
     const val KEY_BACKGROUND_CONNECTION = "noop.backgroundConnection"
@@ -138,6 +141,23 @@ object NoopPrefs {
 
     fun setDebugLogging(context: Context, enabled: Boolean) {
         of(context).edit().putBoolean(KEY_DEBUG_LOGGING, enabled).apply()
+    }
+
+    /** Imperial/Metric display preference (D#103). Display-only — stored data stays SI. The length/mass
+     *  system is read by [UnitPrefs.system]; the temperature override (empty = "match the system") by
+     *  [UnitPrefs.temperature]. Mirrors macOS @AppStorage("units.system" / "units.temperature"). */
+    const val KEY_UNIT_SYSTEM = "units.system"
+    const val KEY_TEMPERATURE_UNIT = "units.temperature"
+
+    fun setUnitSystem(context: Context, system: UnitSystem) {
+        of(context).edit().putString(KEY_UNIT_SYSTEM, system.raw).apply()
+    }
+
+    /** Persist the temperature override, or pass null to clear it back to "match the system". */
+    fun setTemperatureUnit(context: Context, unit: TemperatureUnit?) {
+        of(context).edit().apply {
+            if (unit == null) remove(KEY_TEMPERATURE_UNIT) else putString(KEY_TEMPERATURE_UNIT, unit.raw)
+        }.apply()
     }
 
     /** Health Connect periodic auto-sync (Samsung Health → Health Connect → NOOP). Default OFF.
@@ -260,6 +280,19 @@ fun NoopRoot() {
     }
     var lastSeenChangelog by remember {
         mutableStateOf(prefs.getString(NoopPrefs.KEY_LAST_SEEN_CHANGELOG, "") ?: "")
+    }
+
+    // Terms acknowledgment gate — over EVERYTHING (before onboarding/pairing/Bluetooth) until the
+    // current terms version is accepted; re-appears if the terms materially change. (clickwrap)
+    var acceptedTerms by remember {
+        mutableStateOf(prefs.getString(NoopPrefs.KEY_ACCEPTED_TERMS_VERSION, "") ?: "")
+    }
+    if (acceptedTerms != Terms.CURRENT_VERSION) {
+        TermsGateScreen(onAccept = {
+            prefs.edit().putString(NoopPrefs.KEY_ACCEPTED_TERMS_VERSION, Terms.CURRENT_VERSION).apply()
+            acceptedTerms = Terms.CURRENT_VERSION
+        })
+        return
     }
 
     if (!onboarded) {

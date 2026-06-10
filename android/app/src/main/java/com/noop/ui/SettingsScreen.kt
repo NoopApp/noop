@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Sensors
+import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.Button
@@ -65,6 +66,7 @@ import com.noop.BuildConfig
 import com.noop.analytics.Zones
 import com.noop.ble.PuffinExperiment
 import com.noop.data.DataBackup
+import com.noop.ingest.WhoopCsvExporter
 import com.noop.update.UpdateCheck
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -191,6 +193,15 @@ fun SettingsScreen(vm: AppViewModel) {
     // "Debug logging" — mirror the strap log to logcat (adb). Default OFF so normal users don't.
     var debugLogging by remember { mutableStateOf(NoopPrefs.debugLogging(context)) }
 
+    // Imperial/Metric display preference (D#103). Display-only — stored data stays SI. The system drives
+    // the profile fields below (imperial entry) too, so it's local state the whole screen reads.
+    // `temperatureRaw` is "" (match the system) or a TemperatureUnit raw value. SharedPreferences isn't
+    // reactive, so these mirror into local state like the toggles above.
+    var unitSystem by remember { mutableStateOf(UnitPrefs.system(context)) }
+    var temperatureRaw by remember {
+        mutableStateOf(NoopPrefs.of(context).getString(NoopPrefs.KEY_TEMPERATURE_UNIT, "") ?: "")
+    }
+
     // SAF launchers — CreateDocument for export, OpenDocument for import.
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream"),
@@ -211,6 +222,31 @@ fun SettingsScreen(vm: AppViewModel) {
                 },
                 onFailure = { e ->
                     Toast.makeText(context, "Backup problem: ${e.message}", Toast.LENGTH_LONG).show()
+                },
+            )
+        }
+    }
+
+    // CSV export — the 4-CSV WHOOP-format zip NOOP's own importers re-import (Android + Mac).
+    val csvExportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip"),
+    ) { uri ->
+        if (uri == null) { backupBusy = false; return@rememberLauncherForActivityResult }
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { WhoopCsvExporter.exportZip(context, uri, vm.repo) }
+            }
+            backupBusy = false
+            result.fold(
+                onSuccess = { msg ->
+                    Toast.makeText(
+                        context,
+                        "$msg Re-import it via Data sources → WHOOP import, on Android or Mac.",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                },
+                onFailure = { e ->
+                    Toast.makeText(context, "CSV export problem: ${e.message}", Toast.LENGTH_LONG).show()
                 },
             )
         }
@@ -272,23 +308,48 @@ fun SettingsScreen(vm: AppViewModel) {
                 }
                 RowDivider()
                 FormRow(label = "Weight") {
-                    StepperField(
-                        value = "%.1f".format(profile.weightKg),
-                        unit = "kg",
-                        accessibility = "Weight in kilograms",
-                        onMinus = { mutate { profile.weightKg -= 0.5 } },
-                        onPlus = { mutate { profile.weightKg += 0.5 } },
-                    )
+                    // Imperial mode steps in whole pounds and stores the kg equivalent; metric steps in
+                    // 0.5 kg. The profile is always SI — only the entry unit changes.
+                    if (unitSystem == UnitSystem.IMPERIAL) {
+                        val lb = UnitFormatter.kgToPounds(profile.weightKg)
+                        StepperField(
+                            value = "%.0f".format(lb),
+                            unit = "lb",
+                            accessibility = "Weight, ${lb.roundToInt()} pounds",
+                            onMinus = { mutate { profile.weightKg = (lb - 1) / UnitFormatter.POUNDS_PER_KILOGRAM } },
+                            onPlus = { mutate { profile.weightKg = (lb + 1) / UnitFormatter.POUNDS_PER_KILOGRAM } },
+                        )
+                    } else {
+                        StepperField(
+                            value = "%.1f".format(profile.weightKg),
+                            unit = "kg",
+                            accessibility = "Weight in kilograms",
+                            onMinus = { mutate { profile.weightKg -= 0.5 } },
+                            onPlus = { mutate { profile.weightKg += 0.5 } },
+                        )
+                    }
                 }
                 RowDivider()
                 FormRow(label = "Height") {
-                    StepperField(
-                        value = "%.0f".format(profile.heightCm),
-                        unit = "cm",
-                        accessibility = "Height in centimetres",
-                        onMinus = { mutate { profile.heightCm -= 1 } },
-                        onPlus = { mutate { profile.heightCm += 1 } },
-                    )
+                    // Imperial mode steps in whole inches and stores the cm equivalent; metric steps in cm.
+                    if (unitSystem == UnitSystem.IMPERIAL) {
+                        val (ft, inch) = UnitFormatter.cmToFeetInches(profile.heightCm)
+                        val totalInches = UnitFormatter.cmToInches(profile.heightCm).roundToInt()
+                        StepperField(
+                            value = "$ft′ $inch″",
+                            accessibility = "Height, $ft feet $inch inches",
+                            onMinus = { mutate { profile.heightCm = (totalInches - 1) * UnitFormatter.CENTIMETERS_PER_INCH } },
+                            onPlus = { mutate { profile.heightCm = (totalInches + 1) * UnitFormatter.CENTIMETERS_PER_INCH } },
+                        )
+                    } else {
+                        StepperField(
+                            value = "%.0f".format(profile.heightCm),
+                            unit = "cm",
+                            accessibility = "Height in centimetres",
+                            onMinus = { mutate { profile.heightCm -= 1 } },
+                            onPlus = { mutate { profile.heightCm += 1 } },
+                        )
+                    }
                 }
                 RowDivider()
                 FormRow(label = "Max heart rate") {
@@ -316,6 +377,50 @@ fun SettingsScreen(vm: AppViewModel) {
                             color = if (profile.hrMaxOverride > 0) Palette.accent else Palette.textTertiary,
                         )
                     }
+                }
+            }
+        }
+
+        // --- Units ---
+        // Imperial/Metric display toggle + a separate temperature override. Display-only — nothing
+        // stored changes; NOOP keeps everything in SI and converts at the point of display. Mirrors the
+        // macOS Settings → Units card.
+        SettingsSection(
+            icon = Icons.Filled.Straighten,
+            title = "Units",
+            blurb = "Choose how distances, weights, heights and temperatures are shown. Your data is always stored the same way — this only changes the display.",
+        ) {
+            Column {
+                FormRow(label = "Measurement system") {
+                    SegmentedPillControl(
+                        items = listOf(UnitSystem.METRIC, UnitSystem.IMPERIAL),
+                        selection = unitSystem,
+                        label = { if (it == UnitSystem.METRIC) "Metric" else "Imperial" },
+                        onSelect = {
+                            unitSystem = it
+                            NoopPrefs.setUnitSystem(context, it)
+                        },
+                    )
+                }
+                RowDivider()
+                FormRow(label = "Temperature") {
+                    // Three-way: "Match" follows the system above; °C / °F pin it explicitly. Stored as an
+                    // empty string ("match") or the TemperatureUnit raw value.
+                    SegmentedPillControl(
+                        items = listOf("", TemperatureUnit.CELSIUS.raw, TemperatureUnit.FAHRENHEIT.raw),
+                        selection = temperatureRaw,
+                        label = {
+                            when (it) {
+                                TemperatureUnit.CELSIUS.raw -> "°C"
+                                TemperatureUnit.FAHRENHEIT.raw -> "°F"
+                                else -> "Match"
+                            }
+                        },
+                        onSelect = {
+                            temperatureRaw = it
+                            NoopPrefs.setTemperatureUnit(context, TemperatureUnit.fromRaw(it))
+                        },
+                    )
                 }
             }
         }
@@ -567,6 +672,15 @@ fun SettingsScreen(vm: AppViewModel) {
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Palette.accent),
                     ) { Text("Import…", style = NoopType.captionNumber) }
 
+                    OutlinedButton(
+                        onClick = {
+                            backupBusy = true
+                            csvExportLauncher.launch("noop-export-${java.time.LocalDate.now()}.zip")
+                        },
+                        enabled = !backupBusy,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Palette.accent),
+                    ) { Text("Export CSV…", style = NoopType.captionNumber) }
+
                     if (backupBusy) {
                         CircularProgressIndicator(
                             color = Palette.accent,
@@ -579,7 +693,8 @@ fun SettingsScreen(vm: AppViewModel) {
                 NoteRow(
                     icon = Icons.Filled.Info,
                     iconTint = Palette.textTertiary,
-                    text = "Importing overwrites everything currently on this phone. Your old data is kept in a side file just in case. NOOP needs a relaunch for an import to take effect.",
+                    text = "Importing overwrites everything currently on this phone. Your old data is kept in a side file just in case. NOOP needs a relaunch for an import to take effect. " +
+                        "Export CSV writes a WHOOP-format zip of your days, sleeps, workouts and journal that re-imports into NOOP on Android or Mac — on-device computed rows are marked APPROXIMATE in its Source column; the .noopdb backup stays the lossless restore path.",
                 )
             }
         }

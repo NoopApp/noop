@@ -164,6 +164,15 @@ private struct MetricRow: View {
     let metric: MetricDescriptor
     let isEmpty: Bool
 
+    // Trailing unit chip follows the Imperial/Metric preference (kg→lb, °C→°F).
+    @AppStorage(UnitPrefs.systemKey) private var unitSystemRaw = UnitSystem.metric.rawValue
+    @AppStorage(UnitPrefs.temperatureKey) private var temperatureRaw = ""
+    private var unitLabel: String {
+        let system = UnitSystem(rawValue: unitSystemRaw) ?? .metric
+        let temp = UnitPrefs.resolveTemperature(system: system, override: temperatureRaw)
+        return metric.displayUnit(system: system, temperature: temp)
+    }
+
     var body: some View {
         HStack(spacing: 14) {
             ZStack {
@@ -186,8 +195,8 @@ private struct MetricRow: View {
 
             Spacer(minLength: 8)
 
-            if !metric.unit.isEmpty {
-                Text(metric.unit)
+            if !unitLabel.isEmpty {
+                Text(unitLabel)
                     .font(StrandFont.captionNumber)
                     .foregroundStyle(StrandPalette.textSecondary)
             }
@@ -206,7 +215,7 @@ private struct MetricRow: View {
         .padding(.vertical, 11)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(metric.title), \(metric.unit.isEmpty ? metric.category : metric.unit)\(isEmpty ? ", no data" : "")")
+        .accessibilityLabel("\(metric.title), \(unitLabel.isEmpty ? metric.category : unitLabel)\(isEmpty ? ", no data" : "")")
         .accessibilityAddTraits(.isButton)
     }
 }
@@ -219,6 +228,16 @@ private struct MetricRow: View {
 struct MetricDetailView: View {
     let metric: MetricDescriptor
     @EnvironmentObject var repo: Repository
+
+    // Imperial/Metric display preference (D#103). Display-only: weight (kg) and skin temp (°C) re-label
+    // here; everything else is unit-agnostic and renders unchanged.
+    @AppStorage(UnitPrefs.systemKey) private var unitSystemRaw = UnitSystem.metric.rawValue
+    @AppStorage(UnitPrefs.temperatureKey) private var temperatureRaw = ""
+    private var unitSystem: UnitSystem { UnitSystem(rawValue: unitSystemRaw) ?? .metric }
+    private var temperatureUnit: TemperatureUnit {
+        UnitPrefs.resolveTemperature(system: unitSystem, override: temperatureRaw)
+    }
+    private func fmt(_ v: Double) -> String { metric.format(v, system: unitSystem, temperature: temperatureUnit) }
 
     @State private var range: ExploreRange = .month
     /// Full ascending series for this metric — ALL history.
@@ -385,7 +404,7 @@ struct MetricDetailView: View {
             guard let day = latest?.day, let d = parseDay(day) else { return "—" }
             return "as of \(longDate(d))"
         }()
-        let heroValue = latest.map { metric.format($0.value) } ?? "—"
+        let heroValue = latest.map { fmt($0.value) } ?? "—"
         let subtitle = windowFellBack
             ? "Sparse — widened to \(effectiveRange.name) · \(windowed.count) readings"
             : "\(windowed.count) readings · \(range.name)"
@@ -400,7 +419,7 @@ struct MetricDetailView: View {
                 valueRange: valueRange(windowed.map(\.value)),
                 showsArea: true,
                 height: NoopMetrics.chartHeight,
-                valueFormat: { metric.format($0) }
+                valueFormat: { fmt($0) }
             )
         } footer: {
             ChartFooter([
@@ -440,15 +459,15 @@ struct MetricDetailView: View {
             alignment: .leading,
             spacing: NoopMetrics.gap
         ) {
-            StatTile(label: "Average", value: metric.format(s.mean),
+            StatTile(label: "Average", value: fmt(s.mean),
                      caption: "\(s.n) days", accent: accent,
                      sparkline: windowValues.count > 1 ? windowValues : nil,
                      sparkColor: accent)
-            StatTile(label: "Min", value: metric.format(s.min),
+            StatTile(label: "Min", value: fmt(s.min),
                      accent: StrandPalette.textPrimary)
-            StatTile(label: "Max", value: metric.format(s.max),
+            StatTile(label: "Max", value: fmt(s.max),
                      accent: StrandPalette.textPrimary)
-            StatTile(label: "Latest", value: latest.map { metric.format($0.value) } ?? "—",
+            StatTile(label: "Latest", value: latest.map { fmt($0.value) } ?? "—",
                      caption: latestCaption, accent: accent)
             StatTile(label: "Δ vs prev", value: deltaText ?? "—",
                      caption: deltaCaption, accent: StrandPalette.textPrimary,
@@ -570,7 +589,9 @@ struct MetricDetailView: View {
     // MARK: Helpers
 
     private func signed(_ delta: Double) -> String {
-        (delta >= 0 ? "+" : "−") + metric.format(abs(delta))
+        // A difference between two readings: route through the delta formatter so a temperature Δ
+        // scales without the +32 offset.
+        (delta >= 0 ? "+" : "−") + metric.formatDelta(abs(delta), system: unitSystem, temperature: temperatureUnit)
     }
 
     private func correlationColor(_ r: Double) -> Color {

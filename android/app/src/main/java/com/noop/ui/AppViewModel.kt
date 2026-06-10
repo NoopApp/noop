@@ -6,8 +6,13 @@ import androidx.lifecycle.viewModelScope
 import com.noop.NoopApplication
 import com.noop.analytics.IllnessWatch
 import com.noop.analytics.IntelligenceEngine
+import com.noop.analytics.RouteMath
+import com.noop.analytics.Sport
 import com.noop.analytics.StrainScorer
 import com.noop.analytics.UserProfile
+import com.noop.analytics.WorkoutSport
+import com.noop.location.LocationTracker
+import kotlinx.coroutines.Job
 import com.noop.ble.LiveState
 import com.noop.ble.WhoopConnectionService
 import com.noop.ble.WhoopModel
@@ -104,6 +109,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _illnessWatchEnabled = MutableStateFlow(NoopPrefs.illnessWatch(appContext))
     /** Whether the illness early-warning runs (banner + notification). */
     val illnessWatchEnabled: StateFlow<Boolean> = _illnessWatchEnabled.asStateFlow()
+
+    // Declared BEFORE the init block for the SAME reason as _illnessWatchEnabled above: the bond
+    // collector launched from init runs synchronously on Main.immediate and reads _smartAlarmEnabled on
+    // its first (cached) emission. A declaration after init is null there and NPEs the constructor on a
+    // cold start where the strap is already bonded — the #84 "crashes once, fine on the retry" race on
+    // fast devices (S24+). Port of macOS BehaviorStore (Swift two-phase init makes this safe for free).
+    private val _smartAlarmEnabled = MutableStateFlow(NoopPrefs.smartAlarmEnabled(appContext))
+    val smartAlarmEnabled: StateFlow<Boolean> = _smartAlarmEnabled.asStateFlow()
+    private val _smartAlarmMinutes = MutableStateFlow(NoopPrefs.smartAlarmMinutes(appContext))
+    val smartAlarmMinutes: StateFlow<Int> = _smartAlarmMinutes.asStateFlow()
 
     // MARK: - Today's cached metrics
 
@@ -253,7 +268,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      *  recomputed as the window grows so the active card shows strain building in real time. */
     data class ActiveWorkout(
         val startMs: Long,
+        val sport: Sport,
+        val gpsEnabled: Boolean,
         val samples: List<HrSample> = emptyList(),
+        val track: List<RouteMath.LatLng> = emptyList(),
+        val distanceM: Double = 0.0,
+        val paceSecPerKm: Double? = null,
         val liveStrain: Double = 0.0,
         val avgHr: Int = 0,
         val peakHr: Int = 0,
@@ -264,33 +284,59 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _lastWorkout = MutableStateFlow<WorkoutRow?>(null)
     val lastWorkout: StateFlow<WorkoutRow?> = _lastWorkout.asStateFlow()
 
-    /** Begin a manually-tracked workout (single buzz confirms). */
-    fun startWorkout() {
+    private val locationTracker by lazy { LocationTracker(appContext) }
+    private var gpsJob: Job? = null
+
+    /** Begin a workout for [sport]; start GPS route tracking when [gpsEnabled]. Single buzz confirms. */
+    fun startWorkout(sport: Sport = WorkoutSport.default, gpsEnabled: Boolean = false) {
         if (_activeWorkout.value != null) return
         _lastWorkout.value = null
-        _activeWorkout.value = ActiveWorkout(startMs = System.currentTimeMillis())
+        _activeWorkout.value = ActiveWorkout(startMs = System.currentTimeMillis(), sport = sport, gpsEnabled = gpsEnabled)
         buzz(1)
+        if (gpsEnabled) {
+            gpsJob = viewModelScope.launch {
+                locationTracker.stream().collect { pt -> appendTrackPoint(pt) }
+            }
+        }
     }
 
-    /** Finish the active workout: score the captured HR window and save it as a WorkoutRow. A session
-     *  with too few samples (never streamed HR) is discarded quietly. Double-buzz confirms the save. */
+    private fun appendTrackPoint(pt: RouteMath.LatLng) {
+        val w = _activeWorkout.value ?: return
+        val track = w.track + pt
+        val dist = RouteMath.totalMeters(track)
+        val secs = (System.currentTimeMillis() - w.startMs) / 1000.0
+        _activeWorkout.value = w.copy(track = track, distanceM = dist, paceSecPerKm = RouteMath.paceSecPerKm(dist, secs))
+    }
+
+    /** Finish the active workout: score the captured HR window + finalize the GPS route, save a
+     *  WorkoutRow, and (opt-in) write it to Health Connect. A session with no HR AND no track is
+     *  discarded quietly. Double-buzz confirms the save. */
     fun endWorkout() {
         val w = _activeWorkout.value ?: return
         _activeWorkout.value = null
+        gpsJob?.cancel(); gpsJob = null
         val samples = w.samples
-        if (samples.size < 2) { _lastWorkout.value = null; return }
+        if (samples.size < 2 && w.track.size < 2) { _lastWorkout.value = null; return }
         val endMs = System.currentTimeMillis()
-        val avg = samples.sumOf { it.bpm } / samples.size
-        val peak = samples.maxOf { it.bpm }
-        val strain = StrainScorer.strain(samples, maxHR = profileStore.hrMax.toDouble(), sex = profileStore.sex)
+        val avg = if (samples.isNotEmpty()) samples.sumOf { it.bpm } / samples.size else null
+        val peak = if (samples.isNotEmpty()) samples.maxOf { it.bpm } else null
+        val strain = if (samples.size >= 2)
+            StrainScorer.strain(samples, maxHR = profileStore.hrMax.toDouble(), sex = profileStore.sex) else null
         val row = WorkoutRow(
             deviceId = deviceId, startTs = w.startMs / 1000, endTs = endMs / 1000,
-            sport = "Workout", source = "manual", durationS = (endMs - w.startMs) / 1000.0,
+            sport = w.sport.name, source = "manual", durationS = (endMs - w.startMs) / 1000.0,
             avgHr = avg, maxHr = peak, strain = strain,
+            distanceM = w.distanceM.takeIf { it > 0 },
+            routePolyline = if (w.track.size >= 2) RouteMath.encode(w.track) else null,
         )
         _lastWorkout.value = row
         buzz(2)
-        viewModelScope.launch { runCatching { repository.upsertWorkouts(listOf(row)) } }
+        viewModelScope.launch {
+            runCatching { repository.upsertWorkouts(listOf(row)) }
+            if (_hcWriteback.value) {
+                runCatching { HealthConnectWriter.writeExercise(appContext, row, w.sport.exerciseType) }
+            }
+        }
     }
 
     /** Append the current smoothed bpm to the active workout and recompute its running strain. Called
@@ -302,6 +348,68 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _activeWorkout.value = w.copy(
             samples = s, avgHr = s.sumOf { it.bpm } / s.size, peakHr = s.maxOf { it.bpm }, liveStrain = strain,
         )
+    }
+
+    // MARK: - Workouts screen (load + manual edit · relabel · dismiss · delete) (#107)
+    //
+    // The screen observes [workouts]; every mutation re-loads it so the list reflects the new state
+    // immediately. Loads ALL sources — strap (imported + manual), Apple Health / Health Connect, and
+    // the on-device DETECTED bouts under "<deviceId>-noop" — then filters out dismissed detected bouts
+    // so a duplicate the auto-detector created is visible but removable. Mirrors macOS
+    // Repository.workoutRows.
+
+    private val _workouts = MutableStateFlow<List<WorkoutRow>>(emptyList())
+    /** All workouts for the Workouts screen (newest first), dismissed detected bouts removed. */
+    val workouts: StateFlow<List<WorkoutRow>> = _workouts.asStateFlow()
+
+    /** Re-read every source + the dismissed markers and republish [workouts]. */
+    fun loadWorkouts() {
+        viewModelScope.launch {
+            val now = System.currentTimeMillis() / 1000
+            val whoop = repository.workouts(deviceId, 0L, now)
+            val apple = repository.workouts("apple-health", 0L, now) +
+                repository.workouts("health-connect", 0L, now)
+            val detected = repository.workouts(repository.computedDeviceId(deviceId), 0L, now)
+            val markers = repository.dismissedDetected(deviceId)
+            // Fill imported sessions' missing HR from strap samples (#77), same as before; detected /
+            // manual rows already carry their own HR so they pass through unchanged.
+            val filled = repository.fillWorkoutHrFromStrap((whoop + apple + detected))
+            _workouts.value = WorkoutEditing
+                .filterDismissed(filled, markers)
+                .sortedByDescending { it.startTs }
+        }
+    }
+
+    /** Save a retroactive / edited manual workout, then reload. [replacing] is the original on edit. */
+    fun saveManualWorkout(row: WorkoutRow, replacing: WorkoutRow? = null) {
+        viewModelScope.launch {
+            runCatching { repository.saveManualWorkout(row, replacing) }
+            loadWorkouts()
+        }
+    }
+
+    /** Re-label a detected bout to [sport] (becomes a durable manual session), then reload. */
+    fun relabelDetected(row: WorkoutRow, sport: String) {
+        viewModelScope.launch {
+            runCatching { repository.relabelDetected(row, sport) }
+            loadWorkouts()
+        }
+    }
+
+    /** Dismiss a detected bout ("not a workout") durably, then reload. */
+    fun dismissDetected(row: WorkoutRow) {
+        viewModelScope.launch {
+            runCatching { repository.dismissDetected(row) }
+            loadWorkouts()
+        }
+    }
+
+    /** Delete one workout (manual delete, or durable dismiss for a detected bout), then reload. */
+    fun deleteWorkout(row: WorkoutRow) {
+        viewModelScope.launch {
+            runCatching { repository.deleteWorkout(row) }
+            loadWorkouts()
+        }
     }
 
     /**
@@ -479,12 +587,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      *  proprietary command is dropped) and also fires the legacy command on WHOOP 4. */
     fun getBattery() = ble.refreshBattery()
 
+    /**
+     * User-initiated "Sync now": kick a historical offload on demand (#93). A thin pass-through to the
+     * BLE client's gated [WhoopBleClient.syncNow], which forwards to the same connected+bonded+
+     * not-already-backfilling guard the auto-kick and 900s periodic timer use — so it's a safe no-op
+     * when the strap isn't ready or a session is already running. Progress is unknowable from the
+     * protocol, so the UI shows an indeterminate indicator + live.syncChunksThisSession, never a percent. */
+    fun syncNow() = ble.syncNow()
+
     // --- Smart alarm (persisted; arms the strap's firmware alarm). Port of macOS BehaviorStore +
-    // AppModel.applySmartAlarm. The previous Android UI was a non-persisted mock-up (issue #51). ---
-    private val _smartAlarmEnabled = MutableStateFlow(NoopPrefs.smartAlarmEnabled(appContext))
-    val smartAlarmEnabled: StateFlow<Boolean> = _smartAlarmEnabled.asStateFlow()
-    private val _smartAlarmMinutes = MutableStateFlow(NoopPrefs.smartAlarmMinutes(appContext))
-    val smartAlarmMinutes: StateFlow<Int> = _smartAlarmMinutes.asStateFlow()
+    // AppModel.applySmartAlarm. The previous Android UI was a non-persisted mock-up (issue #51).
+    // NOTE: the _smartAlarm* state fields are declared ABOVE the init block (next to _illnessWatchEnabled)
+    // so the init bond-collector can't read them before they're initialized (#84). ---
 
     fun setSmartAlarmEnabled(enabled: Boolean) {
         _smartAlarmEnabled.value = enabled

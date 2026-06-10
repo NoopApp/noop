@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 import UniformTypeIdentifiers
 import StrandDesign
 import WhoopStore
@@ -22,6 +25,16 @@ struct SettingsView: View {
     /// Opt-in WHOOP 5/MG raw-frame capture to a file (off by default). See [PuffinFrameRecorder].
     @AppStorage(PuffinFrameRecorder.enabledKey) private var puffinCapture = false
 
+    // Imperial/Metric display preference (D#103). Stored data is always SI; this only changes how
+    // distances/weights/heights/temperatures are SHOWN — and lets the profile fields below take
+    // imperial entry. Temperature has a separate override so °C/°F can be picked independently.
+    @AppStorage(UnitPrefs.systemKey) private var unitSystemRaw = UnitSystem.metric.rawValue
+    @AppStorage(UnitPrefs.temperatureKey) private var temperatureRaw = ""
+    private var unitSystem: UnitSystem { UnitSystem(rawValue: unitSystemRaw) ?? .metric }
+    private var temperatureUnit: TemperatureUnit {
+        UnitPrefs.resolveTemperature(system: unitSystem, override: temperatureRaw)
+    }
+
     /// "What's New" changelog sheet, reachable any time from About.
     @State private var showWhatsNew = false
 
@@ -33,6 +46,7 @@ struct SettingsView: View {
         ScreenScaffold(title: "Settings",
                        subtitle: "Your numbers, your strap, and how NOOP works. All on this Mac.") {
             profileCard
+            unitsCard
             strapCard
             experimentalCard
             backupCard
@@ -82,15 +96,25 @@ struct SettingsView: View {
                 }
                 rowDivider
                 FormRow(label: "Weight") {
-                    measureField(value: $profile.weightKg, unit: "kg",
-                                 range: 30...250, step: 0.5, format: "%.1f",
-                                 accessibility: "Weight in kilograms")
+                    // Imperial mode steps in pounds and stores the kg equivalent; metric steps in kg.
+                    if unitSystem == .imperial {
+                        poundsField(weightKg: $profile.weightKg)
+                    } else {
+                        measureField(value: $profile.weightKg, unit: "kg",
+                                     range: 30...250, step: 0.5, format: "%.1f",
+                                     accessibility: "Weight in kilograms")
+                    }
                 }
                 rowDivider
                 FormRow(label: "Height") {
-                    measureField(value: $profile.heightCm, unit: "cm",
-                                 range: 120...230, step: 1, format: "%.0f",
-                                 accessibility: "Height in centimetres")
+                    // Imperial mode steps in whole inches and stores the cm equivalent; metric steps in cm.
+                    if unitSystem == .imperial {
+                        feetInchesField(heightCm: $profile.heightCm)
+                    } else {
+                        measureField(value: $profile.heightCm, unit: "cm",
+                                     range: 120...230, step: 1, format: "%.0f",
+                                     accessibility: "Height in centimetres")
+                    }
                 }
                 rowDivider
                 FormRow(label: "Max heart rate") {
@@ -134,6 +158,48 @@ struct SettingsView: View {
         }
     }
 
+    /// Imperial weight entry: shows pounds, steps in 1-lb increments, and writes the kg equivalent back
+    /// to the SI-stored profile. Range mirrors the metric 30…250 kg (≈66…551 lb).
+    private func poundsField(weightKg: Binding<Double>) -> some View {
+        let lb = Binding<Double>(
+            get: { UnitFormatter.kgToPounds(weightKg.wrappedValue) },
+            set: { weightKg.wrappedValue = $0 / UnitFormatter.poundsPerKilogram }
+        )
+        return HStack(spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(String(format: "%.0f", lb.wrappedValue))
+                    .font(StrandFont.bodyNumber)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .frame(minWidth: 48, alignment: .trailing)
+                Text("lb")
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textTertiary)
+            }
+            Stepper("Weight in pounds", value: lb, in: 66...551, step: 1)
+                .labelsHidden()
+                .accessibilityLabel("Weight, \(Int(lb.wrappedValue.rounded())) pounds")
+        }
+    }
+
+    /// Imperial height entry: shows feet′ inches″, steps in whole inches, and writes the cm equivalent
+    /// back to the SI-stored profile. Range mirrors the metric 120…230 cm (≈47…91 in).
+    private func feetInchesField(heightCm: Binding<Double>) -> some View {
+        let inches = Binding<Double>(
+            get: { UnitFormatter.cmToInches(heightCm.wrappedValue).rounded() },
+            set: { heightCm.wrappedValue = $0 * UnitFormatter.centimetersPerInch }
+        )
+        let parts = UnitFormatter.cmToFeetInches(heightCm.wrappedValue)
+        return HStack(spacing: 10) {
+            Text("\(parts.feet)′ \(parts.inches)″")
+                .font(StrandFont.bodyNumber)
+                .foregroundStyle(StrandPalette.textPrimary)
+                .frame(minWidth: 56, alignment: .trailing)
+            Stepper("Height in inches", value: inches, in: 47...91, step: 1)
+                .labelsHidden()
+                .accessibilityLabel("Height, \(parts.feet) feet \(parts.inches) inches")
+        }
+    }
+
     /// HR-max override: 0 = auto. Shown as a compact tabular value with a stepper.
     private var hrMaxField: some View {
         HStack(spacing: 10) {
@@ -147,6 +213,45 @@ struct SettingsView: View {
                     value: $profile.hrMaxOverride, in: 0...230, step: 1)
                 .labelsHidden()
                 .accessibilityLabel("Max heart rate override, \(profile.hrMaxOverride == 0 ? "automatic" : "\(profile.hrMaxOverride) bpm")")
+        }
+    }
+
+    // MARK: - Units
+
+    /// Imperial/Metric display toggle + a separate temperature override. Display-only — nothing stored
+    /// changes, NOOP keeps everything in SI and converts at the point of display.
+    private var unitsCard: some View {
+        SettingsSection(
+            icon: "ruler",
+            title: "Units",
+            blurb: "Choose how distances, weights, heights and temperatures are shown. Your data is always stored the same way — this only changes the display."
+        ) {
+            VStack(spacing: 0) {
+                FormRow(label: "Measurement system") {
+                    Picker("Measurement system", selection: $unitSystemRaw) {
+                        Text("Metric").tag(UnitSystem.metric.rawValue)
+                        Text("Imperial").tag(UnitSystem.imperial.rawValue)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .fixedSize()
+                    .accessibilityLabel("Measurement system")
+                }
+                rowDivider
+                FormRow(label: "Temperature") {
+                    // Three-way: "Match" follows the system above; °C / °F pin it explicitly. Stored as
+                    // an empty string ("match") or the TemperatureUnit raw value.
+                    Picker("Temperature", selection: $temperatureRaw) {
+                        Text("Match").tag("")
+                        Text("°C").tag(TemperatureUnit.celsius.rawValue)
+                        Text("°F").tag(TemperatureUnit.fahrenheit.rawValue)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .fixedSize()
+                    .accessibilityLabel("Temperature unit")
+                }
+            }
         }
     }
 
@@ -337,6 +442,16 @@ struct SettingsView: View {
                     .tint(StrandPalette.accent)
                     .disabled(backupBusy)
 
+                    Button {
+                        runCsvExport()
+                    } label: {
+                        Label("Export CSV…", systemImage: "tablecells")
+                            .padding(.horizontal, 6)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(StrandPalette.accent)
+                    .disabled(backupBusy)
+
                     if backupBusy { ProgressView().controlSize(.small) }
                     Spacer(minLength: 0)
                 }
@@ -346,7 +461,7 @@ struct SettingsView: View {
                         .foregroundStyle(StrandPalette.textTertiary)
                         .font(.system(size: 13))
                         .accessibilityHidden(true)
-                    Text("Importing overwrites everything currently on this Mac. Your old data is kept in a side file just in case. NOOP needs a relaunch for an import to take effect.")
+                    Text("Importing overwrites everything currently on this Mac. Your old data is kept in a side file just in case. NOOP needs a relaunch for an import to take effect. Export CSV writes a WHOOP-format zip of your days, sleeps, workouts and journal that re-imports into NOOP on Mac or Android — on-device computed rows are marked APPROXIMATE in its Source column; the full backup stays the lossless restore path.")
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -368,6 +483,26 @@ struct SettingsView: View {
         Task {
             let result = await DataBackup.runImport()
             handleBackup(result)
+        }
+    }
+
+    private func runCsvExport() {
+        backupBusy = true
+        Task {
+            let result = await CsvExport.run(repo: model.repo)
+            backupBusy = false
+            switch result {
+            case .cancelled:
+                return
+            case .exported(let url):
+                backupAlertTitle = "CSV exported"
+                backupAlertMessage = "Saved to \(url.lastPathComponent). The zip re-imports into NOOP (Data Sources → WHOOP Export) on any Mac or Android device."
+                showBackupAlert = true
+            case .failure(let message):
+                backupAlertTitle = "Export problem"
+                backupAlertMessage = message
+                showBackupAlert = true
+            }
         }
     }
 

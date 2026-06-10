@@ -20,6 +20,13 @@ import Foundation
 struct AppleHealthView: View {
     @EnvironmentObject var repo: Repository
 
+    // Imperial/Metric display preference (D#103). Weight and lean mass (stored kg) re-label to lb here;
+    // every other Apple Health metric is unit-agnostic. Display-only.
+    @AppStorage(UnitPrefs.systemKey) private var unitSystemRaw = UnitSystem.metric.rawValue
+    private var unitSystem: UnitSystem { UnitSystem(rawValue: unitSystemRaw) ?? .metric }
+    /// kg value → the active mass unit, full string with label (e.g. "74.5 kg" / "164.2 lb").
+    private func massLabel(_ kg: Double) -> String { UnitFormatter.massFromKilograms(kg, system: unitSystem) }
+
     /// Optional pre-seeded data for previews; when set, the async store load is
     /// skipped (store-backed reads can't be seeded in a preview). Production leaves
     /// this nil and loads from the repository in `.task`.
@@ -308,14 +315,14 @@ struct AppleHealthView: View {
                      accent: StrandPalette.accent, unit: "ml/kg",
                      fmt: { String(format: "%.1f", $0) })
             statTile(key: "weight", label: "Weight",
-                     accent: StrandPalette.accent, unit: "kg",
-                     fmt: { String(format: "%.1f", $0) })
+                     accent: StrandPalette.accent,
+                     fmt: { massLabel($0) })
             statTile(key: "body_fat", label: "Body Fat",
                      accent: StrandPalette.metricAmber, unit: "%",
                      fmt: { String(format: "%.1f", $0) })
             statTile(key: "lean_mass", label: "Lean Mass",
-                     accent: StrandPalette.accent, unit: "kg",
-                     fmt: { String(format: "%.1f", $0) })
+                     accent: StrandPalette.accent,
+                     fmt: { massLabel($0) })
             statTile(key: "asleep_min", label: "Asleep avg",
                      accent: StrandPalette.metricPurple,
                      aggregate: .mean, fmt: { durationString($0) })
@@ -412,13 +419,13 @@ struct AppleHealthView: View {
                           trailing: range.caption)
             chartCard(title: "Weight", key: "weight",
                       gradient: accentGradient, fallback: 50...100,
-                      fmt: { String(format: "%.1f kg", $0) })
+                      fmt: { massLabel($0) })
             chartCard(title: "Body fat", key: "body_fat",
                       gradient: amberGradient, fallback: 8...35,
                       fmt: { String(format: "%.1f%%", $0) })
             chartCard(title: "Lean body mass", key: "lean_mass",
                       gradient: accentGradient, fallback: 40...80,
-                      fmt: { String(format: "%.1f kg", $0) })
+                      fmt: { massLabel($0) })
             chartCard(title: "BMI", key: "bmi",
                       gradient: purpleGradient, fallback: 16...35,
                       fmt: { String(format: "%.1f", $0) })

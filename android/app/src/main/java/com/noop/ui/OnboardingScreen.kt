@@ -632,6 +632,9 @@ private fun BondedStep(viewModel: AppViewModel) {
 private fun ProfileStep() {
     val context = LocalContext.current
     val profile = remember { ProfileStore.from(context.applicationContext) }
+    // Imperial/Metric display preference (D#103). The stored profile is always SI; the steppers keep
+    // operating in SI and only the DISPLAYED value re-labels to lb / ft-in.
+    val unitSystem = UnitPrefs.system(context)
     var rev by remember { mutableIntStateOf(0) }
     fun mutate(block: () -> Unit) {
         block()
@@ -669,9 +672,9 @@ private fun ProfileStep() {
                 ThinDivider()
                 ProfileFieldRow(label = "Weight") {
                     StepperField(
-                        value = "%.1f".format(profile.weightKg),
-                        unit = "kg",
-                        accessibility = "Weight in kilograms",
+                        // Full re-labelled string (e.g. "74.5 kg" / "164.2 lb"); unit folded into value.
+                        value = UnitFormatter.massFromKilograms(profile.weightKg, unitSystem),
+                        accessibility = "Weight",
                         onMinus = { mutate { profile.weightKg = (profile.weightKg - 0.5).coerceIn(30.0, 250.0) } },
                         onPlus = { mutate { profile.weightKg = (profile.weightKg + 0.5).coerceIn(30.0, 250.0) } },
                     )
@@ -679,9 +682,8 @@ private fun ProfileStep() {
                 ThinDivider()
                 ProfileFieldRow(label = "Height") {
                     StepperField(
-                        value = "%.0f".format(profile.heightCm),
-                        unit = "cm",
-                        accessibility = "Height in centimetres",
+                        value = UnitFormatter.heightFromCentimeters(profile.heightCm, unitSystem),
+                        accessibility = "Height",
                         onMinus = { mutate { profile.heightCm = (profile.heightCm - 1).coerceIn(120.0, 230.0) } },
                         onPlus = { mutate { profile.heightCm = (profile.heightCm + 1).coerceIn(120.0, 230.0) } },
                     )

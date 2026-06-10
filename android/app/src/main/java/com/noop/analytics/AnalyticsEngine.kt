@@ -98,10 +98,16 @@ object AnalyticsEngine {
         profile: UserProfile,
         baselines: ProfileBaselines = ProfileBaselines(),
         maxHROverride: Double? = null,
+        // Wall-clock UTC offset (seconds) for the sleep detector's daytime false-sleep guard (#90).
+        // Default 0 keeps pure-function callers/tests on UTC; IntelligenceEngine passes the device's
+        // real offset.
+        tzOffsetSeconds: Long = 0L,
     ): DayResult {
 
         // ── Sleep detection + staging ─────────────────────────────────────────
-        val allSessions = SleepStager.detectSleep(hr = hr, rr = rr, resp = resp, gravity = gravity)
+        val allSessions = SleepStager.detectSleep(
+            hr = hr, rr = rr, resp = resp, gravity = gravity, tzOffsetSeconds = tzOffsetSeconds,
+        )
         // Sessions attributed to `day` = those whose end falls on `day` (UTC).
         val matched = allSessions.filter { dayString(it.end) == day }
 
@@ -169,7 +175,7 @@ object AnalyticsEngine {
             recovery = RecoveryScorer.recovery(
                 hrv = hrvVal,
                 rhr = rhrVal.toDouble(),
-                resp = null, // raw resp not aggregated to a nightly scalar here
+                resp = respRateDaily, // term drops + renormalizes when null / no baseline
                 hrvBaseline = hrvBase,
                 rhrBaseline = baselines.restingHR,
                 respBaseline = baselines.resp,

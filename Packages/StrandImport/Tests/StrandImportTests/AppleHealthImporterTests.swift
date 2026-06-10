@@ -144,6 +144,112 @@ final class AppleHealthImporterTests: XCTestCase {
         XCTAssertEqual(r.summary.countsByCategory["Workout"], 1)
     }
 
+    // MARK: - Tolerant parse / byte sanitizer (#100)
+
+    /// A 0x00 NUL byte planted mid-file (XML-1.0-illegal control char) must be scrubbed by the
+    /// streaming sanitizer so the parse runs to EOF — records BEFORE and AFTER the bad byte both
+    /// survive, and the import reports the skipped span rather than aborting the whole file.
+    func testIllegalByteMidFileIsSanitizedAndBothSidesSurvive() throws {
+        var bytes = Data()
+        bytes.append(Data("""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <HealthData>
+         <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="W" unit="count/min" startDate="2024-01-02 08:00:00 +0000" endDate="2024-01-02 08:00:00 +0000" value="61"/>
+
+        """.utf8))
+        // Illegal control bytes mid-file (NUL + a lone 0x1F), between two valid records.
+        bytes.append(contentsOf: [0x00, 0x1F])
+        bytes.append(Data("""
+
+         <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="W" unit="count/min" startDate="2024-01-02 09:00:00 +0000" endDate="2024-01-02 09:00:00 +0000" value="72"/>
+        </HealthData>
+        """.utf8))
+
+        let r = try AppleHealthImporter().importXML(data: bytes)
+        let hr = r.samples.filter { $0.type == "HeartRate" }.compactMap { $0.value }.sorted()
+        XCTAssertEqual(hr, [61, 72], "both records around the illegal byte must survive")
+        XCTAssertGreaterThanOrEqual(r.summary.skippedSpans, 1, "the scrubbed illegal-byte run must be surfaced")
+    }
+
+    /// Invalid UTF-8 (a lone 0xFF continuation byte that is not part of any valid sequence) inside a
+    /// text node is repaired to U+FFFD and does not abort the import.
+    func testInvalidUTF8IsRepairedNotFatal() throws {
+        var bytes = Data()
+        bytes.append(Data("""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <HealthData>
+         <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="
+        """.utf8))
+        bytes.append(contentsOf: [0xFF, 0xFE]) // invalid UTF-8 in the sourceName attribute value
+        bytes.append(Data("""
+        W" unit="count/min" startDate="2024-01-02 08:00:00 +0000" endDate="2024-01-02 08:00:00 +0000" value="61"/>
+         <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="W2" unit="count/min" startDate="2024-01-02 09:00:00 +0000" endDate="2024-01-02 09:00:00 +0000" value="72"/>
+        </HealthData>
+        """.utf8))
+
+        let r = try AppleHealthImporter().importXML(data: bytes)
+        // Two distinct sourceNames -> two HeartRate samples survive (the dedupe key includes source).
+        XCTAssertEqual(r.samples.filter { $0.type == "HeartRate" }.count, 2)
+        XCTAssertGreaterThanOrEqual(r.summary.skippedSpans, 1)
+    }
+
+    /// TOLERANT PARSE layer: a hard, structural XML error (not a bad byte — the sanitizer can't fix
+    /// a broken tag) AFTER at least one record was parsed keeps the partial result instead of
+    /// discarding everything, and reports the truncated tail as a skipped span.
+    func testHardParseErrorAfterRecordsKeepsPartialResult() throws {
+        // Two valid records, then a malformed (never-closed, garbage) tag that libxml2 rejects.
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <HealthData>
+         <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="W" unit="count/min" startDate="2024-01-02 08:00:00 +0000" endDate="2024-01-02 08:00:00 +0000" value="61"/>
+         <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="W2" unit="count/min" startDate="2024-01-02 09:00:00 +0000" endDate="2024-01-02 09:00:00 +0000" value="72"/>
+         <Record type="HKQuantityTypeIdentifierHeartRate" startDate=<<<BROKEN
+        """
+        let r = try AppleHealthImporter().importXML(data: Data(xml.utf8))
+        // The two well-formed records before the break must survive.
+        XCTAssertEqual(r.samples.filter { $0.type == "HeartRate" }.count, 2)
+        XCTAssertGreaterThanOrEqual(r.summary.skippedSpans, 1, "the truncated tail must be surfaced as a skipped span")
+    }
+
+    /// A hard parse error with NO records parsed yet still throws (we don't silently swallow a
+    /// completely broken file).
+    func testHardParseErrorWithNoRecordsStillThrows() {
+        let xml = "<<<not xml at all"
+        XCTAssertThrowsError(try AppleHealthImporter().importXML(data: Data(xml.utf8)))
+    }
+
+    /// A clean export reports zero skipped spans (no false positives from the sanitizer).
+    func testCleanFileReportsNoSkippedSpans() throws {
+        let r = try parsed()
+        XCTAssertEqual(r.summary.skippedSpans, 0)
+    }
+
+    /// A multi-byte UTF-8 character split across the sanitizer's chunk boundary must NOT be
+    /// misclassified as invalid. We force a tiny chunk so the 2-byte "é" straddles two reads.
+    func testMultiByteUTF8AcrossChunkBoundaryIsPreserved() throws {
+        // "é" is U+00E9 = 0xC3 0xA9. Pad the sourceName so the split lands between those two bytes.
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <HealthData>
+         <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="caf\u{00E9}meter" unit="count/min" startDate="2024-01-02 08:00:00 +0000" endDate="2024-01-02 08:00:00 +0000" value="61"/>
+        </HealthData>
+        """
+        let data = Data(xml.utf8)
+
+        // Drive the sanitizer directly with an 8-byte chunk so the multi-byte char is guaranteed to
+        // be cut across a refill; then parse the sanitized output and confirm the value survived
+        // and nothing was scrubbed.
+        let san = SanitizingInputStream(source: InputStream(data: data), chunkSize: 8)
+        let parser = XMLParser(stream: san)
+        let delegate = HealthXMLDelegate()
+        parser.delegate = delegate
+        XCTAssertTrue(parser.parse(), "well-formed UTF-8 split across chunks must parse cleanly")
+        XCTAssertEqual(san.scrubbedRunCount, 0, "a valid multi-byte char must not be scrubbed")
+        let result = delegate.makeResult()
+        XCTAssertEqual(result.samples.first?.value, 61)
+        XCTAssertEqual(result.samples.first?.sourceName, "caf\u{00E9}meter")
+    }
+
     // MARK: - Unknown elements tolerated
 
     func testUnknownElementsTolerated() throws {

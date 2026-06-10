@@ -19,10 +19,25 @@ import Foundation
 struct WorkoutsView: View {
     @EnvironmentObject var repo: Repository
 
+    // Imperial/Metric display preference (D#103). Workout distances are stored in metres; the toggle
+    // re-labels them to miles/yards. Display-only — nothing on disk changes.
+    @AppStorage(UnitPrefs.systemKey) private var unitSystemRaw = UnitSystem.metric.rawValue
+    private var unitSystem: UnitSystem { UnitSystem(rawValue: unitSystemRaw) ?? .metric }
+
     /// All loaded sessions, newest first. Seedable for previews.
     @State private var allRows: [WorkoutRow]
     @State private var loaded: Bool
     @State private var range: Range = .all
+
+    /// The add/edit sheet target: `.some(nil)` = add a new workout, `.some(row)` = edit `row`,
+    /// `nil` = sheet closed. Wrapped in Identifiable so `.sheet(item:)` can drive presentation.
+    @State private var sheet: WorkoutSheetTarget?
+
+    /// Wraps the optional edited row so `.sheet(item:)` can present add (editing == nil) or edit.
+    private struct WorkoutSheetTarget: Identifiable {
+        let editing: WorkoutRow?
+        let id = UUID()
+    }
 
     init(previewRows: [WorkoutRow]? = nil) {
         _allRows = State(initialValue: previewRows ?? [])
@@ -32,9 +47,12 @@ struct WorkoutsView: View {
     var body: some View {
         ScreenScaffold(title: "Workouts", subtitle: "Every session, threaded together.") {
             if allRows.isEmpty {
-                ComingSoon(what: loaded
-                    ? "No workouts yet. They come from your WHOOP and Apple Health history. Import in Data Sources to bring them in."
-                    : "Loading your sessions…")
+                VStack(alignment: .leading, spacing: 16) {
+                    ComingSoon(what: loaded
+                        ? "No workouts yet. They come from your WHOOP and Apple Health history. Import in Data Sources to bring them in — or add one you tracked elsewhere."
+                        : "Loading your sessions…")
+                    if loaded { addWorkoutButton }
+                }
             } else {
                 // Compute the windowed rows and per-sport groups ONCE per body
                 // evaluation, then thread them into every section. SwiftUI re-runs
@@ -67,7 +85,43 @@ struct WorkoutsView: View {
             // Preview-seeded rows skip `.task`; still choose a range that has data.
             if loaded { range = defaultRange(for: allRows) }
         }
+        .sheet(item: $sheet) { target in
+            ManualWorkoutSheet(editing: target.editing) { row, replacing in
+                Task {
+                    await repo.saveManualWorkout(row, replacing: replacing)
+                    await reload()
+                }
+            }
+        }
     }
+
+    /// Re-read every source after a mutation so the screen reflects the new state immediately.
+    /// Keeps the user's current range — only the initial load picks a default — and the auto-widen
+    /// (`effectiveRange`) still covers a now-empty window.
+    private func reload() async {
+        allRows = await repo.workoutRows()
+    }
+
+    // MARK: - Row actions (edit · relabel · dismiss · delete)
+
+    private func editWorkout(_ row: WorkoutRow) { sheet = WorkoutSheetTarget(editing: row) }
+
+    private func relabel(_ row: WorkoutRow, to sport: String) {
+        Task { await repo.relabelDetected(row, sport: sport); await reload() }
+    }
+
+    private func dismiss(_ row: WorkoutRow) {
+        Task { await repo.dismissDetected(row); await reload() }
+    }
+
+    private func delete(_ row: WorkoutRow) {
+        Task { await repo.deleteWorkout(row); await reload() }
+    }
+
+    /// Common sports offered when re-labelling a detected bout (keeps the menu short and honest —
+    /// the user can fine-tune via Edit afterwards).
+    private static let relabelSports = ["Running", "Walking", "Cycling", "Strength Training",
+                                        "Swimming", "Rowing", "Yoga", "HIIT"]
 
     // MARK: - Range control
 
@@ -75,7 +129,8 @@ struct WorkoutsView: View {
         let fellBack = effectiveRange != range
         let caption = rangeCaption(rows: rows, effectiveRange: effectiveRange, fellBack: fellBack)
         return VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            HStack(spacing: 12) {
+                addWorkoutButton
                 Spacer()
                 SegmentedPillControl(Range.allCases, selection: $range) { $0.label }
             }
@@ -85,6 +140,20 @@ struct WorkoutsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityLabel(caption)
         }
+    }
+
+    /// Opens the add sheet (editing == nil). Present on the populated screen and the empty state so a
+    /// user with no imports can still log a session.
+    private var addWorkoutButton: some View {
+        Button {
+            sheet = WorkoutSheetTarget(editing: nil)
+        } label: {
+            Label("Add workout", systemImage: "plus")
+                .font(StrandFont.subhead)
+        }
+        .buttonStyle(.bordered)
+        .tint(StrandPalette.accent)
+        .accessibilityLabel("Add a workout")
     }
 
     /// The latest session start (anchors every window — windows are relative to the
@@ -136,7 +205,7 @@ struct WorkoutsView: View {
         let totalCount = rows.count
         let totalTimeH = rows.compactMap(\.durationS).reduce(0, +) / 3600.0
         let totalKcal = rows.compactMap(\.energyKcal).reduce(0, +)
-        let totalKm = rows.compactMap(\.distanceM).reduce(0, +) / 1000.0
+        let totalKmRaw = rows.compactMap(\.distanceM).reduce(0, +) / 1000.0
         let modal = modalSport(from: groups)
 
         return LazyVGrid(columns: tileColumns, alignment: .leading, spacing: NoopMetrics.gap) {
@@ -153,7 +222,7 @@ struct WorkoutsView: View {
                      caption: "kcal",
                      accent: StrandPalette.metricAmber)
             StatTile(label: "Total Distance",
-                     value: oneDecimal(totalKm) + " km",
+                     value: UnitFormatter.distanceFromKilometers(totalKmRaw, system: unitSystem),
                      caption: "covered",
                      accent: StrandPalette.metricCyan)
             StatTile(label: "Most Active",
@@ -333,13 +402,13 @@ struct WorkoutsView: View {
             }
             .frame(width: ColWidth.date, alignment: .leading)
 
-            // Sport
+            // Sport ("detected" reads as "Activity")
             HStack(spacing: 7) {
                 Image(systemName: sportIcon(row.sport))
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(StrandPalette.textSecondary)
                     .frame(width: 16)
-                Text(row.sport)
+                Text(WorkoutSource.displaySport(row.sport))
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textPrimary)
                     .lineLimit(1)
@@ -363,6 +432,42 @@ struct WorkoutsView: View {
         }
         .padding(.horizontal, NoopMetrics.cardPadding)
         .frame(height: RowMetrics.rowHeight)
+        .contentShape(Rectangle())
+        .contextMenu { rowMenu(row) }
+    }
+
+    /// Right-click actions per row. A DETECTED bout can be re-labelled (becomes a real manual session
+    /// that survives re-detection) or dismissed (durably hidden). A MANUAL session can be edited or
+    /// deleted. Imported WHOOP / Apple rows are read-only (we never rewrite imported history).
+    @ViewBuilder
+    private func rowMenu(_ row: WorkoutRow) -> some View {
+        switch WorkoutSource.classify(row.source) {
+        case .detected:
+            Menu("Re-label as") {
+                ForEach(Self.relabelSports, id: \.self) { sport in
+                    Button(sport) { relabel(row, to: sport) }
+                }
+            }
+            Button("Edit details…") { editWorkout(row) }
+            Divider()
+            Button("Dismiss (not a workout)", role: .destructive) { dismiss(row) }
+        case .manual:
+            Button("Edit…") { editWorkout(row) }
+            Divider()
+            Button("Delete", role: .destructive) { delete(row) }
+        case .whoop, .apple:
+            // Imported history is read-only; offer a copy-to-manual edit path that doesn't touch it.
+            Button("Duplicate as manual…") { editWorkout(asManualCopy(row)) }
+        }
+    }
+
+    /// A manual-source copy of an imported row, so "Duplicate as manual" opens the add sheet pre-filled
+    /// without ever mutating the imported original (the sheet saves under the strap source).
+    private func asManualCopy(_ row: WorkoutRow) -> WorkoutRow {
+        WorkoutRow(startTs: row.startTs, endTs: row.endTs, sport: WorkoutSource.displaySport(row.sport),
+                   source: "manual", durationS: row.durationS, energyKcal: row.energyKcal,
+                   avgHr: row.avgHr, maxHr: row.maxHr, strain: row.strain, distanceM: row.distanceM,
+                   zonesJSON: row.zonesJSON, notes: row.notes)
     }
 
     private func cell(_ text: String, width: CGFloat, color: Color? = nil) -> some View {
@@ -372,12 +477,20 @@ struct WorkoutsView: View {
             .frame(width: width, alignment: .trailing)
     }
 
-    /// Source badge built from the locked SourceBadge component (no custom capsule).
+    /// Source badge built from the locked SourceBadge component (no custom capsule). Four origins:
+    /// Whoop (import), Apple (import), Detected (on-device auto-detector — honestly labelled so a
+    /// duplicate is recognisable and removable), Manual (user-logged).
     private func sourceBadge(_ source: String) -> some View {
-        let isWhoop = source.lowercased().contains("whoop")
-        return SourceBadge(isWhoop ? "Whoop" : "Apple",
-                           tint: isWhoop ? StrandPalette.accent : StrandPalette.metricCyan)
-            .accessibilityLabel(isWhoop ? "Source Whoop" : "Source Apple Health")
+        let (label, tint, a11y): (String, Color, String) = {
+            switch WorkoutSource.classify(source) {
+            case .whoop:    return ("Whoop", StrandPalette.accent, "Source Whoop")
+            case .apple:    return ("Apple", StrandPalette.metricCyan, "Source Apple Health")
+            case .detected: return ("Detected", StrandPalette.metricPurple, "Source on-device detected")
+            case .manual:   return ("Manual", StrandPalette.statusWarning, "Source manual entry")
+            }
+        }()
+        // String interpolation lifts the computed label into a LocalizedStringKey (SourceBadge's type).
+        return SourceBadge("\(label)", tint: tint).accessibilityLabel(a11y)
     }
 
     // MARK: - Grid columns
@@ -499,8 +612,7 @@ struct WorkoutsView: View {
 
     private func distanceLabel(_ m: Double?) -> String {
         guard let m, m > 0 else { return "–" }
-        let km = m / 1000.0
-        return km >= 1 ? oneDecimal(km) + "km" : "\(Int(m.rounded()))m"
+        return UnitFormatter.distanceFromMeters(m, system: unitSystem)
     }
 
     private func oneDecimal(_ v: Double) -> String { String(format: "%.1f", v) }
