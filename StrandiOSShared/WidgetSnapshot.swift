@@ -19,9 +19,19 @@ public struct WidgetSnapshot: Codable, Equatable {
     }
 
     /// App Group suite the app and widget both use. Must match the `com.apple.security.application-groups`
-    /// entitlement on both targets.
+    /// entitlement on both targets. If the entitlement is missing on either side, `UserDefaults(suiteName:)`
+    /// returns nil and every consumer (PendingIntents, WidgetSnapshot.publish, Live Activity) silently
+    /// no-ops — see `assertGroupProvisioned` for the debug-time canary.
     public static let suiteName = "group.com.noopapp.noop"
     public static let storageKey = "noop.widget.snapshot"
+
+    /// Debug-only canary: trips on the first run after a misprovisioning so the silent no-op gets
+    /// caught immediately rather than masquerading as "widget shows nothing yet." Release builds do
+    /// nothing — App Store apps can't crash on a missing entitlement.
+    public static func assertGroupProvisioned() {
+        assert(UserDefaults(suiteName: suiteName) != nil,
+               "App Group '\(suiteName)' not provisioned on this target — check the entitlement.")
+    }
 
     public static var placeholder: WidgetSnapshot {
         WidgetSnapshot(recovery: 72, bpm: 58, batteryPct: 84, bonded: true, updated: Date())
