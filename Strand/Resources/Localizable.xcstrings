@@ -434,6 +434,22 @@
         }
       }
     },
+    "%lld of %lld nights": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld of %lld nights"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld von %lld Nächten"
+          }
+        }
+      }
+    },
     "%lld overlapping days · %@ %@ correlation": {
       "localizations": {
         "en": {
@@ -1374,6 +1390,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Kalender"
+          }
+        }
+      }
+    },
+    "Calibrating": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calibrating"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kalibrierung"
           }
         }
       }
@@ -3214,6 +3246,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Magermasse"
+          }
+        }
+      }
+    },
+    "Learning your baseline — %lld of %lld nights.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Learning your baseline — %lld of %lld nights."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deine Baseline wird gelernt — %lld von %lld Nächten."
           }
         }
       }
