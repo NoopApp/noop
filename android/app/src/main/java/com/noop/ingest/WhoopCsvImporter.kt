@@ -272,7 +272,9 @@ object WhoopCsvImporter {
 
     // MARK: - physiological_cycles.csv -> DailyMetric
 
-    private fun parseCycles(table: CsvTable, deviceId: String): List<DailyMetric> {
+    // internal (not private): the exporter round-trip test parses with the REAL importer
+    // (the parseCycleSeries/WhoopCycleSeriesTest precedent).
+    internal fun parseCycles(table: CsvTable, deviceId: String): List<DailyMetric> {
         val out = ArrayList<DailyMetric>(table.rows.size)
         for (row in table.rows) {
             val tz = WhoopTime.tzOffsetMinutes(row["cycle_timezone"])
@@ -351,12 +353,12 @@ object WhoopCsvImporter {
 
     // MARK: - sleeps.csv -> SleepSession (+ DailyMetric sleep fields)
 
-    private class SleepParse(
+    internal class SleepParse(
         val sessions: List<SleepSession>,
         val daily: List<DailyMetric>,
     )
 
-    private fun parseSleeps(table: CsvTable, deviceId: String): SleepParse {
+    internal fun parseSleeps(table: CsvTable, deviceId: String): SleepParse {
         val sessions = ArrayList<SleepSession>(table.rows.size)
         val daily = ArrayList<DailyMetric>()
         for (row in table.rows) {
@@ -431,7 +433,7 @@ object WhoopCsvImporter {
 
     // MARK: - workouts.csv -> WorkoutRow
 
-    private fun parseWorkouts(table: CsvTable, deviceId: String): List<WorkoutRow> {
+    internal fun parseWorkouts(table: CsvTable, deviceId: String): List<WorkoutRow> {
         val out = ArrayList<WorkoutRow>(table.rows.size)
         for (row in table.rows) {
             val tz = WhoopTime.tzOffsetMinutes(row["cycle_timezone"])
@@ -489,7 +491,7 @@ object WhoopCsvImporter {
 
     // MARK: - journal_entries.csv -> JournalEntry
 
-    private fun parseJournal(table: CsvTable, deviceId: String): List<JournalEntry> {
+    internal fun parseJournal(table: CsvTable, deviceId: String): List<JournalEntry> {
         val out = ArrayList<JournalEntry>(table.rows.size)
         for (row in table.rows) {
             val tz = WhoopTime.tzOffsetMinutes(row["cycle_timezone"])

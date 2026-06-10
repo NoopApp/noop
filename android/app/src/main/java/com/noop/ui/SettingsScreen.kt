@@ -65,6 +65,7 @@ import com.noop.BuildConfig
 import com.noop.analytics.Zones
 import com.noop.ble.PuffinExperiment
 import com.noop.data.DataBackup
+import com.noop.ingest.WhoopCsvExporter
 import com.noop.update.UpdateCheck
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -211,6 +212,31 @@ fun SettingsScreen(vm: AppViewModel) {
                 },
                 onFailure = { e ->
                     Toast.makeText(context, "Backup problem: ${e.message}", Toast.LENGTH_LONG).show()
+                },
+            )
+        }
+    }
+
+    // CSV export — the 4-CSV WHOOP-format zip NOOP's own importers re-import (Mac + Android).
+    val csvExportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip"),
+    ) { uri ->
+        if (uri == null) { backupBusy = false; return@rememberLauncherForActivityResult }
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { WhoopCsvExporter.exportZip(context, uri, vm.repo) }
+            }
+            backupBusy = false
+            result.fold(
+                onSuccess = { msg ->
+                    Toast.makeText(
+                        context,
+                        "$msg Re-import it via Data sources → WHOOP import, on Android or Mac.",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                },
+                onFailure = { e ->
+                    Toast.makeText(context, "CSV export problem: ${e.message}", Toast.LENGTH_LONG).show()
                 },
             )
         }
@@ -567,6 +593,15 @@ fun SettingsScreen(vm: AppViewModel) {
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Palette.accent),
                     ) { Text("Import…", style = NoopType.captionNumber) }
 
+                    OutlinedButton(
+                        onClick = {
+                            backupBusy = true
+                            csvExportLauncher.launch("noop-export-${java.time.LocalDate.now()}.zip")
+                        },
+                        enabled = !backupBusy,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Palette.accent),
+                    ) { Text("Export CSV…", style = NoopType.captionNumber) }
+
                     if (backupBusy) {
                         CircularProgressIndicator(
                             color = Palette.accent,
@@ -579,7 +614,8 @@ fun SettingsScreen(vm: AppViewModel) {
                 NoteRow(
                     icon = Icons.Filled.Info,
                     iconTint = Palette.textTertiary,
-                    text = "Importing overwrites everything currently on this phone. Your old data is kept in a side file just in case. NOOP needs a relaunch for an import to take effect.",
+                    text = "Importing overwrites everything currently on this phone. Your old data is kept in a side file just in case. NOOP needs a relaunch for an import to take effect. " +
+                        "Export CSV writes a WHOOP-format zip of your days, sleeps, workouts and journal that re-imports into NOOP on Android or Mac — on-device computed rows are marked APPROXIMATE in its Source column; the .noopdb backup stays the lossless restore path.",
                 )
             }
         }

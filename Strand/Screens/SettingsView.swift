@@ -347,6 +347,16 @@ struct SettingsView: View {
                     .tint(StrandPalette.accent)
                     .disabled(backupBusy)
 
+                    Button {
+                        runCsvExport()
+                    } label: {
+                        Label("Export CSV…", systemImage: "tablecells")
+                            .padding(.horizontal, 6)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(StrandPalette.accent)
+                    .disabled(backupBusy)
+
                     if backupBusy { ProgressView().controlSize(.small) }
                     Spacer(minLength: 0)
                 }
@@ -356,7 +366,7 @@ struct SettingsView: View {
                         .foregroundStyle(StrandPalette.textTertiary)
                         .font(.system(size: 13))
                         .accessibilityHidden(true)
-                    Text("Importing overwrites everything currently on this Mac. Your old data is kept in a side file just in case. NOOP needs a relaunch for an import to take effect.")
+                    Text("Importing overwrites everything currently on this Mac. Your old data is kept in a side file just in case. NOOP needs a relaunch for an import to take effect. Export CSV writes a WHOOP-format zip of your days, sleeps, workouts and journal that re-imports into NOOP on Mac or Android — on-device computed rows are marked APPROXIMATE in its Source column; the full backup stays the lossless restore path.")
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -378,6 +388,26 @@ struct SettingsView: View {
         Task {
             let result = await DataBackup.runImport()
             handleBackup(result)
+        }
+    }
+
+    private func runCsvExport() {
+        backupBusy = true
+        Task {
+            let result = await CsvExport.run(repo: model.repo)
+            backupBusy = false
+            switch result {
+            case .cancelled:
+                return
+            case .exported(let url):
+                backupAlertTitle = "CSV exported"
+                backupAlertMessage = "Saved to \(url.lastPathComponent). The zip re-imports into NOOP (Data Sources → WHOOP Export) on any Mac or Android device."
+                showBackupAlert = true
+            case .failure(let message):
+                backupAlertTitle = "Export problem"
+                backupAlertMessage = message
+                showBackupAlert = true
+            }
         }
     }
 

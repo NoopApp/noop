@@ -146,6 +146,38 @@
         }
       }
     },
+    "Export CSV…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export CSV…"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CSV exportieren …"
+          }
+        }
+      }
+    },
+    "Importing overwrites everything currently on this Mac. Your old data is kept in a side file just in case. NOOP needs a relaunch for an import to take effect. Export CSV writes a WHOOP-format zip of your days, sleeps, workouts and journal that re-imports into NOOP on Mac or Android — on-device computed rows are marked APPROXIMATE in its Source column; the full backup stays the lossless restore path.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Importing overwrites everything currently on this Mac. Your old data is kept in a side file just in case. NOOP needs a relaunch for an import to take effect. Export CSV writes a WHOOP-format zip of your days, sleeps, workouts and journal that re-imports into NOOP on Mac or Android — on-device computed rows are marked APPROXIMATE in its Source column; the full backup stays the lossless restore path."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der Import überschreibt alles, was sich derzeit auf diesem Mac befindet. Deine alten Daten werden sicherheitshalber in einer separaten Datei aufbewahrt. NOOP muss neu gestartet werden, damit ein Import wirksam wird. „CSV exportieren“ schreibt ein Zip im WHOOP-Format mit deinen Tagen, Schlafphasen, Trainings und Journal-Einträgen, das sich auf Mac oder Android wieder in NOOP importieren lässt — auf dem Gerät berechnete Zeilen sind in der Source-Spalte als APPROXIMATE markiert; das vollständige Backup bleibt der verlustfreie Wiederherstellungsweg."
+          }
+        }
+      }
+    },
     "Label this activity": {
       "localizations": {
         "en": {
@@ -3310,22 +3342,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Importieren…"
-          }
-        }
-      }
-    },
-    "Importing overwrites everything currently on this Mac. Your old data is kept in a side file just in case. NOOP needs a relaunch for an import to take effect.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Importing overwrites everything currently on this Mac. Your old data is kept in a side file just in case. NOOP needs a relaunch for an import to take effect."
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Der Import überschreibt alles, was sich derzeit auf diesem Mac befindet. Deine alten Daten werden sicherheitshalber in einer separaten Datei aufbewahrt. NOOP muss neu gestartet werden, damit ein Import wirksam wird."
           }
         }
       }
