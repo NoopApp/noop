@@ -59,24 +59,23 @@ run. You do not need to install Gradle manually.
 
 ```
 .
-├── Strand/
-│   ├── project.yml              # XcodeGen source of truth — edit this, not the .xcodeproj
-│   ├── Strand.xcodeproj/        # Generated — do NOT hand-edit, gitignored
-│   ├── Strand/                  # macOS SwiftUI app target (product: NOOP.app)
-│   │   ├── App/                 # StrandApp, AppModel, RootView
-│   │   ├── BLE/                 # CoreBluetooth, frame router, command set, live state
-│   │   ├── Collect/             # Backfiller, Collector, clock correlation
-│   │   ├── Data/                # Repository, importers, MetricCatalog, profile
-│   │   ├── Screens/             # SwiftUI feature screens
-│   │   ├── MenuBar/             # MenuBarExtra (glanceable live HR)
-│   │   └── System/              # MacActions, ProjectInfo
-│   ├── StrandTests/             # macOS app integration test suite
-│   └── Packages/
-│       ├── WhoopProtocol/       # BLE framing, CRC, decode — the reverse-engineering core
-│       ├── WhoopStore/          # GRDB/SQLite persistence (schema, migrations, caches)
-│       ├── StrandAnalytics/     # Recovery, strain, HRV, sleep math — pure functions
-│       ├── StrandImport/        # WHOOP CSV + Apple Health importers
-│       └── StrandDesign/        # SwiftUI design system (palette, components, charts)
+├── project.yml                  # XcodeGen source of truth — edit this, not the .xcodeproj
+├── Strand.xcodeproj/            # Generated — do NOT hand-edit, gitignored
+├── Strand/                      # macOS SwiftUI app target (product: NOOP.app)
+│   ├── App/                     # StrandApp, AppModel, RootView
+│   ├── BLE/                     # CoreBluetooth, frame router, command set, live state
+│   ├── Collect/                 # Backfiller, Collector, clock correlation
+│   ├── Data/                    # Repository, importers, MetricCatalog, profile
+│   ├── Screens/                 # SwiftUI feature screens
+│   ├── MenuBar/                 # MenuBarExtra (glanceable live HR)
+│   └── System/                  # MacActions, ProjectInfo
+├── StrandTests/                 # macOS app integration test suite
+├── Packages/
+│   ├── WhoopProtocol/           # BLE framing, CRC, decode — the reverse-engineering core
+│   ├── WhoopStore/              # GRDB/SQLite persistence (schema, migrations, caches)
+│   ├── StrandAnalytics/         # Recovery, strain, HRV, sleep math — pure functions
+│   ├── StrandImport/            # WHOOP CSV + Apple Health importers
+│   └── StrandDesign/            # SwiftUI design system (palette, components, charts)
 ├── android/                     # Android client — full Kotlin/Gradle app
 │   ├── app/
 │   │   ├── build.gradle.kts     # App module config (minSdk 26, compileSdk 34, Kotlin 17 JVM)
@@ -85,7 +84,7 @@ run. You do not need to install Gradle manually.
 │   │       ├── ble/             # Android BLE client (WhoopBleClient)
 │   │       └── data/            # Room database, repositories, importers
 │   └── build.gradle.kts         # Root Gradle config
-├── tools/
+├── Tools/
 │   └── linux-capture/           # Python/bleak headless capture + whoop-decode CLI
 ├── Fixtures/                    # Sample WHOOP export used by package tests
 └── .github/workflows/
@@ -144,12 +143,13 @@ xcodegen generate
 xcodebuild \
   -project Strand.xcodeproj \
   -scheme Strand \
-  -destination 'platform=macOS' \
+  -sdk macosx \
   CODE_SIGNING_ALLOWED=NO \
+  CODE_SIGNING_REQUIRED=NO \
   build
 
 # 3. Run the test suite:
-xcodebuild -project Strand.xcodeproj -scheme Strand -destination 'platform=macOS' test
+xcodebuild -project Strand.xcodeproj -scheme Strand -sdk macosx CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build test
 
 # 4. Open in Xcode for interactive editing:
 open Strand.xcodeproj

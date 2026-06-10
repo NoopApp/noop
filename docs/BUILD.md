@@ -128,7 +128,7 @@ The app is **sandboxed** and requests Bluetooth + user-selected-file access. Fro
 <key>com.apple.security.files.user-selected.read-write</key> <true/>
 ```
 
-`project.yml` deliberately keeps `DEVELOPMENT_TEAM` empty, `ENABLE_HARDENED_RUNTIME: NO`, and uses
+`project.yml` deliberately keeps `DEVELOPMENT_TEAM` empty, `ENABLE_HARDENED_RUNTIME: YES`, and uses
 **ad-hoc signing** — no Apple Developer account is required to run a personal build. To produce the
 runnable bundle, build without disabling signing so Xcode applies the sandbox + Bluetooth
 entitlements with an ad-hoc identity:

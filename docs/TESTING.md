@@ -202,7 +202,7 @@ Android instrumentation tests (Espresso) are declared as dependencies but no ins
 | File | What it tests |
 |---|---|
 | `WhoopExportImporterTests.swift` | WHOOP CSV export parsing using the fixture in `Fixtures/` |
-| `AppleHealthImportift` | Apple Health `export.xml` SAX parsing |
+| `AppleHealthImporterTests.swift` | Apple Health `export.xml` SAX parsing |
 | `AppleHealthAggregatorTests.swift` | Apple Health metric aggregation |
 | `ImportCoordinatorTests.swift` | `ImportCoordinator.detectAndImport` routing logic |
 
