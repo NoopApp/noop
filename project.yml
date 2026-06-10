@@ -96,3 +96,5 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.noopapp.strandtests
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/NOOP.app/Contents/MacOS/NOOP
+        BUNDLE_LOADER: $(TEST_HOST)
