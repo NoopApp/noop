@@ -60,7 +60,7 @@ Pre-built apps you can run right now:
 | Platform | Build | Notes |
 |---|---|---|
 | **macOS** | `NOOP.app` (see [Releases](../../releases)) | Apple Silicon + Intel. Drag to Applications. Not notarized — see **First launch on macOS** below. |
-| **Android** | `NOOP-full.apk` (see [Releases](../../releases)) | The full app. `minSdk 26` (Android 8+). Sideload — enable "install unknown apps". |
+| **Android** | `NOOP-full.apk` (see [Releases](../../releases)) | The full app. `minSdk 26` (Android 8+). Sideload — enable "install unknown apps". Blocked by Play Protect? See **Installing on Android** below. |
 | **Android (demo)** | `NOOP-demo.apk` | Preloaded with sample data so you can explore every screen with no strap. Installs alongside the full app. |
 | **iOS** | Build from source — see [PR #42](../../pull/42) | An experimental community port (app + widgets + HealthKit). **Not distributed as a download:** iOS has no anonymous install path — the App Store and TestFlight both require a real Apple Developer identity — so it's build-it-yourself in Xcode, not officially maintained. |
 
@@ -77,6 +77,23 @@ Pre-built apps you can run right now:
 >   earlier you can also right-click the app → **Open**.)
 >
 > Prefer to avoid this entirely? Build from source — see [Quickstart](#quickstart-macos).
+
+> **Installing on Android (Play Protect blocked it?).** NOOP isn't on the Play Store — it's an
+> **unsigned, source-available APK** you sideload, because the project is anonymous and has no paid
+> Play identity to publish or sign under. So Android treats it as an "unknown app" and **Google
+> Play Protect** may warn or block on install (most stubbornly on stock Pixel / recent Android).
+> Nothing is wrong with the file — it's just missing a Play signature. To get it on:
+>
+> - **Tap "Install anyway."** When the warning appears, choose **More details → Install anyway**.
+> - **No "Install anyway" button?** It can vanish after a first install + uninstall. Grant the source
+>   directly: **Settings → Apps → Special app access → Install unknown apps**, pick the **browser or
+>   file manager you're installing from**, turn on **"Allow from this source"**, then open the APK again.
+> - **Still blocked by Play Protect?** It's your call to make for an unsigned app you trust: open the
+>   **Play Store → your profile icon → Play Protect → ⚙ Settings**, toggle **"Scan apps with Play
+>   Protect" off**, install NOOP, then switch it **back on**.
+> - **Reinstalling is safe.** Uninstalling and installing again won't hurt anything — NOOP keeps all
+>   data on-device with `allowBackup=false`, so a reinstall simply starts fresh. There's no cloud copy
+>   to lose either way.
 
 Prefer to build it yourself? See [`docs/BUILD.md`](docs/BUILD.md).
 
