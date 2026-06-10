@@ -10,9 +10,9 @@ public final class FrameRouter {
     /// BLEManager wires this to a rate-limited requestSync(.strap). nil in pure/unit contexts.
     var onSyncTrigger: (() -> Void)?
     /// Which family's framing to decode with. Set per connection by BLEManager. WHOOP 5.0/MG frames
-    /// use the CRC16/offset-8 envelope; the biometric field decode for puffin is still a stub, so
-    /// WHOOP 5 custom frames currently surface only their envelope (live HR/battery come from the
-    /// standard 0x2A37/0x2A19 profiles instead).
+    /// use the CRC16/offset-8 puffin envelope; parseFrame decodes the realtime + historical
+    /// biometrics for both families (the v18 record's bytes 75+ remain an honest raw region —
+    /// see Interpreter.swift). The standard 0x2A37/0x2A19 profiles remain a parallel live source.
     var family: DeviceFamily = .whoop4
 
     public init(state: LiveState) {

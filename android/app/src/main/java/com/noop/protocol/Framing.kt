@@ -16,8 +16,9 @@ package com.noop.protocol
  *   [len..]  CRC32 (zlib, LE) over frame[4..<length], 4 bytes;  total frame = length + 4
  *
  * The Whoop 5.0 ("puffin") envelope differs (CRC16-Modbus header, inner record at offset 8); it is
- * validated/decoded here for completeness, with biometric field offsets deferred (the inner record
- * is exposed but HR/RR/battery decoding for WHOOP5 is a later milestone, matching the Swift port).
+ * validated and decoded here too — realtime HR/RR/battery and the type-47 historical streams both
+ * decode for WHOOP5 (see parseFrameWhoop5/HistoricalStreams), with only the v18 record's unmapped
+ * tail bytes kept as an honest raw region, matching the Swift port.
  */
 
 // MARK: - little-endian readers (null when out of range; mirror interpreter._read)

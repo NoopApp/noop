@@ -83,8 +83,8 @@ import kotlinx.coroutines.launch
 // ModalNavigationDrawer (hamburger in the top bar) for the full grouped list, plus a
 // bottom NavigationBar for the four everyday screens (Today/Trends/Live/Sleep) with a
 // "More" sheet that reuses the same groups — both routes reach every destination.
-// Destinations are grouped exactly as the sidebar groups them. Routes whose screens
-// belong to later waves point at a ComingSoon placeholder so the app compiles today.
+// Destinations are grouped exactly as the sidebar groups them; every route points at a
+// real, shipped screen.
 
 /** A single drawer destination: stable route, display title, sidebar icon. */
 private enum class Destination(
@@ -325,8 +325,6 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 composable(Destination.Workouts.route) { WorkoutsScreen(viewModel) }
                 composable(Destination.Support.route) { SupportScreen() }
                 composable(Destination.Intelligence.route) { IntelligenceScreen(viewModel) }
-
-                // --- Placeholder routes (later waves fill these in) ---
                 composable(Destination.Stress.route) { StressScreen(viewModel) }
                 composable(Destination.Trends.route) { TrendsScreen(viewModel) }
                 composable(Destination.Insights.route) { InsightsScreen(viewModel) }
@@ -416,40 +414,3 @@ private fun NavHostController.navigateTopLevel(route: String) {
     }
 }
 
-/**
- * Placeholder screen for routes later waves will build. Uses [ScreenScaffold] so the
- * dark, instrument-grade chrome is already correct when a real screen replaces it.
- */
-@Composable
-fun ComingSoon(text: String, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(28.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        NoopCard(padding = 28.dp) {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(
-                    Icons.Filled.Sensors,
-                    contentDescription = null,
-                    tint = Palette.textTertiary,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(text, style = NoopType.title2, color = Palette.textPrimary, textAlign = TextAlign.Center)
-                Overline("Coming soon", color = Palette.textSecondary)
-                Text(
-                    "This section is on the way.",
-                    style = NoopType.footnote,
-                    color = Palette.textTertiary,
-                    textAlign = TextAlign.Center,
-                )
-            }
-        }
-    }
-}

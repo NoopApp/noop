@@ -10,9 +10,9 @@ enum DataSourceImportKind {
     case appleHealth
 }
 
-/// Root app state: owns the live BLE connection state and the CoreBluetooth engine.
-/// More subsystems (Repository, AnalyticsEngine, ImportCoordinator) get wired in here
-/// in later milestones.
+/// Root app state: owns the live BLE connection state, the CoreBluetooth engine, and the
+/// wired subsystems — Repository (merged history), ImportCoordinator-backed importers,
+/// IntelligenceEngine (on-device scoring), behavior/profile stores, and the AI Coach.
 @MainActor
 final class AppModel: ObservableObject {
     /// The live instance, so an AppIntent (Shortcuts) can reach the bonded strap rather than spinning
