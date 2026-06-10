@@ -17,6 +17,21 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 1.63 — Mac: strap-computed nights show in Sleep (#77)
+
+- **Fixed (macOS): BLE-computed nights vanished from the Sleep tab** (found from RolandGao's #77
+  question "why is last night's analysis in Intelligence instead of Sleep?"). Root cause: TWO
+  `stagesJSON` formats exist — imported nights store a **dict of minutes** (`{"light":N,…}`), while
+  on-device computed nights store a **segment array** (`AnalyticsEngine.encodeStages` →
+  `[{start,end,stage}]`). `SleepView.decodeStages` only parsed the dict, and `latestNight` returned
+  nil on failure → **the whole "last night" hero disappeared for Bluetooth-only users** while
+  Intelligence (reading DailyMetric) showed the night fine. Fix: `decodeSegments` parses the array
+  (mapping the stager's "wake"→awake), and `Night.realSegments` feeds the hypnogram the GENUINE
+  timeline for computed nights — strictly better than the synthetic "plausible architecture"
+  reconstruction imported nights still get (the export has no per-epoch timeline).
+- Android already handled both shapes (`SleepScreen.kt` tries JSONObject then JSONArray) — **version
+  bump only.**
+
 ## 1.62 — WHOOP 5/MG history: the missing clock (thanks tajchert, #78)
 
 Reimplemented (per our external-contribution policy) from **tajchert's hardware-validated fork branch**

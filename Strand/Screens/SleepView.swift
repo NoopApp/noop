@@ -386,12 +386,21 @@ struct SleepView: View {
 
     // MARK: - Derived model
 
-    /// The most recent imported sleep, decoded into stage durations.
+    /// The most recent sleep, decoded into stage durations. TWO stagesJSON formats exist:
+    /// imported nights store a dict of MINUTES {"light","deep","rem","awake"}; on-device computed
+    /// nights store a SEGMENT ARRAY [{start,end,stage}] (AnalyticsEngine.encodeStages). Only the
+    /// dict was decoded before, so a Bluetooth-only user's night vanished from this tab entirely
+    /// while Intelligence showed it (#77). Computed nights also carry their REAL timeline now —
+    /// the hypnogram draws genuine segments instead of the synthetic reconstruction.
     private var latestNight: Night? {
-        guard let s = repo.sleeps.last,
-              let stages = decodeStages(s.stagesJSON),
-              stages.total > 0 else { return nil }
-        return Night(session: s, stages: stages)
+        guard let s = repo.sleeps.last else { return nil }
+        if let stages = decodeStages(s.stagesJSON), stages.total > 0 {
+            return Night(session: s, stages: stages)
+        }
+        if let seg = decodeSegments(s.stagesJSON, sessionStart: s.startTs), seg.stages.total > 0 {
+            return Night(session: s, stages: seg.stages, realSegments: seg.intervals)
+        }
+        return nil
     }
 
     /// Mean total sleep duration (minutes) across nights with data — the "typical".
@@ -630,6 +639,38 @@ struct SleepView: View {
         return s.total > 0 ? s : nil
     }
 
+    /// Decode the COMPUTED stagesJSON segment array [{"start":epoch,"end":epoch,"stage":"wake"|
+    /// "light"|"deep"|"rem"}] into stage totals plus the real timeline (seconds relative to the
+    /// session start, the Hypnogram's domain). The on-device SleepStager calls awake "wake". (#77)
+    private func decodeSegments(
+        _ json: String?, sessionStart: Int
+    ) -> (stages: Stages, intervals: [SleepInterval])? {
+        guard let json, let data = json.data(using: .utf8),
+              let arr = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]],
+              !arr.isEmpty else { return nil }
+        var stages = Stages(awake: 0, light: 0, deep: 0, rem: 0)
+        var intervals: [SleepInterval] = []
+        for seg in arr {
+            guard let start = (seg["start"] as? NSNumber)?.intValue,
+                  let end = (seg["end"] as? NSNumber)?.intValue, end > start,
+                  let name = seg["stage"] as? String else { continue }
+            let minutes = Double(end - start) / 60.0
+            let stage: SleepStage
+            switch name {
+            case "wake", "awake": stage = .awake; stages.awake += minutes
+            case "light": stage = .light; stages.light += minutes
+            case "deep": stage = .deep; stages.deep += minutes
+            case "rem": stage = .rem; stages.rem += minutes
+            default: continue
+            }
+            intervals.append(SleepInterval(
+                stage: stage,
+                start: TimeInterval(start - sessionStart),
+                end: TimeInterval(end - sessionStart)))
+        }
+        return stages.total > 0 ? (stages, intervals) : nil
+    }
+
     /// yyyy-MM-dd → Date (en_US_POSIX, UTC), per task spec.
     private static let dayParser: DateFormatter = {
         let f = DateFormatter()
@@ -699,6 +740,9 @@ private struct Stages {
 private struct Night {
     let session: CachedSleepSession
     let stages: Stages
+    /// The REAL per-segment timeline for on-device computed nights (nil for imported nights,
+    /// whose export carries totals only — those keep the synthetic reconstruction below). (#77)
+    var realSegments: [SleepInterval]? = nil
 
     /// Total time in bed in minutes (from reconstructed stages).
     var timeInBed: Double { stages.total }
@@ -707,8 +751,10 @@ private struct Night {
     var onsetDate: Date { Date(timeIntervalSince1970: TimeInterval(session.startTs)) }
 
     /// Stage intervals laid end-to-end across the night, in seconds from start.
-    /// Reconstructed from durations only (export has no per-epoch timeline).
+    /// On-device computed nights use their REAL timeline; imported nights are reconstructed
+    /// from durations only (the export has no per-epoch timeline).
     var intervals: [SleepInterval] {
+        if let real = realSegments, real.count >= 2 { return real }
         var t: TimeInterval = 0
         var out: [SleepInterval] = []
         func add(_ stage: SleepStage, _ minutes: Double) {
