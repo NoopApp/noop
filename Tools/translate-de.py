@@ -25,6 +25,7 @@ DE: dict[str, str] = {
     "Edit workout": "Training bearbeiten",
     "Label this activity": "Aktivität benennen",
     "Manual": "Manuell",
+    "Once NOOP has 14 nights of history, in-range compares each vital to your own baseline (approximate — not medical advice); until then, typical adult ranges apply.": "Sobald NOOP 14 Nächte Verlauf hat, vergleicht „im Bereich“ jeden Vitalwert mit deiner eigenen Baseline (approximativ — kein medizinischer Rat); bis dahin gelten typische Erwachsenen-Bereiche.",
     "Save": "Speichern",
     "Sport": "Sportart",
     "Start time": "Startzeit",

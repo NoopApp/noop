@@ -289,8 +289,12 @@ Windows are taken relative to your latest recorded day and auto-widen on sparse 
   your Max HR (from Settings) and a streaming/idle state. When the strap reports HR as 0, NOOP
   derives it from the latest R-R interval and notes "from R-R".
 - **Vital Signs** — a tile grid from your most recent imported day: Respiratory Rate, Blood O₂,
-  Resting HR, HRV and Skin Temp, each colored by whether it sits in a healthy range ("In range" /
-  "Out of range").
+  Resting HR, HRV and Skin Temp. Once NOOP has **14 nights** of history, each tile is colored
+  against **your own trailing baseline** (a Winsorized-EWMA personal baseline, within ~2 sigma —
+  APPROXIMATE, not medical advice) and the captions read "In your range" / "Off your baseline".
+  Before that — and after a long wear gap makes the baseline stale — typical adult ranges apply
+  ("In typical range" / "Outside typical range"), with physiological bounds as an absolute outer
+  guard either way. Blood O₂ deliberately stays on the absolute 95–100 % range.
 
 With no live HR and no imported day, NOOP prompts you to connect or import.
 
