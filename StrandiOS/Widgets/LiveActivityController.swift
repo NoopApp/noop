@@ -8,12 +8,16 @@ import ActivityKit
 final class LiveActivityController {
     private var activity: Activity<NOOPActivityAttributes>?
     private var lastPush: Date = .distantPast
+    /// Cached `ActivityAuthorizationInfo` — `update` runs at ~1 Hz off the live HR stream, and
+    /// instantiating this system bridge per tick is needless allocation. ActivityKit's auth status
+    /// only changes via Settings, so caching for the controller's lifetime is safe.
+    private let authInfo = ActivityAuthorizationInfo()
 
     /// Drive the activity from the latest live values. Lazily starts when the strap is bonded and a
     /// heart rate is present; ends when the strap goes offline. Throttled to ~once every 2s so we
     /// stay well under the Live Activity update budget.
     func update(bpm: Int?, recovery: Int?, bonded: Bool) {
-        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        guard authInfo.areActivitiesEnabled else { return }
 
         if !bonded {
             Task { await end() }
