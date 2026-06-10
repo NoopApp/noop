@@ -2,6 +2,38 @@
   "sourceLanguage": "en",
   "strings": {
     "": {},
+    "Add": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hinzufügen"
+          }
+        }
+      }
+    },
+    "Add a custom question…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add a custom question…"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eigene Frage hinzufügen …"
+          }
+        }
+      }
+    },
     "Add workout": {
       "localizations": {
         "en": {
@@ -14,6 +46,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Training hinzufügen"
+          }
+        }
+      }
+    },
+    "Answers are about the night and day leading into this morning — the same attribution a WHOOP export uses, so logged and imported days line up.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Answers are about the night and day leading into this morning — the same attribution a WHOOP export uses, so logged and imported days line up."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Antworten beziehen sich auf die Nacht und den Tag vor diesem Morgen — dieselbe Zuordnung wie in einem WHOOP-Export, damit protokollierte und importierte Tage zusammenpassen."
           }
         }
       }
@@ -178,6 +226,22 @@
         }
       }
     },
+    "Journal": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Journal"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Journal"
+          }
+        }
+      }
+    },
     "Label this activity": {
       "localizations": {
         "en": {
@@ -194,6 +258,22 @@
         }
       }
     },
+    "Log behaviours above — after a few days of answers, NOOP ranks how each one moves your recovery, HRV and sleep. Importing a WHOOP export (which includes its journal) backfills history instantly.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Log behaviours above — after a few days of answers, NOOP ranks how each one moves your recovery, HRV and sleep. Importing a WHOOP export (which includes its journal) backfills history instantly."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Protokolliere oben deine Verhaltensweisen — nach ein paar Tagen mit Antworten bewertet NOOP, wie jede davon deine Erholung, HRV und deinen Schlaf beeinflusst. Der Import eines WHOOP-Exports (inklusive Journal) füllt die Historie sofort auf."
+          }
+        }
+      }
+    },
     "Manual": {
       "localizations": {
         "en": {
@@ -206,6 +286,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Manuell"
+          }
+        }
+      }
+    },
+    "No": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nein"
           }
         }
       }
@@ -286,6 +382,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "Für nachträgliche Einträge wird keine Belastung geschätzt — es gibt kein aufgezeichnetes Herzfrequenz-Fenster als Grundlage."
+          }
+        }
+      }
+    },
+    "Yes": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yes"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ja"
+          }
+        }
+      }
+    },
+    "Yesterday": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yesterday"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gestern"
           }
         }
       }
@@ -3374,22 +3502,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Einblicke"
-          }
-        }
-      }
-    },
-    "Insights read your journal and outcomes. Import your WHOOP export, which includes your journal, in Data Sources to unlock them.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Insights read your journal and outcomes. Import your WHOOP export, which includes your journal, in Data Sources to unlock them."
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Einblicke lesen dein Journal und deine Ergebnisse. Importiere deinen WHOOP-Export, der dein Journal enthält, unter Datenquellen, um sie freizuschalten."
           }
         }
       }

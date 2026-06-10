@@ -207,6 +207,17 @@ object NoopPrefs {
         of(context).edit().putBoolean(KEY_ILLNESS_WATCH, enabled).apply()
     }
 
+    /** User-added custom journal questions, newline-joined (putStringSet loses order). */
+    const val KEY_JOURNAL_CUSTOM = "noop.journalCustomQuestions"
+
+    fun customJournalQuestions(context: Context): List<String> =
+        (of(context).getString(KEY_JOURNAL_CUSTOM, "") ?: "").split('\n')
+            .map { it.trim() }.filter { it.isNotEmpty() }
+
+    fun setCustomJournalQuestions(context: Context, questions: List<String>) {
+        of(context).edit().putString(KEY_JOURNAL_CUSTOM, questions.joinToString("\n")).apply()
+    }
+
     /** Detected bouts the user dismissed, as "startTs:endTs" spans. Read-time filter — the
      *  IntelligenceEngine re-derives detected rows every run, so deletion alone resurrects them. */
     const val KEY_DISMISSED_DETECTED = "noop.dismissedDetectedSpans"

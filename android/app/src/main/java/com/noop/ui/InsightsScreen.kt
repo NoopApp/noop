@@ -31,6 +31,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.data.DailyMetric
+import com.noop.data.JournalEntry
+import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -144,18 +146,31 @@ private data class InsightModel(
 fun InsightsScreen(vm: AppViewModel) {
     val days by vm.recentDays.collectAsStateWithLifecycle()
 
-    // Journal answers (all history). Loaded once via a wide lexicographic range so we
-    // need no date math; recomputed if the device's cached days change underneath us.
+    // Journal answers (all history): imported "my-whoop" rows UNIONED with native
+    // "noop-journal" rows (native wins per (day, question)). Keyed on journalSeq so the
+    // logging card's saves/clears refresh the effects immediately.
     var behaviours by remember { mutableStateOf<Map<String, Set<String>>>(emptyMap()) }
     var journalLoaded by remember { mutableStateOf(false) }
+    var journalSeq by remember { mutableStateOf(0) }
+    var dayOffset by remember { mutableStateOf(0L) }
+    var importedQuestions by remember { mutableStateOf<List<String>>(emptyList()) }
+    var dayAnswers by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var customQuestions by remember { mutableStateOf(NoopPrefs.customJournalQuestions(ctx)) }
 
-    androidx.compose.runtime.LaunchedEffect(Unit) {
-        val entries = vm.repo.journal("my-whoop", "0000-01-01", "9999-12-31")
+    androidx.compose.runtime.LaunchedEffect(journalSeq, dayOffset) {
+        val imported = vm.repo.journal("my-whoop", "0000-01-01", "9999-12-31")
+        val native = vm.repo.journal(JOURNAL_DEVICE_ID, "0000-01-01", "9999-12-31")
+        val entries = mergeJournalEntries(imported, native)
         val byBehaviour = mutableMapOf<String, MutableSet<String>>()
         for (e in entries) if (e.answeredYes) {
             byBehaviour.getOrPut(e.question) { mutableSetOf() }.add(e.day)
         }
         behaviours = byBehaviour.mapValues { it.value.toSet() }
+        importedQuestions = imported.map { it.question }.distinct()
+        val key = journalDayKey(dayOffset)
+        dayAnswers = native.filter { it.day == key }.associate { it.question to it.answeredYes }
         journalLoaded = true
     }
 
@@ -173,6 +188,35 @@ fun InsightsScreen(vm: AppViewModel) {
 
     ScreenScaffold(title = "Insights", subtitle = "Interrogate what affects what.") {
 
+        // --- Native journal logging (always reachable — the account-free way in) ---
+        JournalLogCard(
+            catalog = mergeJournalCatalog(importedQuestions, customQuestions),
+            answers = dayAnswers,
+            dayOffset = dayOffset,
+            onDayOffset = { dayOffset = it },
+            onAnswer = { q, yes ->
+                scope.launch {
+                    vm.repo.upsertJournal(
+                        listOf(JournalEntry(JOURNAL_DEVICE_ID, journalDayKey(dayOffset), q, yes)),
+                    )
+                    journalSeq++
+                }
+            },
+            onClear = { q ->
+                scope.launch {
+                    vm.repo.deleteJournalEntry(JOURNAL_DEVICE_ID, journalDayKey(dayOffset), q)
+                    journalSeq++
+                }
+            },
+            onAddCustom = { q ->
+                val next = customQuestions + q
+                NoopPrefs.setCustomJournalQuestions(ctx, next)
+                customQuestions = next
+            },
+        )
+
+        Spacer(Modifier.height(Metrics.sectionGap - 20.dp))
+
         // --- Behaviour effects -------------------------------------------------
         if (!journalLoaded) {
             NoopCard {
@@ -183,12 +227,12 @@ fun InsightsScreen(vm: AppViewModel) {
                 )
             }
         } else if (behaviours.isEmpty()) {
-            // No journal yet — explain what an import unlocks, but still surface
-            // relationships below if the daily cache has them.
+            // No journal yet — explain, without dead-ending on a paid export.
             DataPendingNote(
                 title = "Insights read your journal and outcomes",
-                body = "Insights read your journal and outcomes. Import your WHOOP export, " +
-                    "which includes your journal, in Data Sources to unlock them.",
+                body = "Log behaviours above — after a few days of answers, NOOP ranks how each " +
+                    "one moves your recovery, HRV and sleep. Importing a WHOOP export (which " +
+                    "includes its journal) backfills history instantly.",
             )
         } else {
             BehaviourSection(

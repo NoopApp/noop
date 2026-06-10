@@ -52,6 +52,25 @@ final class JournalWorkoutAppleCacheTests: XCTestCase {
         XCTAssertNil(rows[0].notes)
     }
 
+    func testDeleteJournalTouchesOnlyTheNamedSource() async throws {
+        // The native logging card clears under "noop-journal" only — an identical
+        // (day, question) imported under "my-whoop" must survive.
+        let store = try await WhoopStore.inMemory()
+        let e = JournalEntry(day: "2026-06-09", question: "Any alcohol?", answeredYes: true, notes: nil)
+        try await store.upsertJournal([e], deviceId: "my-whoop")
+        try await store.upsertJournal([e], deviceId: "noop-journal")
+
+        let n = try await store.deleteJournal(deviceId: "noop-journal", day: "2026-06-09",
+                                              question: "Any alcohol?")
+        XCTAssertEqual(n, 1)
+        let imported = try await store.journalEntries(deviceId: "my-whoop",
+                                                      from: "2026-06-01", to: "2026-06-30")
+        XCTAssertEqual(imported.count, 1, "imported row untouched")
+        let native = try await store.journalEntries(deviceId: "noop-journal",
+                                                    from: "2026-06-01", to: "2026-06-30")
+        XCTAssertEqual(native.count, 0)
+    }
+
     func testJournalDistinctQuestionsCoexist() async throws {
         let store = try await WhoopStore.inMemory()
         try await store.upsertJournal([

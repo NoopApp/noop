@@ -224,6 +224,10 @@ interface WhoopDao {
     )
     suspend fun journal(deviceId: String, from: String, to: String): List<JournalEntry>
 
+    /** Delete one native journal answer by natural key (the logging card's "clear"). */
+    @Query("DELETE FROM journal WHERE deviceId = :deviceId AND day = :day AND question = :question")
+    suspend fun deleteJournalEntry(deviceId: String, day: String, question: String)
+
     /**
      * Workouts whose startTs falls in [from, to] (unix seconds), oldest first, row-limited.
      * Port of JournalWorkoutAppleCache.swift workouts(deviceId:from:to:limit:).

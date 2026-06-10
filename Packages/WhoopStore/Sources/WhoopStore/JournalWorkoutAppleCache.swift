@@ -132,6 +132,17 @@ extension WhoopStore {
         }
     }
 
+    /// Delete one journal answer by natural key (native logging's "clear"). Returns rows deleted.
+    @discardableResult
+    public func deleteJournal(deviceId: String, day: String, question: String) async throws -> Int {
+        try syncWrite { db in
+            try db.execute(sql: """
+                DELETE FROM journal WHERE deviceId = ? AND day = ? AND question = ?
+                """, arguments: [deviceId, day, question])
+            return db.changesCount
+        }
+    }
+
     /// Upsert Apple-Health daily aggregates. Natural key (deviceId, day). Returns rows changed.
     @discardableResult
     public func upsertAppleDaily(_ rows: [AppleDaily], deviceId: String) async throws -> Int {

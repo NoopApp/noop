@@ -3,6 +3,8 @@ import SwiftUI
 @main
 struct StrandApp: App {
     @StateObject private var model = AppModel()
+    /// Native journal logging: the user's custom question catalog (UserDefaults-backed).
+    @StateObject private var journalCatalog = JournalCatalogStore()
 
     var body: some Scene {
         WindowGroup {
@@ -14,6 +16,7 @@ struct StrandApp: App {
                 .environmentObject(model.behavior)
                 .environmentObject(model.intelligence)
                 .environmentObject(model.coach)
+                .environmentObject(journalCatalog)
                 .frame(minWidth: 1000, minHeight: 700)
                 .preferredColorScheme(.dark)
         }

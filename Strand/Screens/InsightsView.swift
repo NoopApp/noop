@@ -100,17 +100,26 @@ struct InsightsView: View {
 
     private let outcomeKeys = ["recovery", "hrv", "sleep_performance", "rhr"]
 
+    /// Native-logging state for the journal card.
+    @State private var importedQuestions: [String] = []
+    @State private var dayAnswers: [String: Bool] = [:]
+    @State private var journalDayOffset = 0
+
     var body: some View {
         ScreenScaffold(title: "Insights", subtitle: "Interrogate what affects what.") {
             if !loaded {
                 ComingSoon(what: "Reading your journal and outcomes…")
             } else {
                 VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
+                    // Native logging — always reachable: the account-free way into Insights.
+                    JournalLogCard(importedQuestions: importedQuestions,
+                                   answers: dayAnswers,
+                                   dayOffset: $journalDayOffset,
+                                   onChanged: { Task { await load() } })
                     if behaviours.isEmpty {
-                        // No journal yet — explain, but still surface relationships if
-                        // the loaded series are non-empty (data-display rule).
+                        // No journal yet — explain, without dead-ending on a paid export.
                         NoopCard {
-                            Text("Insights read your journal and outcomes. Import your WHOOP export, which includes your journal, in Data Sources to unlock them.")
+                            Text("Log behaviours above — after a few days of answers, NOOP ranks how each one moves your recovery, HRV and sleep. Importing a WHOOP export (which includes its journal) backfills history instantly.")
                                 .font(StrandFont.subhead)
                                 .foregroundStyle(StrandPalette.textSecondary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -133,31 +142,66 @@ struct InsightsView: View {
 
     private func load() async {
         // Journal → behaviours map (only "yes" answers count as the behaviour occurring).
+        // journalEntries() is the imported ∪ native union (native wins per day+question).
         let entries = await repo.journalEntries()
         var byBehaviour: [String: Set<String>] = [:]
         for e in entries where e.answeredYes {
             byBehaviour[e.question, default: []].insert(e.day)
         }
 
-        // Outcome series (Whoop) → both [day:value] dictionaries and ordered series.
+        // The logging card's inputs: the export's exact question strings (so logged days
+        // join imported history) and the selected day's native chip state — a targeted
+        // read, since the merged list carries no deviceId to filter on.
+        let imported = await repo.importedJournalEntries()
+        let importedQs = Array(NSOrderedSet(array: imported.map(\.question))) as? [String] ?? []
+        let selectedDayKey = await MainActor.run {
+            Repository.localDayKey(Calendar.current.date(byAdding: .day,
+                                                         value: -journalDayOffset,
+                                                         to: Date()) ?? Date())
+        }
+        let nativeAnswers = await repo.nativeJournalAnswers(day: selectedDayKey)
+
+        // Daily metrics for the strap-only outcome fallback (merged, imported-wins).
+        let mergedDays = await MainActor.run { repo.days }
+
+        // Outcome series (Whoop) → both [day:value] dictionaries and ordered series. The
+        // imported metricSeries only exists after a CSV import; fill missing days from the
+        // merged daily metrics so an account-free user's logging still gets effects
+        // (recovery/hrv/rhr have daily columns; sleep_performance stays import-only).
         var byKey: [String: [String: Double]] = [:]
         var seriesMap: [String: [(day: String, value: Double)]] = [:]
         for key in outcomeKeys {
             let s = await repo.series(key: key, source: "my-whoop")
-            seriesMap[key] = s
             var dict: [String: Double] = [:]
             for row in s { dict[row.day] = row.value }
+            for d in mergedDays where dict[d.day] == nil {
+                if let v = Self.dailyOutcome(key: key, day: d) { dict[d.day] = v }
+            }
             byKey[key] = dict
+            seriesMap[key] = dict.sorted { $0.key < $1.key }.map { (day: $0.key, value: $0.value) }
         }
 
         await MainActor.run {
             self.behaviours = byBehaviour
+            self.importedQuestions = importedQs
+            self.dayAnswers = nativeAnswers
             self.outcomeByKey = byKey
             self.seriesByKey = seriesMap
             self.loaded = true
             // Seed the memoized derived state from the freshly loaded inputs.
             self.recomputeRanked()
             self.recomputeRelationships()
+        }
+    }
+
+    /// The merged DailyMetric column backing an outcome key, for days the imported
+    /// metricSeries doesn't cover (strap-only users).
+    private static func dailyOutcome(key: String, day d: DailyMetric) -> Double? {
+        switch key {
+        case "recovery": return d.recovery
+        case "hrv":      return d.avgHrv
+        case "rhr":      return d.restingHr.map(Double.init)
+        default:         return nil   // sleep_performance has no daily column — import-only
         }
     }
 

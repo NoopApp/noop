@@ -222,6 +222,11 @@ class WhoopRepository(private val dao: WhoopDao) {
     suspend fun journal(deviceId: String, from: String, to: String): List<JournalEntry> =
         dao.journal(deviceId, from, to)
 
+    /** Delete one native journal answer by natural key (only ever called with the
+     *  "noop-journal" source id — imported rows are never touched). */
+    suspend fun deleteJournalEntry(deviceId: String, day: String, question: String) =
+        dao.deleteJournalEntry(deviceId, day, question)
+
     /** Apple-Health daily aggregates for the inclusive day range [from, to] (YYYY-MM-DD), oldest first. */
     suspend fun appleDaily(deviceId: String, from: String, to: String): List<AppleDaily> =
         dao.appleDaily(deviceId, from, to)
