@@ -872,6 +872,7 @@ extension BLEManager: CBCentralManagerDelegate {
         preparePeripheral(peripheral)
         state.connected = true
         state.encryptedBond = false   // re-proved per connection at the genuine-bond site (#69)
+        state.reconnectGuide = nil    // a connect succeeded — the stale-bond guide (if shown) is resolved
         lastDataAt = Date()
         log("Connected — discovering services")
         discoverPrimaryServices(on: peripheral)
@@ -923,6 +924,20 @@ extension BLEManager: CBCentralManagerDelegate {
                                didFailToConnect peripheral: CBPeripheral,
                                error: Error?) {
         log("Failed to connect\(error.map { " — \($0.localizedDescription)" } ?? "")")
+        // The strap wiped its bond (a firmware update, or the official WHOOP app re-bonding it). macOS keeps
+        // re-presenting the now-stale pairing key, so every reconnect loops on this same error with no
+        // recovery and no user guidance. Surface an actionable re-pair guide instead of failing silently —
+        // NOOP itself works fine on the new firmware once the stale bond is cleared. (5/MG firmware reset, 2026-06)
+        if let cbErr = error as? CBError, cbErr.code == .peerRemovedPairingInformation {
+            state.reconnectGuide = """
+            Your strap's Bluetooth pairing was reset — usually by a WHOOP firmware update, or the official WHOOP app reconnecting. NOOP works fine on the new firmware; you just need to re-pair:
+
+            1. Quit the official WHOOP app (or turn off Bluetooth on that phone).
+            2. Open System Settings → Bluetooth and Forget “WHOOP MG” if it's listed.
+            3. Tap the strap repeatedly until its LEDs flash blue (pairing mode).
+            4. Come back here and reconnect.
+            """
+        }
     }
 
     /// State restoration entry point (M3 background collection).

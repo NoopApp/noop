@@ -25,6 +25,10 @@ struct LiveView: View {
                        subtitle: "Your strap in real time — heart rate and frames as they arrive.") {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                 connectionRow
+                // Can't-connect-at-all guidance: the strap wiped its bond (firmware update / WHOOP app
+                // re-bond), so connects loop on "Peer removed pairing information". Show the re-pair steps
+                // right here instead of silently retrying. (5/MG firmware reset, 2026-06)
+                if let guide = live.reconnectGuide { reconnectGuideBanner(guide) }
                 // Bond-refused guidance, shown right here on Live where people actually connect (it
                 // also appears in Settings). A 5/MG strap still bonded to the WHOOP app refuses pairing
                 // with "Encryption is insufficient" — this tells the user to free it and re-pair.
@@ -193,6 +197,28 @@ struct LiveView: View {
     private static func elapsed(since start: Date) -> String {
         let s = max(0, Int(Date().timeIntervalSince(start)))
         return String(format: "%d:%02d", s / 60, s % 60)
+    }
+
+    private func reconnectGuideBanner(_ guide: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(StrandPalette.statusWarning)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Can't connect — your strap's pairing was reset")
+                    .font(StrandFont.subhead).foregroundStyle(StrandPalette.textPrimary)
+                Text(guide)
+                    .font(StrandFont.footnote).foregroundStyle(StrandPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(StrandPalette.surfaceRaised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(StrandPalette.statusWarning.opacity(0.5), lineWidth: 1))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Reconnect help: \(guide)")
     }
 
     private func pairingHintBanner(_ hint: String) -> some View {

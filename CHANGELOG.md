@@ -17,6 +17,16 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 1.73 — Reconnect help for WHOOP 5.0 / MG after a firmware update
+
+- **If your WHOOP 5.0 / MG stopped connecting after a WHOOP firmware update**, that's a Bluetooth
+  pairing reset — not a lockout, and NOOP works fine on the new firmware. To reconnect: quit the
+  official WHOOP app, forget the strap in your Bluetooth settings, put it in pairing mode (tap the
+  band until the LEDs flash blue), then reconnect. On Mac, NOOP now detects this automatically and
+  shows you these exact steps in-app instead of silently retrying. WHOOP 4.0 is unaffected.
+
+---
+
 ## 1.72 — GPS workout crash fix (Android)
 
 - **Fixed (Android):** starting a GPS-tracked workout could crash the app on Android 12 and newer.
