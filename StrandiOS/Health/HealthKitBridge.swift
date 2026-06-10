@@ -49,10 +49,13 @@ final class HealthKitBridge: ObservableObject {
         return s
     }
 
+    // Every id here ends up in the HealthKit permission dialog. Only request what `sync` actually
+    // aggregates into `DayAgg`; adding read scopes the app never consumes makes the consent prompt
+    // noisier and surfaces a privacy ask we don't honour.
     private static let quantityReadIds: [HKQuantityTypeIdentifier] = [
         .heartRate, .restingHeartRate, .heartRateVariabilitySDNN, .oxygenSaturation,
         .respiratoryRate, .bodyTemperature, .stepCount, .activeEnergyBurned,
-        .basalEnergyBurned, .vo2Max, .bodyMass
+        .basalEnergyBurned, .vo2Max
     ]
     private static let quantityWriteIds: [HKQuantityTypeIdentifier] = [
         .restingHeartRate, .heartRateVariabilitySDNN, .oxygenSaturation, .respiratoryRate
