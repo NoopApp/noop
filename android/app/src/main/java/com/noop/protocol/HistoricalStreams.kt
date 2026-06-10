@@ -115,6 +115,30 @@ private fun histVersionLayout(version: Int): HistVersion? = when (version) {
 }
 
 /**
+ * The HISTORICAL_DATA record frames in [rawFrames] that FAIL decode (CRC failure, or an unmapped
+ * layout the v24-fallback's physical-validation gate also rejects). Console (type-50) and
+ * METADATA frames decode to zero rows BY DESIGN and are never returned — only genuine record
+ * frames whose biometric payload would otherwise be silently lost.
+ *
+ * Used by the Backfiller to archive undecodable history BEFORE acking the trim: the strap frees
+ * acked history, so without an archive a user on an unmapped firmware permanently loses every
+ * record while the UI reports a healthy sync (#77 / #91).
+ */
+fun rejectedHistoricalRecords(rawFrames: List<ByteArray>, family: DeviceFamily): List<ByteArray> {
+    val typeIndex = if (family == DeviceFamily.WHOOP5) 8 else 4
+    return rawFrames.filter { f ->
+        if (f.size <= typeIndex) return@filter false
+        if ((f[typeIndex].toInt() and 0xFF) != PacketType.HISTORICAL_DATA.rawValue) return@filter false
+        // 5/MG v26 (raw PPG block) is DELIBERATELY not stored — known and skipped by design,
+        // not lost data; flagging it would alarm on every PPG-carrying offload.
+        if (family == DeviceFamily.WHOOP5 && f.size > 9 && (f[9].toInt() and 0xFF) == 26) {
+            return@filter false
+        }
+        decodeHistorical(f, family) == null
+    }
+}
+
+/**
  * Decode a single type-47 HISTORICAL_DATA frame into the same flat parsed-map keys the Swift
  * `postHooks["historical_data"]` produces. Returns null when the frame is not a valid type-47
  * record (wrong SOF/too short/failed CRC/unmapped version) — callers skip those, matching the

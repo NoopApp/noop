@@ -51,7 +51,13 @@ final class Collector {
     private let monotonic: () -> TimeInterval
 
     /// Set once the GET_CLOCK correlation lands (E1). Until then, frames buffer un-persisted.
+    /// WHOOP 5/MG: BLEManager sets an IDENTITY ref at connect instead — 5/MG live frames carry
+    /// real unix timestamps, so device==wall makes toWall a no-op (same idiom as Backfiller).
     var clockRef: ClockRef?
+    /// Frame family for flush()'s decode. WHOOP4 default preserves the original byte-for-byte
+    /// behavior; BLEManager sets .whoop5 for a puffin connection so live 5/MG frames parse with
+    /// the puffin decoder (mirrors Android flushLive's family-aware Framing.parseFrame).
+    var family: DeviceFamily = .whoop4
     /// On-demand bounded raw-capture window. ORs into the raw-persist gate so a "capture
     /// activity sample" action can persist raw even when `enableRawCapture` is off. The window's
     /// monotonic deadline auto-expires so a missed stop callback can't leak raw forever.
@@ -124,7 +130,7 @@ final class Collector {
         let frames = buffer
         buffer.removeAll(keepingCapacity: true)
 
-        let parsed = frames.map { parseFrame($0) }
+        let parsed = frames.map { parseFrame($0, family: family) }
         let streams = extractStreams(parsed, deviceClockRef: ref.device, wallClockRef: ref.wall)
         do {
             try await store.insert(streams, deviceId: deviceId)   // DECODED FIRST (durable)

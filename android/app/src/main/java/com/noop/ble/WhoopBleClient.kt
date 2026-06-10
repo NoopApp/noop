@@ -260,6 +260,14 @@ class WhoopBleClient(
         private const val WHOOP5_CAPTURE_MAX_BYTES = 10L * 1024 * 1024
         private const val WHOOP5_CAPTURE_MAX_LINES = 40_000
 
+        /** Archive of HISTORICAL_DATA record frames that failed decode, written BEFORE the trim
+         *  ack deletes the strap's copy — the user's only remaining copy of an unmapped firmware's
+         *  records, and the corpus a later layout mapping re-ingests (#77 / #91). App filesDir. */
+        const val REJECTED_ARCHIVE_FILE = "backfill-rejected.jsonl"
+        /** Cap on the rejected-frame archive. When full, archiving reports success WITHOUT writing
+         *  so the offload can never wedge — by then plenty of sample bytes exist for mapping. */
+        private const val REJECTED_ARCHIVE_MAX_BYTES = 10L * 1024 * 1024
+
         /** Live-gesture freshness window (seconds). A DOUBLE_TAP / WRIST_* event only updates live state
          *  if its event_timestamp is within this of wall-now, so a *replayed historical* gesture during a
          *  backfill offload is ignored. Port of Swift FrameRouter.liveGestureWindowSeconds (#69). */
@@ -445,6 +453,7 @@ class WhoopBleClient(
         ackTrim = { trim, endData -> ackHistoricalChunk(trim, endData) },
         onChunkCommitted = { batch -> onBackfillChunkCommitted(batch) },
         log = { s -> log(s) },
+        rejectedSink = { frames, trim -> archiveRejectedFrames(frames, trim) },
     )
 
     /**
@@ -1908,6 +1917,7 @@ class WhoopBleClient(
         backfilling = true
         ackedChunksThisSession = 0
         offloadFramesThisSession = 0
+        rejectedFramesThisSession = 0
         historicalKickSent = false
         _state.value = _state.value.copy(backfilling = true, syncChunksThisSession = 0)
         // Opt-in raw capture (research aid): pref read fresh per session, like the probes gate.
@@ -2034,7 +2044,17 @@ class WhoopBleClient(
                 backfilling = false,
                 syncChunksThisSession = ackedChunksThisSession,
                 lastSyncAt = nowSec,
-                lastSyncError = null,
+                // #91: a sync that completed but DISCARDED records must not read as a clean
+                // "History synced N ago" — the user in #91 saw exactly that while 100% of his
+                // records were dropped (unmapped firmware layout). The raw bytes are archived
+                // on-device; a strap log carries hex samples for mapping the layout.
+                lastSyncError = if (rejectedFramesThisSession > 0) {
+                    "Synced, but $rejectedFramesThisSession record(s) could not be decoded " +
+                        "(unrecognised strap firmware layout). The raw bytes were saved on this " +
+                        "phone — please share a strap log so the layout can be mapped."
+                } else {
+                    null
+                },
             )
             "timeout" -> _state.value.copy(
                 backfilling = false,
@@ -2211,6 +2231,48 @@ class WhoopBleClient(
     @Volatile private var captureLines = 0
     private var captureSessionId = ""
     private val captureSummary = BackfillCaptureSummary()
+
+    /** Undecodable record frames archived this offload session (#77/#91); drives the honest
+     *  sync status in [exitBackfilling]. Reset at session start. */
+    @Volatile private var rejectedFramesThisSession = 0
+
+    /**
+     * Durably archive HISTORICAL_DATA record frames that failed decode, BEFORE the trim ack
+     * (the strap frees acked history — these bytes are the user's only remaining copy until
+     * the layout is mapped). Append-only JSONL in app-private filesDir, flushed + fsynced
+     * before returning. Returns false ONLY on a write failure, which makes the Backfiller
+     * hold the cursor/ack so the strap re-sends the chunk (no data loss either way). Frames
+     * carry sensor payloads, not identifiers — no serials/MACs land in the archive.
+     */
+    private fun archiveRejectedFrames(frames: List<ByteArray>, trim: Long): Boolean {
+        return try {
+            val f = java.io.File(context.filesDir, REJECTED_ARCHIVE_FILE)
+            if (f.length() < REJECTED_ARCHIVE_MAX_BYTES) {
+                java.io.FileOutputStream(f, true).use { out ->
+                    for (frame in frames) {
+                        val rec = BackfillCaptureRecord(
+                            capturedAtMs = System.currentTimeMillis(),
+                            sessionId = "rejected-trim-$trim",
+                            characteristic = "backfill-rejected",
+                            typeName = "HISTORICAL_DATA",
+                            crcOk = null,
+                            offload = true,
+                            size = frame.size,
+                            parsed = emptyMap(),
+                            hex = frame.joinToString("") { "%02x".format(it) },
+                        )
+                        out.write((BackfillCaptureJsonl.encode(rec) + "\n").toByteArray())
+                    }
+                    out.fd.sync() // durable BEFORE the ack — the whole point of the archive
+                }
+            }
+            rejectedFramesThisSession += frames.size
+            true
+        } catch (t: Throwable) {
+            log("Backfill: rejected-frame archive FAILED (${t.message}) — holding ack so the strap re-sends")
+            false
+        }
+    }
 
     private fun startWhoop5BackfillCapture() {
         if (captureWriter != null || captureDisabled) return

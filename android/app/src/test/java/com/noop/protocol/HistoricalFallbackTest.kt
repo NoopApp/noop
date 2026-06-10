@@ -3,6 +3,7 @@ package com.noop.protocol
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -69,5 +70,44 @@ class HistoricalFallbackTest {
         for (i in 40 until 52) frame[i] = 0   // zero gravity x/y/z (offsets 40/44/48) → |g| = 0
         repairCrc32(frame)
         assertNull(decodeHistorical(frame, DeviceFamily.WHOOP4))
+    }
+
+    // ---- rejectedHistoricalRecords: the #77/#91 archive-before-ack classifier ----
+
+    @Test
+    fun rejectedHistoricalRecords_returnsOnlyUndecodableRecordFrames() {
+        val good = bytes(realV24Hex)
+        // Unmapped version AND non-physical gravity → fails decode even via the v24 fallback.
+        val unmappedBad = bytes(realV24Hex).also { f ->
+            f[5] = 99.toByte()
+            for (i in 40 until 52) f[i] = 0
+            repairCrc32(f)
+        }
+        // Payload mutated without repairing the CRC → integrity gate fails the decode.
+        val crcBad = bytes(realV24Hex).also { it[20] = (it[20] + 1).toByte() }
+        // Type-50 console + type-49 METADATA frames decode to zero rows BY DESIGN — they must
+        // never be classified as lost records (the old chunk-level isEmpty diagnostic counted
+        // them, which produced the #77-tail "CRC FAILURE" false alarm).
+        val console = ByteArray(12).also { it[0] = 0xAA.toByte(); it[4] = 50 }
+        val metadata = ByteArray(12).also { it[0] = 0xAA.toByte(); it[4] = 49 }
+
+        val rejected = rejectedHistoricalRecords(
+            listOf(good, unmappedBad, crcBad, console, metadata),
+            DeviceFamily.WHOOP4,
+        )
+        assertEquals(2, rejected.size)
+        assertTrue(rejected.contains(unmappedBad))
+        assertTrue(rejected.contains(crcBad))
+    }
+
+    @Test
+    fun rejectedHistoricalRecords_whoop5ReadsTypeAtFrame8() {
+        // 5/MG: the record type byte sits at frame[8] (+4 puffin envelope). An undecodable
+        // record-typed frame is returned; the console frame at the same index is not.
+        val badRecord = ByteArray(40).also { it[0] = 0xAA.toByte(); it[8] = 47 }
+        val console = ByteArray(40).also { it[0] = 0xAA.toByte(); it[8] = 50 }
+        val rejected = rejectedHistoricalRecords(listOf(badRecord, console), DeviceFamily.WHOOP5)
+        assertEquals(1, rejected.size)
+        assertTrue(rejected.contains(badRecord))
     }
 }

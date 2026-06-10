@@ -8,6 +8,7 @@ import com.noop.protocol.Framing
 import com.noop.protocol.HistoricalMeta
 import com.noop.protocol.classifyHistoricalMeta
 import com.noop.protocol.extractHistoricalStreams
+import com.noop.protocol.rejectedHistoricalRecords
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -63,6 +64,16 @@ class Backfiller(
      * an unmapped layout are dropped, the chunk looks empty, the trim acks past them). Without this a
      * "zero data" strap log shows healthy "acked chunk" lines while data is being discarded (#77). */
     private val log: (String) -> Unit = {},
+    /**
+     * Durable archive for HISTORICAL_DATA record frames that FAILED decode, called BEFORE the
+     * chunk is acked. The strap frees acked history, so these raw bytes are the user's ONLY
+     * remaining copy of an unmapped firmware's records — archiving them preserves the data for a
+     * later release that maps the layout AND provides the corpus that mapping needs (#77 / #91).
+     * Return false when the archive could NOT be made durable: finishChunk then does NOT advance
+     * the cursor or ack (same invariant as a failed repository insert — the strap re-sends).
+     * The default keeps old behavior for tests/callers that do not wire an archive.
+     */
+    private val rejectedSink: (frames: List<ByteArray>, trim: Long) -> Boolean = { _, _ -> true },
     /**
      * The (device, wall) clock reference. type-47 records carry their OWN real unix timestamp so
      * the offset is a no-op for them; this is supplied only for the REALTIME_RAW_DATA fallback and
@@ -161,18 +172,27 @@ class Backfiller(
         if (frames.isNotEmpty()) {
             val ref = clockRef
             val decoded = extractHistoricalStreams(frames, ref.device, ref.wall, family)
-            // DIAGNOSTIC (#77): frames arrived but produced no rows — they were dropped (CRC fail /
-            // unmapped layout / out-of-range timestamp), so this chunk persists nothing yet still acks
-            // below and the strap trims past it. Surface it loudly so a "zero data" strap log reveals
-            // the silent loss instead of looking healthy. (Observability only — behaviour unchanged
-            // pending a confirmed root cause; not acking here would wedge the offload on a re-send loop.)
-            if (decoded.isEmpty) {
-                log("Backfill: WARNING ${frames.size} frame(s) decoded to 0 rows (trim=$trim) — dropped (CRC/layout/timestamp); nothing persisted for this chunk")
-                // #91: dump a hex sample of the rejected frames so an unmapped firmware's record
-                // layout can be mapped from a user's strap log — the count alone can't be decoded.
-                frames.take(3).forEachIndexed { i, f ->
+            // #77 / #91: HISTORICAL_DATA record frames that fail decode (CRC / unmapped layout the
+            // v24 fallback also rejects) used to be acked anyway — the strap trims acked history,
+            // so the user's ONLY copy of those records was permanently destroyed while the UI said
+            // "History synced". Classify PER FRAME (type-50 console frames decode to 0 rows BY
+            // DESIGN and must not raise the alarm — the old chunk-level isEmpty check counted them
+            // and could waste the hex sample on them; it also missed mixed chunks where one good
+            // row hid the losses), archive the rejects durably, and only then allow the ack.
+            val rejected = rejectedHistoricalRecords(frames, family)
+            if (rejected.isNotEmpty()) {
+                log(
+                    "Backfill: WARNING ${rejected.size} record frame(s) decoded to 0 rows " +
+                        "(trim=$trim) — raw bytes archived before ack (CRC/unmapped layout)",
+                )
+                // #91: a hex sample in the strap log so an unmapped firmware's record layout can
+                // be mapped from a shared log — now guaranteed to be actual record frames.
+                rejected.take(3).forEachIndexed { i, f ->
                     val hex = f.take(64).joinToString("") { "%02x".format(it) }
                     log("Backfill: rejected frame[$i] ${f.size}B: $hex${if (f.size > 64) "…" else ""}")
+                }
+                if (!rejectedSink(rejected, trim)) {
+                    return // archive not durable — do NOT advance/ack; the strap re-sends
                 }
             }
             try {

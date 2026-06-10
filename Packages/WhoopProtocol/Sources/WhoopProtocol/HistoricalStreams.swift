@@ -1,5 +1,29 @@
 import Foundation
 
+/// The HISTORICAL_DATA record frames in `rawFrames` that FAIL decode (CRC failure, or an
+/// unmapped layout whose v24-fallback plausibility gate also rejects it). Console (type-50)
+/// and METADATA frames decode to zero rows BY DESIGN and are never returned — only genuine
+/// record frames whose biometric payload would otherwise be silently lost. 5/MG v26 (raw PPG
+/// block) is DELIBERATELY not stored — known and skipped by design, not lost data.
+///
+/// Used by the Backfiller to archive undecodable history BEFORE acking the trim: the strap
+/// frees acked history, so without an archive a user on an unmapped firmware permanently
+/// loses every record while the UI reports a healthy sync (#77 / #91). Mirrors the Android
+/// rejectedHistoricalRecords.
+public func rejectedHistoricalRecords(_ rawFrames: [[UInt8]], family: DeviceFamily) -> [[UInt8]] {
+    let typeIndex = family == .whoop5 ? 8 : 4
+    return rawFrames.filter { f in
+        guard f.count > typeIndex, Int(f[typeIndex]) == 47 else { return false }  // 47 = HISTORICAL_DATA
+        if family == .whoop5, f.count > 9, Int(f[9]) == 26 { return false }       // v26 PPG: skipped by design
+        let p = parseFrame(f, family: family)
+        if !p.ok || p.crcOK == false { return true }   // envelope/CRC reject
+        // Unmapped layout: the envelope parsed but no biometrics decoded — exactly the rows
+        // extractHistoricalStreams skips (it requires the `unix` key; a record with no
+        // heart_rate either carried nothing usable or was rejected by the plausibility gate).
+        return p.parsed["unix"]?.intValue == nil || p.parsed["heart_rate"]?.intValue == nil
+    }
+}
+
 /// Turn historical (offload) parsed frames into datastore rows. Port of
 /// interpreter.extract_historical_streams.
 ///

@@ -65,18 +65,27 @@ final class Backfiller {
     private let log: ((String) -> Void)?
     /// Versions already reported this session, so the diagnostic logs each once (no spam).
     private var loggedUnmappedVersions: Set<Int> = []
+    /// Durable archive for HISTORICAL_DATA record frames that FAILED decode, called BEFORE the
+    /// chunk is acked. The strap frees acked history, so these raw bytes are the user's ONLY
+    /// remaining copy of an unmapped firmware's records — archiving preserves the data for a
+    /// later release that maps the layout AND provides the corpus the mapping needs (#77 / #91).
+    /// Returns false when the archive could NOT be made durable: finishChunk then does NOT
+    /// advance the cursor or ack (same invariant as a failed insert — the strap re-sends).
+    private let rejectedSink: (_ frames: [[UInt8]], _ trim: UInt32) -> Bool
 
     init(store: BackfillStoreWriting,
          deviceId: String,
          ackTrim: @escaping (_ trim: UInt32, _ endData: [UInt8]) -> Void,
          enableRawCapture: Bool = false,
          log: ((String) -> Void)? = nil,
+         rejectedSink: @escaping (_ frames: [[UInt8]], _ trim: UInt32) -> Bool = { _, _ in true },
          extract: @escaping Extractor = { extractHistoricalStreams($0, deviceClockRef: $1, wallClockRef: $2) }) {
         self.store = store
         self.deviceId = deviceId
         self.ackTrim = ackTrim
         self.enableRawCapture = enableRawCapture
         self.log = log
+        self.rejectedSink = rejectedSink
         self.extract = extract
     }
 
@@ -158,18 +167,24 @@ final class Backfiller {
                 log?("Historical records use firmware layout v\(v), which NOOP doesn't decode yet — no motion data, so sleep can't be computed from the strap. Please report this (issue #30).")
             }
             let decoded = extract(parsed, ref.device, ref.wall)
-            // Diagnostic (#77): the AGGREGATE silent-loss case — frames arrived but produced no rows at
-            // all (CRC fail / unmapped layout / out-of-range timestamp), so this chunk persists nothing
-            // yet still acks below and the strap trims past it. The per-version log above only catches
-            // unmapped layouts; this catches CRC drops too. Observability only — behaviour unchanged
-            // (not acking would wedge the offload on a re-send loop). Surfaces in the user's strap log.
-            if decoded.isEmpty {
-                log?("Backfill: \(frames.count) frame(s) decoded to 0 rows (trim=\(trim)) — dropped (CRC/layout/timestamp); nothing persisted for this chunk.")
-                // #91: dump a hex sample of the rejected frames so an unmapped firmware's record
-                // layout can be mapped from a user's strap log — the count alone can't be decoded.
-                for (i, f) in frames.prefix(3).enumerated() {
+            // #77 / #91: HISTORICAL_DATA record frames that fail decode (CRC / unmapped layout the
+            // v24 fallback also rejects) used to be acked anyway — the strap trims acked history,
+            // so the user's ONLY copy of those records was permanently destroyed while the UI said
+            // "History synced". Classify PER FRAME (type-50 console frames decode to 0 rows BY
+            // DESIGN and must not raise the alarm — the old chunk-level isEmpty check counted them
+            // and could waste the hex sample on them; it also missed mixed chunks where one good
+            // row hid the losses), archive the rejects durably, and only then allow the ack.
+            let rejected = rejectedHistoricalRecords(frames, family: family)
+            if !rejected.isEmpty {
+                log?("Backfill: WARNING \(rejected.count) record frame(s) decoded to 0 rows (trim=\(trim)) — raw bytes archived before ack (CRC/unmapped layout).")
+                // #91: a hex sample in the strap log so an unmapped firmware's record layout can
+                // be mapped from a shared log — now guaranteed to be actual record frames.
+                for (i, f) in rejected.prefix(3).enumerated() {
                     let hex = f.prefix(64).map { String(format: "%02x", $0) }.joined()
                     log?("Backfill: rejected frame[\(i)] \(f.count)B: \(hex)\(f.count > 64 ? "…" : "")")
+                }
+                if !rejectedSink(rejected, trim) {
+                    return  // archive not durable — do NOT advance/ack; the strap re-sends
                 }
             }
             do { try await store.insert(decoded, deviceId: deviceId) } catch { return }
