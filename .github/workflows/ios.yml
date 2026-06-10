@@ -1,0 +1,111 @@
+name: iOS CI
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'Packages/**'
+      - 'Strand/**'
+  push:
+    branches:
+      - main
+    paths:
+      - 'Packages/**'
+      - 'Strand/**'
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    concurrency:
+      group: ios-ci-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test WhoopProtocol
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -scheme WhoopProtocol-Package \
+            -destination 'platform=iOS Simulator,OS=latest,name=iPhone 16' \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            ONLY_ACTIVE_ARCH=YES \
+            -derivedDataPath /tmp/ios-derived/WhoopProtocol \
+            -resultBundlePath /tmp/noop-ios-results/WhoopProtocol.xcresult
+        working-directory: Packages/WhoopProtocol
+
+      - name: Test WhoopStore
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -scheme WhoopStore \
+            -destination 'platform=iOS Simulator,OS=latest,name=iPhone 16' \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            ONLY_ACTIVE_ARCH=YES \
+            -derivedDataPath /tmp/ios-derived/WhoopStore \
+            -resultBundlePath /tmp/noop-ios-results/WhoopStore.xcresult
+        working-directory: Packages/WhoopStore
+
+      - name: Test StrandAnalytics
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -scheme StrandAnalytics \
+            -destination 'platform=iOS Simulator,OS=latest,name=iPhone 16' \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            ONLY_ACTIVE_ARCH=YES \
+            -derivedDataPath /tmp/ios-derived/StrandAnalytics \
+            -resultBundlePath /tmp/noop-ios-results/StrandAnalytics.xcresult
+        working-directory: Packages/StrandAnalytics
+
+      - name: Test StrandDesign
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -scheme StrandDesign \
+            -destination 'platform=iOS Simulator,OS=latest,name=iPhone 16' \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            ONLY_ACTIVE_ARCH=YES \
+            -derivedDataPath /tmp/ios-derived/StrandDesign \
+            -resultBundlePath /tmp/noop-ios-results/StrandDesign.xcresult
+        working-directory: Packages/StrandDesign
+
+      - name: Test StrandImport
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -scheme StrandImport \
+            -destination 'platform=iOS Simulator,OS=latest,name=iPhone 16' \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            ONLY_ACTIVE_ARCH=YES \
+            -derivedDataPath /tmp/ios-derived/StrandImport \
+            -resultBundlePath /tmp/noop-ios-results/StrandImport.xcresult
+        working-directory: Packages/StrandImport
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: noop-ios-test-results
+          path: /tmp/noop-ios-results/
+          retention-days: 7
+          if-no-files-found: error
