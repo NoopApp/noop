@@ -52,6 +52,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlin.coroutines.cancellation.CancellationException
 import java.util.UUID
 import java.util.concurrent.ConcurrentLinkedQueue
 
@@ -512,6 +513,7 @@ class WhoopBleClient(
                 }.onSuccess {
                     log("Backfill: post-sync scoring pass done")
                 }.onFailure {
+                    if (it is CancellationException) throw it // shutdown() is not a scoring failure
                     log("Backfill: post-sync scoring failed: ${it.message}")
                 }
                 // Keep the opt-in Health Connect writeback fresh in background-only operation too.

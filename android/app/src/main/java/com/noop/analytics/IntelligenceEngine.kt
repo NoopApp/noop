@@ -4,6 +4,10 @@ import com.noop.data.DailyMetric
 import com.noop.data.SleepSession
 import com.noop.data.WhoopRepository
 import com.noop.data.WorkoutRow
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 
 /*
  * IntelligenceEngine.kt — on-device "intelligence": computes recovery / day-strain /
@@ -36,6 +40,14 @@ object IntelligenceEngine {
 
     /** Read cap per stream read — matches the Swift 200_000 bound. */
     const val STREAM_LIMIT: Int = 200_000
+
+    /**
+     * Skip-if-busy gate for [analyzeRecent] (the Swift mirror's `computing` flag): the
+     * AppViewModel 15-min loop and WhoopBleClient's post-backfill scoring pass can overlap,
+     * and the pass ends with a non-transactional delete-then-reinsert of detected workouts —
+     * two interleaved passes could transiently drop rows.
+     */
+    private val analyzeGate = Mutex()
 
     private const val SECONDS_PER_DAY: Long = 86_400L
 
@@ -74,6 +86,35 @@ object IntelligenceEngine {
         importedDeviceId: String = "my-whoop",
         maxHROverride: Double? = null,
         nowSeconds: Long = System.currentTimeMillis() / 1000L,
+    ): List<Computed> {
+        // Single-flight, skip-if-busy (the Swift mirror's `guard !computing else { return }`):
+        // a pass already being in flight means the same data is being scored right now.
+        if (!analyzeGate.tryLock()) return emptyList()
+        try {
+            // Main-safety: hop to the CPU dispatcher BEFORE any analysis. analyzeDay grinds
+            // seconds-to-minutes of CPU over up to 21 nights of 1 Hz raw streams, and the
+            // AppViewModel 15-min loop launches from viewModelScope (Dispatchers.Main) — without
+            // this hop every analysis tick froze the UI thread into "Input dispatching timed out"
+            // ANRs once enough offloaded history accumulated. The Swift mirror hops each per-night
+            // analyzeDay onto Task.detached(priority: .utility) inside its engine; the Kotlin port
+            // dropped any off-main hop. This hop covers the whole pass (broader than the mirror —
+            // the baseline folds and pass-2 re-score also leave Main, which is strictly safer).
+            // Room's suspend DAO calls are main-safe under any dispatcher.
+            return withContext(Dispatchers.Default) {
+                analyzeRecentOnCpu(repo, profile, maxDays, importedDeviceId, maxHROverride, nowSeconds)
+            }
+        } finally {
+            analyzeGate.unlock()
+        }
+    }
+
+    private suspend fun analyzeRecentOnCpu(
+        repo: WhoopRepository,
+        profile: UserProfile,
+        maxDays: Int,
+        importedDeviceId: String,
+        maxHROverride: Double?,
+        nowSeconds: Long,
     ): List<Computed> {
         val hrvCfg = Baselines.metricCfg["hrv"] ?: return emptyList()
         val rhrCfg = Baselines.metricCfg["resting_hr"] ?: return emptyList()
@@ -171,6 +212,10 @@ object IntelligenceEngine {
             nightlySkinByDay[day] = res.nightlySkinTempC
             nightlyRespByDay[day] = res.daily.respRateBpm
             scoredNights.add(res)
+            // Cooperative checkpoint between nights (the Swift mirror's per-night Task.yield()):
+            // analyzeDay is a pure-CPU stretch, so without this a cancelled scope only stops at
+            // the next DAO read.
+            yield()
         }
 
         // ── Seed the baseline from the UNION of imported nightly history + the nightly

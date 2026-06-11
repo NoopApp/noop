@@ -38,6 +38,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.roundToInt
 
 /**
@@ -206,6 +207,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                             .takeIf { it > 0 }?.toDouble(),
                     )
                 }
+                    // runCatching must not eat the scope's own teardown: rethrow so the loop
+                    // exits here instead of doing one more cancelled-scope writeback pass.
+                    .onFailure { if (it is CancellationException) throw it }
                 // Opt-in writeback: push the freshly computed nights into Health Connect so other
                 // apps see them. Idempotent (clientRecordId per metric+day), so re-running every
                 // cycle just upserts. Never let an HC hiccup (perm revoked mid-flight, provider
