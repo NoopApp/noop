@@ -12,120 +12,11 @@ import WhoopStore
 // transmit the small text context built in `buildContext()` + the running chat — no raw streams.
 //
 // Pure macOS: Foundation + URLSession + Security (Keychain). Compiles on macOS 13, Swift 5.
+// Provider wire formats live in Providers/: OpenAI.swift, Anthropic.swift, Gemini.swift.
 
 /// One-line privacy note the UI should display verbatim near the composer / settings.
 public let aiCoachPrivacyNote =
     "Private by default: nothing is sent until you add your own key and ask a question — only a short text summary of your metrics goes to the provider you pick."
-
-// MARK: - Provider
-
-/// The remote provider the user opts into. Anonymous: only the provider's own name is shown; no
-/// other vendor/author branding. Wire formats are pinned per provider in `AICoachEngine`.
-enum AIProvider: String, CaseIterable, Identifiable {
-    case openAI
-    case anthropic
-    case gemini
-
-    var id: String { rawValue }
-
-    /// Plain provider name shown in the picker (no extra branding).
-    var displayName: String {
-        switch self {
-        case .openAI:    return "OpenAI"
-        case .anthropic: return "Anthropic"
-        case .gemini:    return "Google Gemini"
-        }
-    }
-
-    /// Model selected by default when this provider is first chosen.
-    var defaultModel: String {
-        switch self {
-        case .openAI:    return "gpt-4o-mini"
-        case .anthropic: return "claude-sonnet-4-6"
-        case .gemini:    return "gemini-2.5-flash"
-        }
-    }
-
-    /// Models offered in the model picker for this provider. A free-text "Custom…" path in the UI
-    /// lets the user pick any id beyond these, and `refreshModels()` can merge the provider's live list.
-    var modelOptions: [String] {
-        switch self {
-        case .openAI:
-            return [
-                "gpt-4o",
-                "gpt-4o-mini",
-                "gpt-4.1",
-                "gpt-4.1-mini",
-                "gpt-4.1-nano"
-            ]
-        case .anthropic:
-            return [
-                "claude-opus-4-8",
-                "claude-sonnet-4-6",
-                "claude-haiku-4-5-20251001",
-                "claude-3-7-sonnet-latest",
-                "claude-3-5-sonnet-latest",
-                "claude-3-5-haiku-latest",
-                "claude-3-opus-latest"
-            ]
-        case .gemini:
-            return [
-                "gemini-2.5-pro",
-                "gemini-2.5-flash",
-                "gemini-2.5-flash-lite",
-                "gemini-2.0-flash"
-            ]
-        }
-    }
-
-    /// The HTTPS endpoint this provider's chat request is POSTed to. Gemini's chat URL is
-    /// per-model, so its case is the models BASE — `sendGemini` appends
-    /// "/{model}:generateContent" at request time.
-    var endpoint: URL {
-        switch self {
-        case .openAI:    return URL(string: "https://api.openai.com/v1/chat/completions")!
-        case .anthropic: return URL(string: "https://api.anthropic.com/v1/messages")!
-        case .gemini:    return URL(string: "https://generativelanguage.googleapis.com/v1beta/models")!
-        }
-    }
-
-    /// The HTTPS endpoint that lists the provider's available models (GET, authenticated).
-    var modelsEndpoint: URL {
-        switch self {
-        case .openAI:    return URL(string: "https://api.openai.com/v1/models")!
-        case .anthropic: return URL(string: "https://api.anthropic.com/v1/models")!
-        case .gemini:    return URL(string: "https://generativelanguage.googleapis.com/v1beta/models")!
-        }
-    }
-
-    /// Parse the provider's model-list response body into chat-capable model ids.
-    ///
-    /// OpenAI/Anthropic return `{"data":[{"id":…}]}`; Gemini returns
-    /// `{"models":[{"name":"models/gemini-…"}]}` — its ids carry a `models/` prefix and the list
-    /// includes non-chat entries (embeddings, AQA) we must drop. Pure (no network) so it can be
-    /// unit tested directly off a decoded body.
-    func parseModelList(_ obj: [String: Any]) -> [String] {
-        let listKey = (self == .gemini) ? "models" : "data"
-        guard let list = obj[listKey] as? [[String: Any]] else { return [] }
-        return list.compactMap { row in
-            switch self {
-            case .openAI:
-                guard let id = row["id"] as? String, !id.isEmpty else { return nil }
-                return (id.hasPrefix("gpt") || id.hasPrefix("o")) ? id : nil
-            case .anthropic:
-                guard let id = row["id"] as? String, !id.isEmpty else { return nil }
-                return id
-            case .gemini:
-                guard let name = row["name"] as? String, !name.isEmpty else { return nil }
-                let id = name.hasPrefix("models/") ? String(name.dropFirst("models/".count)) : name
-                // Keep only chat-capable gemini-* ids; exclude embeddings/AQA and the like.
-                guard id.hasPrefix("gemini"),
-                      !id.contains("embedding"), !id.contains("aqa") else { return nil }
-                return id
-            }
-        }
-    }
-}
 
 // MARK: - Chat model
 
@@ -135,7 +26,7 @@ struct ChatMessage: Identifiable, Equatable {
     let id: UUID
     let role: Role
     let text: String
-
+    
     init(id: UUID = UUID(), role: Role, text: String) {
         self.id = id
         self.role = role
@@ -150,7 +41,7 @@ struct ChatMessage: Identifiable, Equatable {
 enum AIKeyStore {
     private static let service = "com.noop.aicoach"
     private static let account = "api-key"
-
+    
     private static var baseQuery: [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
@@ -158,28 +49,28 @@ enum AIKeyStore {
             kSecAttrAccount as String: account
         ]
     }
-
+    
     /// Store (or replace) the API key. Empty/whitespace input is treated as a clear.
     static func save(_ key: String) {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { clear(); return }
         guard let data = trimmed.data(using: .utf8) else { return }
-
+        
         // Delete any existing item first so we always insert a single, fresh value.
         SecItemDelete(baseQuery as CFDictionary)
-
+        
         var attrs = baseQuery
         attrs[kSecValueData as String] = data
         attrs[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
         SecItemAdd(attrs as CFDictionary, nil)
     }
-
+    
     /// Read the stored API key, or nil if none is set.
     static func read() -> String? {
         var query = baseQuery
         query[kSecReturnData as String] = kCFBooleanTrue
         query[kSecMatchLimit as String] = kSecMatchLimitOne
-
+        
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
         guard status == errSecSuccess,
@@ -188,7 +79,7 @@ enum AIKeyStore {
               !str.isEmpty else { return nil }
         return str
     }
-
+    
     /// Remove any stored API key.
     static func clear() {
         SecItemDelete(baseQuery as CFDictionary)
@@ -206,7 +97,7 @@ enum AICoachError: LocalizedError {
     case server(Int, String)
     case network(String)
     case decode
-
+    
     var errorDescription: String? {
         switch self {
         case .noKey:
@@ -235,7 +126,7 @@ enum AICoachError: LocalizedError {
 /// call hops off-main via `URLSession`'s async API and results are applied back on the main actor.
 @MainActor
 final class AICoachEngine: ObservableObject {
-
+    
     // Published state the UI binds to.
     @Published var messages: [ChatMessage] = []
     @Published var sending = false
@@ -263,14 +154,14 @@ final class AICoachEngine: ObservableObject {
     @Published var dataConsent: Bool {
         didSet { UserDefaults.standard.set(dataConsent, forKey: Self.consentKey) }
     }
-
+    
     private let repo: Repository
     private let session: URLSession
-
+    
     private static let providerKey = "ai.provider"
     private static let modelKey = "ai.model"
     private static let consentKey = "ai.dataConsent"
-
+    
     /// The system prompt that frames every request. Anonymous — frames the assistant only as a coach.
     private let systemPrompt = """
     You are an elite, supportive recovery and performance coach with a real training methodology. \
@@ -286,22 +177,22 @@ final class AICoachEngine: ObservableObject {
     If no data is provided, coach generally and invite them to turn on data access for personalised \
     advice. You are NOT a doctor — never diagnose; suggest a professional for genuine health concerns.
     """
-
+    
     /// Used in place of the metrics context when the user has NOT granted data access.
     private let noConsentNote = """
     NOTE: The user has not granted access to their biometric data. Coach generally and encourage \
     them to enable "Let the coach use my data" for guidance tailored to their real numbers.
     """
-
+    
     init(repo: Repository, session: URLSession = .shared) {
         self.repo = repo
         self.session = session
-
+        
         // Restore persisted provider / model (falling back to sane defaults).
         let storedProvider = UserDefaults.standard.string(forKey: Self.providerKey)
             .flatMap(AIProvider.init(rawValue:)) ?? .openAI
         self.provider = storedProvider
-
+        
         let storedModel = UserDefaults.standard.string(forKey: Self.modelKey)
         // A persisted custom id is honoured even if it's not in the built-in list.
         if let storedModel, !storedModel.isEmpty {
@@ -309,22 +200,22 @@ final class AICoachEngine: ObservableObject {
         } else {
             self.model = storedProvider.defaultModel
         }
-
+        
         // Seed the picker with the provider's built-in options; include any persisted custom id.
         var seeded = storedProvider.modelOptions
         if let storedModel, !storedModel.isEmpty, !seeded.contains(storedModel) {
             seeded.insert(storedModel, at: 0)
         }
         self.availableModels = seeded
-
+        
         self.dataConsent = UserDefaults.standard.bool(forKey: Self.consentKey)
     }
-
+    
     // MARK: Key management
-
+    
     /// True when a key is present in the Keychain.
     var hasKey: Bool { AIKeyStore.read() != nil }
-
+    
     /// Store the user's pasted key securely. Clears any prior error.
     func setKey(_ key: String) {
         AIKeyStore.save(key)
@@ -333,15 +224,15 @@ final class AICoachEngine: ObservableObject {
         // Pull the user's ACTUAL current models from the provider so the picker is never stale.
         Task { await refreshModels() }
     }
-
+    
     /// Forget the stored key.
     func clearKey() {
         AIKeyStore.clear()
         objectWillChange.send()
     }
-
+    
     // MARK: Live model list
-
+    
     /// Set a custom model id (any string). Adds it to the picker if it isn't already listed.
     func setCustomModel(_ id: String) {
         let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -351,7 +242,7 @@ final class AICoachEngine: ObservableObject {
         }
         model = trimmed
     }
-
+    
     /// Best-effort: GET the chosen provider's models endpoint with the saved key and merge the
     /// returned ids into `availableModels`. Never crashes; failures land in `errorText` and leave
     /// the existing list intact. Requires a saved key.
@@ -361,71 +252,29 @@ final class AICoachEngine: ObservableObject {
             return
         }
         errorText = nil
-
-        var req = URLRequest(url: provider.modelsEndpoint)
-        req.httpMethod = "GET"
-        switch provider {
-        case .openAI:
-            req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-        case .anthropic:
-            req.setValue(key, forHTTPHeaderField: "x-api-key")
-            req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-        case .gemini:
-            req.setValue(key, forHTTPHeaderField: "x-goog-api-key")
-        }
-
-        let data: Data
-        let response: URLResponse
+        
         do {
-            (data, response) = try await session.data(for: req)
+            let ids = try await provider.client.fetchModels(key: key, session: session)
+            guard !ids.isEmpty else {
+                errorText = AICoachError.decode.errorDescription
+                return
+            }
+            
+            // Merge: keep the built-in options on top, append any newly-discovered ids (sorted), and
+            // preserve a current custom selection if it isn't otherwise present.
+            let builtin = provider.modelOptions
+            let discovered = Set(ids).subtracting(builtin).sorted()
+            var merged = builtin + discovered
+            if !merged.contains(model) { merged.insert(model, at: 0) }
+            availableModels = merged
         } catch {
             errorText = AICoachError.network(error.localizedDescription).errorDescription
             return
         }
-
-        guard let http = response as? HTTPURLResponse else {
-            errorText = AICoachError.network("no HTTP response").errorDescription
-            return
-        }
-        switch http.statusCode {
-        case 200...299:
-            break
-        case 401, 403:
-            errorText = AICoachError.badKey.errorDescription
-            return
-        case 429:
-            errorText = AICoachError.rateLimited.errorDescription
-            return
-        default:
-            errorText = AICoachError.server(http.statusCode, providerErrorMessage(from: data)).errorDescription
-            return
-        }
-
-        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            errorText = AICoachError.decode.errorDescription
-            return
-        }
-
-        // Decode + light per-provider filter so the list stays relevant (see parseModelList).
-        let ids = provider.parseModelList(obj)
-        guard !ids.isEmpty else {
-            errorText = AICoachError.decode.errorDescription
-            return
-        }
-
-        // Merge: keep the built-in options on top, append any newly-discovered ids (sorted), and
-        // preserve a current custom selection if it isn't otherwise present.
-        let builtIn = provider.modelOptions
-        let discovered = Set(ids).subtracting(builtIn).sorted()
-        var merged = builtIn + discovered
-        if !merged.contains(model) {
-            merged.insert(model, at: 0)
-        }
-        availableModels = merged
     }
-
+    
     // MARK: Sending
-
+    
     /// Send a question: append it, build the metrics context, call the chosen provider with the
     /// system prompt + context + running history, parse the reply, append it. Never throws/crashes;
     /// failures land in `errorText`.
@@ -433,19 +282,19 @@ final class AICoachEngine: ObservableObject {
         let trimmed = userText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { errorText = AICoachError.emptyQuestion.errorDescription; return }
         guard let key = AIKeyStore.read() else { errorText = AICoachError.noKey.errorDescription; return }
-
+        
         errorText = nil
         messages.append(ChatMessage(role: .user, text: trimmed))
         sending = true
         defer { sending = false }
-
+        
         // Build the data context once and prepend it to the FIRST user turn we send. We send the
         // full running history so follow-ups stay coherent; the context only needs to ride the
         // earliest user message.
         // Include the user's data ONLY with explicit consent; otherwise send a note instead of numbers.
         let context = dataConsent ? await buildFullContext() : noConsentNote
         let wire = wireMessages(context: context)
-
+        
         do {
             let reply = try await callProvider(key: key, messages: wire)
             let clean = reply.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -456,7 +305,7 @@ final class AICoachEngine: ObservableObject {
             errorText = AICoachError.network(error.localizedDescription).errorDescription
         }
     }
-
+    
     /// Proactively generate "Today's brief" the first time the Coach opens — readiness + a training
     /// prescription + one recovery tip — without the user typing. Requires a key + data consent.
     func startBriefIfNeeded() async {
@@ -465,7 +314,7 @@ final class AICoachEngine: ObservableObject {
         errorText = nil
         sending = true
         defer { sending = false }
-
+        
         let context = await buildFullContext()
         let instruction = """
         Based on the data above, give me TODAY'S coaching brief in three short parts: \
@@ -486,24 +335,26 @@ final class AICoachEngine: ObservableObject {
             errorText = AICoachError.network(error.localizedDescription).errorDescription
         }
     }
-
+    
     /// Full data context = the metrics summary + recent workouts. Used when the user has consented.
     func buildFullContext() async -> String {
         var ctx = buildContext()
         ctx += "\n\n" + (await recentWorkoutsBlock())
         return ctx
     }
-
-    /// Dispatch to the user's chosen provider.
+    
+    /// Dispatch to the user's chosen provider client.
     private func callProvider(key: String,
                               messages: [(role: ChatMessage.Role, content: String)]) async throws -> String {
-        switch provider {
-        case .openAI:    return try await sendOpenAI(key: key, messages: messages)
-        case .anthropic: return try await sendAnthropic(key: key, messages: messages)
-        case .gemini:    return try await sendGemini(key: key, messages: messages)
-        }
+        try await provider.client.send(
+            key: key,
+            model: model,
+            systemPrompt: systemPrompt,
+            messages: messages,
+            session: session
+        )
     }
-
+    
     /// The chat as `(role, content)` pairs, with the metrics context prepended to the first user turn.
     private func wireMessages(context: String) -> [(role: ChatMessage.Role, content: String)] {
         var out: [(role: ChatMessage.Role, content: String)] = []
@@ -518,179 +369,16 @@ final class AICoachEngine: ObservableObject {
         }
         return out
     }
-
-    // MARK: Provider calls
-
-    /// OpenAI Chat Completions. System prompt is a leading system message.
-    private func sendOpenAI(key: String,
-                            messages: [(role: ChatMessage.Role, content: String)]) async throws -> String {
-        var wire: [[String: Any]] = [["role": "system", "content": systemPrompt]]
-        for m in messages { wire.append(["role": m.role.rawValue, "content": m.content]) }
-
-        // Standard params first (gpt-4 family). Newer/reasoning models reject `temperature` and want
-        // `max_completion_tokens`; if the provider 400s about either, retry with the modern shape.
-        do {
-            return try await openAIChat(key: key, wire: wire, modernParams: false)
-        } catch let AICoachError.server(code, detail) where code == 400 {
-            let d = detail.lowercased()
-            if d.contains("max_completion_tokens") || d.contains("max_tokens")
-                || d.contains("temperature") || d.contains("unsupported") {
-                return try await openAIChat(key: key, wire: wire, modernParams: true)
-            }
-            throw AICoachError.server(code, detail)
-        }
-    }
-
-    /// One OpenAI chat request. `modernParams` uses `max_completion_tokens` and drops the custom
-    /// temperature — what newer/reasoning models require.
-    private func openAIChat(key: String, wire: [[String: Any]], modernParams: Bool) async throws -> String {
-        var body: [String: Any] = ["model": model, "messages": wire]
-        if modernParams {
-            body["max_completion_tokens"] = 900
-        } else {
-            body["temperature"] = 0.6
-            body["max_tokens"] = 900
-        }
-
-        var req = URLRequest(url: AIProvider.openAI.endpoint)
-        req.httpMethod = "POST"
-        req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        let json = try await perform(req)
-        guard let choices = json["choices"] as? [[String: Any]],
-              let first = choices.first,
-              let message = first["message"] as? [String: Any],
-              let content = message["content"] as? String else {
-            throw AICoachError.decode
-        }
-        return content
-    }
-
-    /// Anthropic Messages. No system role inside `messages` — the system prompt is a top-level field
-    /// and messages strictly alternate user/assistant.
-    private func sendAnthropic(key: String,
-                               messages: [(role: ChatMessage.Role, content: String)]) async throws -> String {
-        var wire: [[String: Any]] = []
-        for m in messages { wire.append(["role": m.role.rawValue, "content": m.content]) }
-
-        let body: [String: Any] = [
-            "model": model,
-            "max_tokens": 900,
-            "system": systemPrompt,
-            "messages": wire
-        ]
-
-        var req = URLRequest(url: AIProvider.anthropic.endpoint)
-        req.httpMethod = "POST"
-        req.setValue(key, forHTTPHeaderField: "x-api-key")
-        req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-        req.setValue("application/json", forHTTPHeaderField: "content-type")
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        let json = try await perform(req)
-        guard let content = json["content"] as? [[String: Any]],
-              let first = content.first,
-              let text = first["text"] as? String else {
-            throw AICoachError.decode
-        }
-        return text
-    }
-
-    /// Google Gemini generateContent. No system role inside `contents` — the system prompt is a
-    /// top-level `system_instruction`. Turns use "user" / "model" (our "assistant" maps to "model").
-    /// The URL is per-model: `{modelsBase}/{model}:generateContent` (see `AIProvider.endpoint`).
-    private func sendGemini(key: String,
-                            messages: [(role: ChatMessage.Role, content: String)]) async throws -> String {
-        var contents: [[String: Any]] = []
-        for m in messages {
-            contents.append([
-                "role": m.role == .assistant ? "model" : "user",
-                "parts": [["text": m.content]]
-            ])
-        }
-
-        let body: [String: Any] = [
-            "system_instruction": ["parts": [["text": systemPrompt]]],
-            "contents": contents,
-            // Gemini 2.5 counts THINKING tokens against maxOutputTokens; the other providers'
-            // visible-reply cap (900) starves the thinking models into empty replies (finishReason
-            // MAX_TOKENS, no text parts). 4096 leaves room for both — the system prompt keeps the
-            // visible reply short.
-            "generationConfig": ["temperature": 0.6, "maxOutputTokens": 4096]
-        ]
-
-        // Built via URL(string:): appendingPathComponent percent-encodes the ":" in
-        // ":generateContent" on some Foundation versions and the API rejects %3A.
-        guard let url = URL(string: "\(AIProvider.gemini.endpoint.absoluteString)/\(model):generateContent") else {
-            throw AICoachError.network("invalid model id")
-        }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue(key, forHTTPHeaderField: "x-goog-api-key")
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        let json = try await perform(req)
-        // The reply text can span several parts; join them (thinking models may emit more than one).
-        guard let candidates = json["candidates"] as? [[String: Any]],
-              let first = candidates.first,
-              let content = first["content"] as? [String: Any],
-              let parts = content["parts"] as? [[String: Any]] else {
-            throw AICoachError.decode
-        }
-        let text = parts.compactMap { $0["text"] as? String }.joined()
-        guard !text.isEmpty else { throw AICoachError.decode }
-        return text
-    }
-
-    /// Shared HTTP execution + status mapping. Returns the decoded top-level JSON object on success.
-    private func perform(_ req: URLRequest) async throws -> [String: Any] {
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await session.data(for: req)
-        } catch {
-            throw AICoachError.network(error.localizedDescription)
-        }
-
-        guard let http = response as? HTTPURLResponse else {
-            throw AICoachError.network("no HTTP response")
-        }
-
-        switch http.statusCode {
-        case 200...299:
-            guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                throw AICoachError.decode
-            }
-            return obj
-        case 401, 403:
-            throw AICoachError.badKey
-        case 429:
-            throw AICoachError.rateLimited
-        default:
-            throw AICoachError.server(http.statusCode, providerErrorMessage(from: data))
-        }
-    }
-
-    /// Best-effort extraction of a human message from a provider error body (shape differs per provider).
-    private func providerErrorMessage(from data: Data) -> String {
-        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return "" }
-        if let err = obj["error"] as? [String: Any], let msg = err["message"] as? String { return msg }
-        if let msg = obj["message"] as? String { return msg }
-        return ""
-    }
-
+    
     // MARK: - Context builder
-
+    
     /// Build a compact plain-text summary of the user's recent data: last ~14 days of
     /// recovery/strain/sleep-hours/HRV/restingHR where present, plus 30-day averages, plus a few
     /// recent workouts. Kept well under ~1500 tokens. If there's no data, it says so.
     func buildContext() -> String {
         let days = repo.days // oldest → newest
         var lines: [String] = ["USER BIOMETRIC SUMMARY (the user's own wearable data):"]
-
+        
         guard !days.isEmpty else {
             return """
             USER BIOMETRIC SUMMARY:
@@ -698,7 +386,7 @@ final class AICoachEngine: ObservableObject {
             while inviting the user to sync their device so future advice can reference real numbers.
             """
         }
-
+        
         // Last ~14 days, newest first for readability.
         let recent = Array(days.suffix(14)).reversed()
         lines.append("")
@@ -706,7 +394,7 @@ final class AICoachEngine: ObservableObject {
         for d in recent {
             lines.append("  " + dayLine(d))
         }
-
+        
         // 30-day averages.
         let last30 = Array(days.suffix(30))
         lines.append("")
@@ -722,10 +410,10 @@ final class AICoachEngine: ObservableObject {
                      + ", skin-temp deviation: \(avgOne(last30.compactMap { $0.skinTempDevC }))°C"
                      + ", steps: \(avgInt(last30.compactMap { $0.steps.map(Double.init) }))/day"
                      + ", active energy: \(avgInt(last30.compactMap { $0.activeKcalEst }))kcal/day")
-
+        
         return lines.joined(separator: "\n")
     }
-
+    
     /// Append recent workouts to an existing context string. Async (workouts are read from the store),
     /// so callers that want workouts in the context can await this and feed the result to `send`'s
     /// flow via the chat — kept separate so `buildContext()` stays synchronous per the spec.
@@ -744,9 +432,9 @@ final class AICoachEngine: ObservableObject {
         }
         return lines.joined(separator: "\n")
     }
-
+    
     // MARK: Formatting helpers
-
+    
     private func dayLine(_ d: DailyMetric) -> String {
         var parts: [String] = [d.day + ":"]
         parts.append("rec " + (d.recovery.map { "\(Int($0.rounded()))%" } ?? "—"))
@@ -756,23 +444,23 @@ final class AICoachEngine: ObservableObject {
         parts.append("RHR " + (d.restingHr.map { "\($0)bpm" } ?? "—"))
         return parts.joined(separator: ", ")
     }
-
+    
     private func avgOne(_ xs: [Double]) -> String {
         guard !xs.isEmpty else { return "—" }
         return String(format: "%.1f", xs.reduce(0, +) / Double(xs.count))
     }
-
+    
     private func avgInt(_ xs: [Double]) -> String {
         guard !xs.isEmpty else { return "—" }
         return "\(Int((xs.reduce(0, +) / Double(xs.count)).rounded()))"
     }
-
+    
     private func avgSleepHours(_ days: [DailyMetric]) -> String {
         let mins = days.compactMap { $0.totalSleepMin }
         guard !mins.isEmpty else { return "—" }
         return String(format: "%.1f", (mins.reduce(0, +) / Double(mins.count)) / 60)
     }
-
+    
     private func dateString(_ ts: Int) -> String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
