@@ -273,6 +273,7 @@ private fun ChartCard(
                     modifier = Modifier.height(Metrics.chartHeight),
                     color = color,
                     fill = true,
+                    selectionEnabled = true,
                 )
             } else {
                 SparsePlaceholder()

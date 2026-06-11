@@ -92,6 +92,7 @@ fun HealthScreen(vm: AppViewModel, onVitalClick: (String) -> Unit = {}) {
                 trailing = null,
                 vitals = latestVitals(days, UnitPrefs.temperature(LocalContext.current)),
                 onVitalClick = onVitalClick,
+                captionMode = VitalCaptionMode.AS_OF,
             )
         }
     }
@@ -127,6 +128,7 @@ fun VitalSignsScreen(vm: AppViewModel, onVitalClick: (String) -> Unit = {}) {
                 vitals = vitals,
                 onVitalClick = onVitalClick,
                 footer = false,
+                captionMode = VitalCaptionMode.RANGE,
             )
         }
     }
@@ -313,6 +315,7 @@ private fun VitalsSection(
     vitals: List<Vital>,
     onVitalClick: (String) -> Unit,
     footer: Boolean = true,
+    captionMode: VitalCaptionMode = VitalCaptionMode.AS_OF,
 ) {
     // Temperature display preference (D#103). Skin temp is stored in °C; the toggle re-labels it to °F.
     // Display-only — banding still runs on the stored °C value.
@@ -334,7 +337,10 @@ private fun VitalsSection(
                             .semantics { contentDescription = v.accessibilityText },
                         vital = v,
                         value = v.formattedValue ?: "—",
-                        caption = v.asOfLabel ?: v.stateCaption,
+                        caption = when (captionMode) {
+                            VitalCaptionMode.AS_OF -> v.asOfLabel ?: v.stateCaption
+                            VitalCaptionMode.RANGE -> v.rangeCaption ?: v.stateCaption
+                        },
                         accent = v.accent,
                     )
                 }
@@ -367,6 +373,7 @@ private data class Vital(
     val deltaText: String? = null,
     val readingDay: String? = null,
     val asOfLabel: String? = null,
+    val rangeCaption: String? = null,
     /** Personal-baseline banding (population fallback until 14 trusted nights). */
     val banding: VitalBands.Result,
     /** The metric's category colour (used only when in range). */
@@ -399,6 +406,11 @@ private data class Vital(
         } ?: "$label: no data"
 }
 
+private enum class VitalCaptionMode {
+    AS_OF,
+    RANGE,
+}
+
 /** Build the vitals, banded against the user's OWN trailing baseline once 14 trusted
  *  nights exist (population ranges before that — VitalBands does the deciding). */
 private fun vitalsFor(
@@ -423,6 +435,11 @@ private fun vitalsFor(
         val num = if (decimals == 0) mag.roundToInt().toString()
         else String.format(Locale.US, "%.${decimals}f", mag)
         return "($sign$num)"
+    }
+    fun rangeCaption(allValues: List<Double>, unit: String, format: (Double) -> String): String? {
+        val min = allValues.minOrNull() ?: return null
+        val max = allValues.maxOrNull() ?: return null
+        return "within ${format(min)} -- ${format(max)} $unit"
     }
 
     // Skin temp is bimodal: CSV imports store ABSOLUTE °C, the on-device pipeline a ±°C
@@ -458,6 +475,17 @@ private fun vitalsFor(
     val previousSkin = history.asReversed().asSequence()
         .mapNotNull { row -> row.skinTempDevC?.takeIf { VitalBands.isAbsoluteSkinTemp(it) == skinIsAbsolute } }
         .firstOrNull()
+    val respRangeCaption = rangeCaption(days.mapNotNull { it.respRateBpm }, "rpm") { String.format(Locale.US, "%.1f", it) }
+    val spo2RangeCaption = rangeCaption(days.mapNotNull { it.spo2Pct }, "%") { String.format(Locale.US, "%.0f", it) }
+    val rhrRangeCaption = rangeCaption(days.mapNotNull { it.restingHr?.toDouble() }, "bpm") { it.roundToInt().toString() }
+    val hrvRangeCaption = rangeCaption(days.mapNotNull { it.avgHrv }, "ms") { it.roundToInt().toString() }
+    val skinRangeCaption = rangeCaption(
+        days.mapNotNull { row ->
+            row.skinTempDevC?.takeIf { VitalBands.isAbsoluteSkinTemp(it) == skinIsAbsolute }
+        },
+        skinUnitLabel,
+        skinFormat,
+    )
     return listOf(
         Vital(
             key = "resp", label = "Resp Rate", unit = "rpm",
@@ -465,6 +493,7 @@ private fun vitalsFor(
             deltaText = deltaText(d?.respRateBpm, previous { it.respRateBpm }),
             readingDay = todayKey,
             asOfLabel = asOfLabel(todayKey),
+            rangeCaption = respRangeCaption,
             banding = VitalBands.band(d?.respRateBpm, series { it.respRateBpm }, 12.0..20.0, Baselines.respCfg),
             metricColor = Palette.metricCyan,
         ),
@@ -474,6 +503,7 @@ private fun vitalsFor(
             deltaText = deltaText(d?.spo2Pct, previous { it.spo2Pct }, decimals = 0),
             readingDay = todayKey,
             asOfLabel = asOfLabel(todayKey),
+            rangeCaption = spo2RangeCaption,
             // Population-only on purpose: an absolute <95% floor is meaningful regardless
             // of personal baseline (no "spo2" MetricCfg exists).
             banding = VitalBands.band(d?.spo2Pct, emptyList(), 95.0..100.0, null),
@@ -485,6 +515,7 @@ private fun vitalsFor(
             deltaText = deltaText(d?.restingHr?.toDouble(), previous { it.restingHr?.toDouble() }, decimals = 0),
             readingDay = todayKey,
             asOfLabel = asOfLabel(todayKey),
+            rangeCaption = rhrRangeCaption,
             banding = VitalBands.band(
                 d?.restingHr?.toDouble(), series { it.restingHr?.toDouble() }, 40.0..60.0,
                 Baselines.restingHRCfg,
@@ -497,6 +528,7 @@ private fun vitalsFor(
             deltaText = deltaText(d?.avgHrv, previous { it.avgHrv }, decimals = 0),
             readingDay = todayKey,
             asOfLabel = asOfLabel(todayKey),
+            rangeCaption = hrvRangeCaption,
             banding = VitalBands.band(d?.avgHrv, series { it.avgHrv }, 40.0..120.0, Baselines.hrvCfg),
             metricColor = Palette.metricPurple,
         ),
@@ -506,6 +538,7 @@ private fun vitalsFor(
             deltaText = deltaText(skin, previousSkin),
             readingDay = todayKey,
             asOfLabel = asOfLabel(todayKey),
+            rangeCaption = skinRangeCaption,
             banding = skinResult, metricColor = Palette.metricAmber,
         ),
     )
@@ -522,11 +555,6 @@ private fun VitalTile(
     NoopCard(modifier = modifier.height(Metrics.tileHeight), padding = 14.dp) {
         Column {
             Overline(vital.label)
-            if (vital.deltaText != null) {
-                Text(vital.deltaText, style = NoopType.footnote, color = Palette.textTertiary)
-            } else {
-                Spacer(Modifier.height(16.dp))
-            }
             Spacer(Modifier.weight(1f))
             Text(
                 text = value,
@@ -579,7 +607,7 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
         if (filteredPoints.size < 2) {
             DataPendingNote(
                 title = "Not enough history in this range",
-                body = "Try a longer interval like 3M, 6M, or ALL to see this vital’s trend.",
+                body = "Try a longer interval like 3M, 6M, 1Y, or ALL to see this vital’s trend.",
             )
             return@ScreenScaffold
         }
@@ -748,6 +776,7 @@ private enum class VitalDetailRange(val label: String, val days: Long?) {
     MONTH("M", 30),
     THREE_MONTH("3M", 90),
     SIX_MONTH("6M", 180),
+    YEAR("1Y", 365),
     ALL("ALL", null),
 }
 

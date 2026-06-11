@@ -5,13 +5,12 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.noop.R
-import com.noop.ui.MainActivity
 import com.noop.ui.NoopPrefs
+import com.noop.ui.appLaunchIntent
 
 /** Small pure policy so the once-per-day gate is JVM-testable (CallAlertPolicy idiom). */
 internal object IllnessAlertPolicy {
@@ -39,8 +38,7 @@ object IllnessAlertNotifier {
             ensureChannel(context)
             val openApp = PendingIntent.getActivity(
                 context, 2,
-                Intent(context, MainActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                appLaunchIntent(context),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
             val n = NotificationCompat.Builder(context, CHANNEL_ID)

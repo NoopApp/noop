@@ -39,6 +39,7 @@ import com.noop.data.DailyMetric
 import com.noop.data.SleepSession
 import org.json.JSONArray
 import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -429,9 +430,9 @@ private fun DrawScope.drawRoundRectFill(color: Color, frac: Float) {
 @Composable
 private fun DurationTrend(m: SleepModel) {
     val pts = m.trendHours
-    val avg = m.typicalTotalMin?.let { it / 60.0 }
+    val avg = pts.averageOrNull()
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        SectionHeader("Asleep duration", overline = "Trend", trailing = "Last 14 days")
+        SectionHeader("Trend", overline = "Sleep", trailing = "Last 14 days")
         ChartCard(
             title = "Hours asleep",
             subtitle = "Per night, trailing 14 days",
@@ -448,24 +449,105 @@ private fun DurationTrend(m: SleepModel) {
             },
         ) {
             if (pts.size >= 2) {
-                LineChart(
-                    values = pts,
-                    modifier = Modifier.fillMaxWidth().height(Metrics.chartHeight - 90.dp),
-                    color = Palette.accent,
-                    fill = true,
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    LineChart(
+                        values = pts,
+                        modifier = Modifier.fillMaxWidth().height(Metrics.chartHeight - 90.dp),
+                        color = Palette.accent,
+                        fill = true,
+                        selectionEnabled = true,
+                    )
+                    DateAxisRow(m.trendDates)
+                }
             } else {
+                TrendPlaceholder()
+            }
+        }
+
+        ChartCard(
+            title = "Sleep Debt",
+            subtitle = "Hours of sleep debt per day",
+            trailing = m.trendDebtHours.lastOrNull()?.let { String.format(Locale.US, "%.1f h", it) },
+            footer = {
+                ChartFooter(
+                    listOf(
+                        "Avg" to (m.trendDebtHours.averageOrNull()?.let { String.format(Locale.US, "%.1f h", it) } ?: "â€”"),
+                        "Max" to (m.trendDebtHours.maxOrNull()?.let { String.format(Locale.US, "%.1f h", it) } ?: "â€”"),
+                        "Days" to "${m.trendDebtHours.size}",
+                    ),
+                )
+            },
+        ) {
+            if (m.trendDebtHours.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    BarChart(
+                        values = m.trendDebtHours,
+                        modifier = Modifier.fillMaxWidth().height(Metrics.chartHeight - 90.dp),
+                        color = Palette.metricRose,
+                        selectionEnabled = true,
+                    )
+                    DateAxisRow(m.trendDates)
+                }
+            } else {
+                TrendPlaceholder()
+            }
+        }
+    }
+}
+
+@Composable
+private fun TrendPlaceholder() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(Metrics.chartHeight - 90.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Palette.surfaceInset),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("Not enough nights yet.", style = NoopType.subhead, color = Palette.textTertiary)
+    }
+}
+
+@Composable
+private fun TrendLegend(items: List<Pair<String, Color>>) {
+    Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        items.forEach { (label, color) ->
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(Metrics.chartHeight - 90.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Palette.surfaceInset),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("Not enough nights yet.", style = NoopType.subhead, color = Palette.textTertiary)
-                }
+                        .width(14.dp)
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(color),
+                )
+                Text(label, style = NoopType.footnote, color = Palette.textTertiary)
             }
+        }
+    }
+}
+
+@Composable
+private fun DateAxisRow(days: List<String>) {
+    if (days.isEmpty()) return
+    val labels = listOf(
+        days.firstOrNull(),
+        days.getOrNull(days.lastIndex / 2),
+        days.lastOrNull(),
+    ).map { it?.let(::shortDayLabel).orEmpty() }
+    Row(modifier = Modifier.fillMaxWidth()) {
+        labels.forEach { label ->
+            Text(
+                text = label,
+                style = NoopType.footnote,
+                color = Palette.textTertiary,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -626,6 +708,9 @@ internal data class SleepModel(
     val typicalRemMin: Double?,
     val typicalLightMin: Double?,
     val trendHours: List<Double>,
+    val trendNeedHours: List<Double>,
+    val trendDebtHours: List<Double>,
+    val trendDates: List<String>,
     /** Persisted per-epoch segments as ordered (stage, minutes) weights — the REAL
      *  hypnogram (on-device APPROXIMATE staging) — or null → synthesized fallback. */
     val realSegments: List<Pair<String, Float>>?,
@@ -660,7 +745,7 @@ internal fun buildSleepModel(
     val effFrac = latest.efficiency?.let { if (it > 1.0) it / 100.0 else it }
     val awake = when {
         effFrac != null && effFrac in 0.01..0.999 -> max(0.0, asleep / effFrac - asleep)
-        latest.disturbances != null -> latest.disturbances!! * 6.0
+        latest.disturbances != null -> latest.disturbances * 6.0
         else -> 0.0
     }
     val stages = Stages(awake = awake, light = light, deep = deep, rem = rem)
@@ -713,10 +798,16 @@ internal fun buildSleepModel(
         Metric(series.lastOrNull(), mean(series), series)
     }
 
-    // 14-day asleep-hours trend (falls back to all nights if the window is too sparse).
-    val allHours = windowDays.mapNotNull { it.totalSleepMin?.takeIf { m -> m > 0.0 }?.let { m -> m / 60.0 } }
-    val recentHours = allHours.takeLast(14)
-    val trendHours = if (recentHours.size >= 2) recentHours else allHours
+    // 14-day trend set ending on the selected day.
+    val trendRows = windowDays.filter { (it.totalSleepMin ?: 0.0) > 0.0 }.takeLast(14)
+    val trendHours = trendRows.mapNotNull { it.totalSleepMin?.let { minutes -> minutes / 60.0 } }
+    val trendNeedHours = trendRows.map { row -> ((imported.needMin[row.day] ?: needMin) / 60.0) }
+    val trendDebtHours = trendRows.map { row ->
+        val sleptMin = row.totalSleepMin ?: 0.0
+        val neededMin = imported.needMin[row.day] ?: needMin
+        ((imported.debtMin[row.day] ?: max(0.0, neededMin - sleptMin)) / 60.0)
+    }
+    val trendDates = trendRows.map { it.day }
 
     // Real per-epoch timeline only when the merged session IS this night (UTC end-day
     // match, the same attribution AnalyticsEngine uses); else synthesized fallback. Note:
@@ -743,6 +834,9 @@ internal fun buildSleepModel(
         typicalRemMin = typicalRemMin,
         typicalLightMin = typicalLightMin,
         trendHours = trendHours,
+        trendNeedHours = trendNeedHours,
+        trendDebtHours = trendDebtHours,
+        trendDates = trendDates,
         realSegments = realSegments,
     )
 }
@@ -836,6 +930,14 @@ private fun durationText(minutes: Double): String {
 }
 
 /** "Wed 4 Jun · 22:50–06:48" style trailing label from the session clock, when available. */
+private fun shortDayLabel(day: String): String =
+    runCatching {
+        LocalDate.parse(day).format(DateTimeFormatter.ofPattern("d MMM", Locale.US))
+    }.getOrDefault(day)
+
+private fun List<Double>.averageOrNull(): Double? =
+    if (isEmpty()) null else sum() / size
+
 private fun clockLabel(latest: DailyMetric, session: SleepSession?): String {
     val timeFmt = SimpleDateFormat("HH:mm", Locale.US)
     val dateFmt = SimpleDateFormat("EEE d MMM", Locale.US)

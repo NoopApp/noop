@@ -17,8 +17,8 @@ import com.noop.NoopApplication
 import com.noop.R
 import com.noop.analytics.IllnessWatch
 import com.noop.notif.IllnessAlertNotifier
-import com.noop.ui.MainActivity
 import com.noop.ui.NoopPrefs
+import com.noop.ui.appLaunchIntent
 import com.noop.widget.WidgetSnapshot
 import com.noop.widget.WidgetSnapshotStore
 import kotlinx.coroutines.CoroutineScope
@@ -185,8 +185,7 @@ class WhoopConnectionService : Service() {
         val openApp = PendingIntent.getActivity(
             this,
             0,
-            Intent(this, MainActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            appLaunchIntent(this),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val stopAction = PendingIntent.getService(
