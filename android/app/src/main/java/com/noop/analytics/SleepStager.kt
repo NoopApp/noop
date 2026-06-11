@@ -50,7 +50,7 @@ object SleepStager {
 
     // ── Stage 0 constants (sleep.py) ─────────────────────────────────────────
 
-    /** Per-sample gravity change (g) at/below which a sample is "still". */
+    /** Per-sample gravity change (g) below which a sample is "still" (strictly <). */
     const val gravityStillThresholdG: Double = 0.01
 
     /** Rolling stillness window (minutes). */
@@ -193,19 +193,28 @@ object SleepStager {
         return maxOf(minWindowSamples, (stillWindowMin * 60 / interval).toInt())
     }
 
-    /** Per-record sleep flags from a rolling fraction of "still" samples. */
+    /**
+     * Per-record sleep flags from a rolling fraction of "still" samples.
+     *
+     * The rolling count uses prefix sums: at 1 Hz the window is ~900 samples, so the naive
+     * per-record rescan is O(n·window) — ~10⁸ list reads over one 42 h analysis window,
+     * which (×21 nights, on the main thread) froze the app into ANRs. Prefix sums give the
+     * identical counts in O(n).
+     */
     internal fun classifyStill(grav: List<GravitySample>, deltas: List<Double>): List<Boolean> {
         val n = grav.size
         if (n < 2) return List(n) { false }
         val half = windowSize(grav.map { it.ts }) / 2
+        // stillPrefix[i] = number of still samples among deltas[0 until i].
+        val stillPrefix = IntArray(n + 1)
+        for (i in 0 until n) {
+            stillPrefix[i + 1] = stillPrefix[i] + if (deltas[i] < gravityStillThresholdG) 1 else 0
+        }
         val flags = ArrayList<Boolean>(n)
         for (i in 0 until n) {
             val lo = maxOf(0, i - half)
             val hi = minOf(n, i + half + 1)
-            var stillCount = 0
-            for (j in lo until hi) {
-                if (deltas[j] < gravityStillThresholdG) stillCount += 1
-            }
+            val stillCount = stillPrefix[hi] - stillPrefix[lo]
             flags.add(stillCount.toDouble() / (hi - lo).toDouble() >= stillFraction)
         }
         return flags

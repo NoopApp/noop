@@ -62,7 +62,7 @@ public enum SleepStager {
 
     // MARK: - Stage 0 constants (sleep.py)
 
-    /// Per-sample gravity change (g) at/below which a sample is "still".
+    /// Per-sample gravity change (g) below which a sample is "still" (strictly <).
     public static let gravityStillThresholdG: Double = 0.01
     /// Rolling stillness window (minutes).
     public static let stillWindowMin: Int = 15
@@ -180,17 +180,27 @@ public enum SleepStager {
     }
 
     /// Per-record sleep flags from a rolling fraction of "still" samples.
+    ///
+    /// The rolling count uses prefix sums: at 1 Hz the window is ~900 samples, so the naive
+    /// per-record rescan is O(n·window) — ~10⁸ array reads over one 42 h analysis window
+    /// (×21 nights per analyzeRecent pass). Prefix sums give the identical counts in O(n).
+    /// (On Android the same rescan ran on the main thread and froze the app into ANRs; here
+    /// it "only" burned minutes of background CPU per analysis tick.)
     static func classifyStill(_ grav: [GravitySample], _ deltas: [Double]) -> [Bool] {
         let n = grav.count
         if n < 2 { return [Bool](repeating: false, count: n) }
         let half = windowSize(grav.map { $0.ts }) / 2
+        // stillPrefix[i] = number of still samples among deltas[0..<i].
+        var stillPrefix = [Int](repeating: 0, count: n + 1)
+        for i in 0..<n {
+            stillPrefix[i + 1] = stillPrefix[i] + (deltas[i] < gravityStillThresholdG ? 1 : 0)
+        }
         var flags: [Bool] = []
         flags.reserveCapacity(n)
         for i in 0..<n {
             let lo = max(0, i - half)
             let hi = min(n, i + half + 1)
-            var stillCount = 0
-            for j in lo..<hi where deltas[j] < gravityStillThresholdG { stillCount += 1 }
+            let stillCount = stillPrefix[hi] - stillPrefix[lo]
             flags.append(Double(stillCount) / Double(hi - lo) >= stillFraction)
         }
         return flags
