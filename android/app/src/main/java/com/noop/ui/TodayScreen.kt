@@ -32,11 +32,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.analytics.Baselines
 import com.noop.analytics.ReadinessEngine
+import com.noop.data.AppleDaily
 import com.noop.data.DailyMetric
 import com.noop.data.WorkoutRow
 import java.time.Instant
@@ -58,6 +60,7 @@ import kotlin.math.roundToInt
  */
 @Composable
 fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
+    val today by viewModel.today.collectAsStateWithLifecycle()
     val alert by viewModel.healthAlert.collectAsStateWithLifecycle()
     val days by viewModel.recentDays.collectAsStateWithLifecycle()
     val live by viewModel.live.collectAsStateWithLifecycle()
@@ -65,7 +68,10 @@ fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
     var selectedDayOffset by remember { mutableIntStateOf(0) }
     val selectedDay = remember(selectedDayOffset) { LocalDate.now().minusDays(selectedDayOffset.toLong()) }
     val selectedDayKey = remember(selectedDay) { selectedDay.toString() }
-    val selectedMetric = remember(days, selectedDayKey) { days.lastOrNull { it.day == selectedDayKey } }
+    val historicalMetric = remember(days, selectedDayKey) { days.lastOrNull { it.day == selectedDayKey } }
+    val displayMetric = remember(today, historicalMetric, selectedDayOffset) {
+        if (selectedDayOffset == 0) today ?: historicalMetric else historicalMetric
+    }
     val dayLabel = remember(selectedDayOffset, selectedDay) {
         when (selectedDayOffset) {
             0 -> "Today"
@@ -81,11 +87,27 @@ fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
         }
     }
 
+    // Display-only unit system + the SI profile weight, read once like every other Settings-backed
+    // preference (SharedPreferences isn't reactive — a Settings write triggers recomposition).
+    val context = LocalContext.current
+    val unitSystem = UnitPrefs.system(context)
+    val profileWeightKg = remember { ProfileStore.from(context).weightKg }
+
+    // The newest Apple Health / Health Connect body weight, loaded off the main thread. Null until the
+    // load runs or when neither source carries a weight — the Weight tile then falls back to the profile.
+    var weightKg by remember { mutableStateOf<Double?>(null) }
+    LaunchedEffect(days) {
+        weightKg = latestWeightKg(
+            viewModel.repo.appleDaily("apple-health", "0000-01-01", "9999-12-31"),
+            viewModel.repo.appleDaily("health-connect", "0000-01-01", "9999-12-31"),
+        )
+    }
+
     // Recovery cold-start: recovery is null until the HRV baseline crosses the seed gate
     // (Baselines.minNightsSeed valid nights). Show honest "calibrating — N of 4 nights" progress
     // instead of a bare "No Data" so a new BLE-only user knows scores are coming, not broken. (PR #85)
     val recoveryCalibration: Int? = if (selectedDayOffset == 0) {
-        recoveryCalibrationNights(days, selectedMetric?.recovery != null)
+        recoveryCalibrationNights(days, displayMetric?.recovery != null)
     } else {
         null
     }
@@ -131,7 +153,7 @@ fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
         // When there is no daily score yet (today's recovery is null / no history),
         // lead with the "live now, history one import away" note so the empty tiles
         // below are explained rather than just dashed out.
-        if (selectedMetric?.recovery == null) {
+        if (displayMetric?.recovery == null) {
             // While the strap is mid-offload, say so — empty tiles read as final otherwise (#77).
             if (live.backfilling) SyncingHistoryNote(chunks = live.syncChunksThisSession)
             DataPendingNote(
@@ -152,32 +174,32 @@ fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
             }
             IconButton(
                 onClick = onSupport,
-                modifier = Modifier.size(36.dp),
+                modifier = Modifier.size(Metrics.iconButton),
             ) {
                 Icon(
                     Icons.Filled.Favorite,
                     contentDescription = "Support NOOP",
                     tint = Palette.textTertiary,
-                    modifier = Modifier.size(18.dp),
+                    modifier = Modifier.size(Metrics.iconSmall),
                 )
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(Metrics.gap)) {
             NoopCard(modifier = Modifier.weight(1f)) {
                 Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    TodayRecoveryRing(selectedMetric, recoveryCalibration)
+                    TodayRecoveryRing(displayMetric, recoveryCalibration)
                 }
             }
             InsightCard(
                 modifier = Modifier.weight(1f),
                 category = "Recovery",
-                status = if (recoveryCalibration != null) "Calibrating" else synthesisWord(selectedMetric?.recovery),
+                status = if (recoveryCalibration != null) "Calibrating" else synthesisWord(displayMetric?.recovery),
                 detail = if (recoveryCalibration != null) {
                     "Learning your baseline — $recoveryCalibration of ${Baselines.minNightsSeed} nights."
                 } else {
-                    synthesisDetail(selectedMetric)
+                    synthesisDetail(displayMetric)
                 },
-                statusColor = selectedMetric?.recovery?.let { Palette.recoveryColor(it) } ?: Palette.textTertiary,
+                statusColor = displayMetric?.recovery?.let { Palette.recoveryColor(it) } ?: Palette.textTertiary,
             )
         }
 
@@ -186,9 +208,9 @@ fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
         if (selectedDayOffset == 0) ReadinessSection(days)
 
         // METRICS — uniform tile grid (two columns), each tile with a 14-day sparkline.
-        Spacer(Modifier.padding(top = (Metrics.sectionGap - 20.dp) / 2))
+        Spacer(Modifier.height(Metrics.selectorTopUp))
         SectionHeader("Key Metrics", overline = dayLabel, trailing = "14-day trend")
-        MetricGrid(selectedMetric, window, recoveryCalibration)
+        MetricGrid(displayMetric, window, recoveryCalibration, unitSystem, weightKg, profileWeightKg)
         HeartRateTrendCard(viewModel, days, selectedDay)
         TodayWorkoutsSection(footer.recentWorkouts)
         TodaySourcesSection(footer)
@@ -197,49 +219,7 @@ fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
 
 @Composable
 private fun DaySelectorBar(selectedOffset: Int, onSelect: (Int) -> Unit) {
-    val base = LocalDate.now()
-    val blockShape = RoundedCornerShape(12.dp)
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        listOf(2, 1, 0).forEach { offset ->
-            val day = base.minusDays(offset.toLong())
-            val selected = selectedOffset == offset
-            val label = when (offset) {
-                0 -> "Today"
-                1 -> "Yesterday"
-                else -> "2 days ago"
-            }
-            val date = day.format(DateTimeFormatter.ofPattern("d MMM", Locale.US))
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(blockShape)
-                    .background(if (selected) Palette.accent.copy(alpha = 0.12f) else Palette.surfaceInset)
-                    .border(
-                        width = 1.dp,
-                        color = if (selected) Palette.accent.copy(alpha = 0.55f) else Palette.hairline,
-                        shape = blockShape,
-                    )
-                    .clickable { onSelect(offset) }
-                    .padding(vertical = 10.dp, horizontal = 10.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(
-                    text = label,
-                    style = NoopType.caption,
-                    color = if (selected) Palette.textPrimary else Palette.textSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = date,
-                    style = NoopType.captionNumber,
-                    color = if (selected) Palette.accent else Palette.textTertiary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-    }
+    ThreeDaySelectorBar(selectedOffset = selectedOffset, onSelect = onSelect)
 }
 
 @Composable
@@ -269,7 +249,7 @@ private fun TodayRecoveryRing(day: DailyMetric?, calibratingNights: Int? = null)
                     color = Palette.textSecondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 4.dp),
+                    modifier = Modifier.padding(top = Metrics.space4),
                 )
             }
         }
@@ -303,7 +283,14 @@ internal fun recoveryCalibrationNights(
  * grid tiles perfectly with no empty cells.
  */
 @Composable
-private fun MetricGrid(d: DailyMetric?, w: Window, recoveryCalibration: Int? = null) {
+private fun MetricGrid(
+    d: DailyMetric?,
+    w: Window,
+    recoveryCalibration: Int? = null,
+    unitSystem: UnitSystem = UnitSystem.METRIC,
+    latestWeightKg: Double? = null,
+    profileWeightKg: Double = 75.0,
+) {
     val tiles = listOf<@Composable (Modifier) -> Unit>(
         { m ->
             SparkStatTile(
@@ -386,34 +373,41 @@ private fun MetricGrid(d: DailyMetric?, w: Window, recoveryCalibration: Int? = n
             )
         },
         { m ->
+            // On-device daily step total derived from the WHOOP5 @57 counter (DailyMetric.steps). (#107)
             SparkStatTile(
                 modifier = m,
                 label = "Steps",
-                value = NO_DATA,
-                caption = "not connected",
-                accent = Palette.textTertiary,
+                value = d?.steps?.let { intString(it.toDouble()) } ?: NO_DATA,
+                caption = d?.steps?.let { "today" },
+                accent = d?.steps?.let { Palette.metricCyan } ?: Palette.textTertiary,
                 spark = emptyList(),
                 sparkColor = Palette.metricCyan,
             )
         },
         { m ->
+            // Latest Apple Health / Health Connect body weight, else the SI profile weight (#107). The
+            // caption stays honest — "from profile" only when we fell back. Always shown in the user's
+            // chosen units via the shared UnitFormatter (matches AppleHealthScreen's weight tile).
+            val weight = weightTile(latestWeightKg, profileWeightKg, unitSystem)
             SparkStatTile(
                 modifier = m,
                 label = "Weight",
-                value = NO_DATA,
-                caption = "not connected",
-                accent = Palette.textTertiary,
+                value = weight.value,
+                caption = weight.caption,
+                accent = Palette.accent,
                 spark = emptyList(),
                 sparkColor = Palette.accent,
             )
         },
         { m ->
+            // On-device APPROXIMATE whole-day active+resting energy from HR alone (DailyMetric
+            // .activeKcalEst). A heart-rate estimate, not cloud/clinical parity — shown rounded. (#107)
             SparkStatTile(
                 modifier = m,
                 label = "Calories",
-                value = NO_DATA,
-                caption = "not connected",
-                accent = Palette.textTertiary,
+                value = d?.activeKcalEst?.let { "${intString(it)} kcal" } ?: NO_DATA,
+                caption = d?.activeKcalEst?.let { "active · est." },
+                accent = d?.activeKcalEst?.let { Palette.metricAmber } ?: Palette.textTertiary,
                 spark = emptyList(),
                 sparkColor = Palette.metricAmber,
             )
@@ -483,7 +477,7 @@ private fun HeartRateTrendCard(viewModel: AppViewModel, days: List<DailyMetric>,
                         color = Palette.textTertiary,
                     )
                 }
-                Text("$latest bpm", style = NoopType.number(22f), color = Palette.metricRose)
+                Text("$latest bpm", style = NoopType.chartValueLarge, color = Palette.metricRose)
             }
             LineChart(
                 values = buckets,
@@ -494,7 +488,7 @@ private fun HeartRateTrendCard(viewModel: AppViewModel, days: List<DailyMetric>,
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(1.dp)
+                    .height(Metrics.divider)
                     .background(Palette.hairline),
             )
             Row(modifier = Modifier.fillMaxWidth()) {
@@ -724,7 +718,7 @@ private fun SparkStatTile(
     spark: List<Double> = emptyList(),
     sparkColor: Color = Palette.accent,
 ) {
-    NoopCard(modifier = modifier.height(Metrics.tileHeight), padding = 14.dp) {
+    NoopCard(modifier = modifier.height(Metrics.tileHeight), padding = Metrics.space14) {
         Column(modifier = Modifier.fillMaxWidth()) {
             Overline(label)
             Spacer(Modifier.weight(1f))
@@ -735,7 +729,7 @@ private fun SparkStatTile(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         value,
-                        style = NoopType.number(26f),
+                        style = NoopType.tileValueLarge,
                         color = accent,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -747,19 +741,14 @@ private fun SparkStatTile(
                             color = Palette.textTertiary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(top = 2.dp),
+                            modifier = Modifier.padding(top = Metrics.space2),
                         )
                     }
                 }
                 if (spark.size >= 2) {
                     // Sparkline forces fillMaxWidth + a fixed height internally, so we
                     // bound it in a sized Box to keep it a compact inline trend.
-                    Box(
-                        modifier = Modifier
-                            .padding(start = 8.dp, bottom = 2.dp)
-                            .width(64.dp)
-                            .height(22.dp),
-                    ) {
+                    SparkTailBox(wide = true) {
                         Sparkline(values = spark, color = sparkColor)
                     }
                 }
@@ -772,14 +761,14 @@ private fun SparkStatTile(
 
 @Composable
 private fun IllnessBanner(message: String) {
-    val shape = RoundedCornerShape(12.dp)
+    val shape = RoundedCornerShape(Metrics.cornerSm)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Palette.statusWarning.copy(alpha = 0.12f), shape)
-            .border(1.dp, Palette.statusWarning.copy(alpha = 0.4f), shape)
-            .padding(14.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+            .background(Palette.statusWarning.copy(alpha = StrandAlpha.warningFill), shape)
+            .border(Metrics.divider, Palette.statusWarning.copy(alpha = StrandAlpha.warningBorder), shape)
+            .padding(Metrics.space14),
+        horizontalArrangement = Arrangement.spacedBy(Metrics.space10),
         verticalAlignment = Alignment.Top,
     ) {
         Icon(Icons.Filled.Warning, contentDescription = null, tint = Palette.statusWarning)
@@ -870,6 +859,44 @@ private fun sleepValue(d: DailyMetric?): String {
     val m = d?.totalSleepMin ?: return NO_DATA
     val total = m.roundToInt()
     return "${total / 60}h ${total % 60}m"
+}
+
+// MARK: - Steps / Weight / Calories tile logic (issue #107)
+//
+// Steps and Calories read straight off today's DailyMetric (the on-device WHOOP5 derivations); the
+// pure helpers below back the Weight tile, which has no daily strap source and instead falls back to
+// the user's profile weight. Kept pure + file-internal so TodayMetricTilesTest is the oracle.
+
+/** The Weight tile's display string and an honest caption ("from profile" only on fallback). */
+internal data class WeightTileText(val value: String, val caption: String?)
+
+/**
+ * The newest body weight across the two Apple-side sources (apple-health + health-connect), or null
+ * when neither carries one. Days are ISO `yyyy-MM-dd`, which sorts chronologically, so the lexically
+ * greatest day with a non-null `weightKg` is the most recent — no date parsing needed. (#107)
+ */
+internal fun latestWeightKg(apple: List<AppleDaily>, healthConnect: List<AppleDaily>): Double? =
+    (apple + healthConnect)
+        .filter { it.weightKg != null }
+        .maxByOrNull { it.day }
+        ?.weightKg
+
+/**
+ * Resolve the Weight tile text: prefer the latest Apple/Health-Connect weight, else fall back to the
+ * SI profile weight with a "from profile" caption so the source stays honest. Both are formatted
+ * through the shared [UnitFormatter] so the Imperial/Metric toggle reaches this tile too. (#107)
+ */
+internal fun weightTile(latestWeightKg: Double?, profileWeightKg: Double, system: UnitSystem): WeightTileText =
+    if (latestWeightKg != null) {
+        WeightTileText(UnitFormatter.massFromKilograms(latestWeightKg, system), "latest")
+    } else {
+        WeightTileText(UnitFormatter.massFromKilograms(profileWeightKg, system), "from profile")
+    }
+
+/** Group-separated integer display from a Double (e.g. 12 345 steps), matching the Apple Health tiles. */
+private fun intString(v: Double): String {
+    val n = v.roundToInt()
+    return if (kotlin.math.abs(n) >= 1000) String.format(Locale.US, "%,d", n) else "$n"
 }
 
 private const val NO_DATA = "No Data"

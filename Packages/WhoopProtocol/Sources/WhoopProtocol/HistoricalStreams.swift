@@ -1,5 +1,37 @@
 import Foundation
 
+/// The HISTORICAL_DATA record frames in `rawFrames` that FAIL decode — a genuine CRC failure, or an
+/// unmapped firmware layout whose envelope parsed but yielded no usable biometrics. These are the
+/// records the strap is about to free once we ack the trim, so without an archive they are lost
+/// forever while the UI reports a clean sync (#77 / #91).
+///
+/// Console (type-50, `frame[typeIndex] == 0x32`) frames are strap-side debug-log text that decode to
+/// zero rows BY DESIGN and are never returned. 5/MG v26 (raw PPG block, hist_version 26) is also
+/// skipped: it is known-and-unstored by design, not lost biometric data. Only genuine type-47
+/// record frames whose payload would otherwise be silently dropped are returned.
+///
+/// Used by the Backfiller/BLEManager to archive undecodable history BEFORE acking the trim. Mirrors
+/// the Android rejectedHistoricalRecords so one mapping toolchain re-ingests both archives.
+public func rejectedHistoricalRecords(_ rawFrames: [[UInt8]], family: DeviceFamily) -> [[UInt8]] {
+    // The type byte sits at the inner-record start: frame[4] on WHOOP 4.0, frame[8] on WHOOP 5/MG
+    // (the puffin envelope is 4 bytes longer). hist_version sits one byte past the type+seq+cmd
+    // header — frame[5] (4.0) / frame[9] (5/MG) — same shift.
+    let typeIndex = family == .whoop5 ? 8 : 4
+    let versionIndex = family == .whoop5 ? 9 : 5
+    return rawFrames.filter { f in
+        // Only genuine HISTORICAL_DATA records (47). Console (50) and METADATA frames have a
+        // different type byte, so they never pass this gate — they are excluded by construction.
+        guard f.count > typeIndex, Int(f[typeIndex]) == 47 else { return false }
+        if family == .whoop5, f.count > versionIndex, Int(f[versionIndex]) == 26 { return false }  // v26 PPG: skipped by design
+        let p = parseFrame(f, family: family)
+        // Envelope/CRC reject: parse failed outright or the CRC32 trailer mismatched.
+        if !p.ok || p.crcOK == false { return true }
+        // Unmapped layout: the envelope parsed but no usable biometrics decoded — exactly the rows
+        // extractHistoricalStreams skips (it requires both `unix` and a non-startup `heart_rate`).
+        return p.parsed["unix"]?.intValue == nil || p.parsed["heart_rate"]?.intValue == nil
+    }
+}
+
 /// Turn historical (offload) parsed frames into datastore rows. Port of
 /// interpreter.extract_historical_streams.
 ///

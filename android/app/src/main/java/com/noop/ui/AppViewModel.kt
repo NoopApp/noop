@@ -8,6 +8,7 @@ import com.noop.analytics.IllnessWatch
 import com.noop.analytics.IntelligenceEngine
 import com.noop.analytics.RouteMath
 import com.noop.analytics.Sport
+import com.noop.analytics.Calories
 import com.noop.analytics.StrainScorer
 import com.noop.analytics.UserProfile
 import com.noop.analytics.WorkoutSport
@@ -326,9 +327,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val peak = if (samples.isNotEmpty()) samples.maxOf { it.bpm } else null
         val strain = if (samples.size >= 2)
             StrainScorer.strain(samples, maxHR = profileStore.hrMax.toDouble(), sex = profileStore.sex) else null
+        // Estimate calories from the captured HR window (same Keytel/Harris–Benedict model the
+        // auto-detector uses) so a manual session shows energy too, not just duration/strain. (#117)
+        val energyKcal = if (samples.size >= 2)
+            Calories.estimateBoutCalories(samples, currentProfile(), profileStore.hrMax.toDouble(), null)
+                .first.takeIf { it > 0 }
+        else null
         val row = WorkoutRow(
             deviceId = deviceId, startTs = w.startMs / 1000, endTs = endMs / 1000,
             sport = w.sport.name, source = "manual", durationS = (endMs - w.startMs) / 1000.0,
+            energyKcal = energyKcal,
             avgHr = avg, maxHr = peak, strain = strain,
             distanceM = w.distanceM.takeIf { it > 0 },
             routePolyline = if (w.track.size >= 2) RouteMath.encode(w.track) else null,

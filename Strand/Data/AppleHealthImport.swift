@@ -20,7 +20,7 @@ enum AppleHealthImport {
                        avgHr: d.avgHr.map { Int($0.rounded()) },
                        maxHr: d.maxHr.map { Int($0.rounded()) },
                        walkingHr: d.walkingHr.map { Int($0.rounded()) },
-                       weightKg: nil)
+                       weightKg: d.weightKg)
         }
         try await store.upsertAppleDaily(appleRows, deviceId: deviceId)
 

@@ -64,6 +64,14 @@ public final class LiveState: ObservableObject {
     /// unknowable from the protocol, so a count, never a percent).
     @Published public var syncChunksThisSession: Int = 0
 
+    /// Undecodable HISTORICAL_DATA record frames seen this offload session whose raw bytes WERE
+    /// preserved to the on-device archive (#77 / #91). Drives the honest "saved on this Mac" sync
+    /// status. Reset at session start.
+    @Published public var rejectedFramesThisSession: Int = 0
+    /// Undecodable record frames the archive could NOT preserve this session (the ~5 MB cap was
+    /// reached). Kept separate so the sync status never claims "saved" for bytes that were not.
+    @Published public var rejectedFramesUnarchived: Int = 0
+
     /// Optional hook invoked on every battery update (wired by LiveViewModel to the alert monitor).
     /// Kept as a closure so LiveState stays a plain observable snapshot with no alert dependency.
     public var onBatteryUpdate: ((Double) -> Void)?

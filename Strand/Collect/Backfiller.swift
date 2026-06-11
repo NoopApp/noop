@@ -66,17 +66,25 @@ final class Backfiller {
     /// Versions already reported this session, so the diagnostic logs each once (no spam).
     private var loggedUnmappedVersions: Set<Int> = []
 
+    /// Durably archives undecodable record frames BEFORE the trim ack (#77 / #91). Returns true once
+    /// the bytes are safe (written OR cap-reached — either way the chunk may be acked) and false on a
+    /// genuine write failure, in which case `finishChunk` holds the cursor/ack so the strap re-sends.
+    /// nil in non-production inits (tests/preview) → archiving is skipped and acks proceed as before.
+    private let rejectedSink: ((_ frames: [[UInt8]], _ trim: UInt32, _ family: DeviceFamily) -> Bool)?
+
     init(store: BackfillStoreWriting,
          deviceId: String,
          ackTrim: @escaping (_ trim: UInt32, _ endData: [UInt8]) -> Void,
          enableRawCapture: Bool = false,
          log: ((String) -> Void)? = nil,
+         rejectedSink: ((_ frames: [[UInt8]], _ trim: UInt32, _ family: DeviceFamily) -> Bool)? = nil,
          extract: @escaping Extractor = { extractHistoricalStreams($0, deviceClockRef: $1, wallClockRef: $2) }) {
         self.store = store
         self.deviceId = deviceId
         self.ackTrim = ackTrim
         self.enableRawCapture = enableRawCapture
         self.log = log
+        self.rejectedSink = rejectedSink
         self.extract = extract
     }
 
@@ -163,16 +171,42 @@ final class Backfiller {
             // yet still acks below and the strap trims past it. The per-version log above only catches
             // unmapped layouts; this catches CRC drops too. Observability only — behaviour unchanged
             // (not acking would wedge the offload on a re-send loop). Surfaces in the user's strap log.
+            // Classify FIRST: separate genuinely-undecodable SENSOR records from the strap's own
+            // type-50 console/diagnostic frames, which decode to 0 rows by design and are NOT a loss
+            // (the "rejected frames" red herring users kept reporting — #77/#120). Drives both the
+            // log wording below and the archive guard further down.
+            let rejected = rejectedHistoricalRecords(frames, family: family)
             if decoded.isEmpty {
-                log?("Backfill: \(frames.count) frame(s) decoded to 0 rows (trim=\(trim)) — dropped (CRC/layout/timestamp); nothing persisted for this chunk.")
-                // #91: dump a hex sample of the rejected frames so an unmapped firmware's record
-                // layout can be mapped from a user's strap log — the count alone can't be decoded.
-                for (i, f) in frames.prefix(3).enumerated() {
-                    let hex = f.prefix(64).map { String(format: "%02x", $0) }.joined()
-                    log?("Backfill: rejected frame[\(i)] \(f.count)B: \(hex)\(f.count > 64 ? "…" : "")")
+                if rejected.isEmpty {
+                    // Benign: the chunk was the strap narrating its own state (console logs), not
+                    // sensor data. Keep the wording calm so it doesn't read as data loss.
+                    log?("Backfill: \(frames.count) frame(s) this chunk carried no sensor records (strap console/diagnostic output) — normal, nothing to persist (trim=\(trim)).")
+                } else {
+                    log?("Backfill: \(frames.count) frame(s) decoded to 0 rows (trim=\(trim)); \(rejected.count) undecodable sensor record(s) — archiving raw bytes before ack (CRC/unmapped layout).")
+                    // #91: dump a hex sample of the GENUINE rejects (not console frames) so an unmapped
+                    // firmware's record layout can be mapped from a user's strap log.
+                    for (i, f) in rejected.prefix(3).enumerated() {
+                        let hex = f.prefix(64).map { String(format: "%02x", $0) }.joined()
+                        log?("Backfill: rejected frame[\(i)] \(f.count)B: \(hex)\(f.count > 64 ? "…" : "")")
+                    }
                 }
             }
+            // Commit the decoded rows FIRST (durable). Doing this before the reject archive means a
+            // rare insert failure — which returns and re-sends the whole chunk next session — can't
+            // leave duplicate lines in the append-only reject archive.
             do { try await store.insert(decoded, deviceId: deviceId) } catch { return }
+
+            // #77 / #91: any genuinely-undecodable type-47 record in this chunk must be ARCHIVED
+            // before we ack — the ack frees the strap's copy, so the archive is the only remaining
+            // copy of an unmapped firmware's records. A genuine archive write FAILURE aborts the
+            // chunk (no setCursor, no ack) so the strap re-sends it next session — no data loss
+            // either way. (A full archive is reported as success by the sink; we still ack.)
+            if !rejected.isEmpty, let rejectedSink {
+                guard rejectedSink(rejected, trim, family) else {
+                    log?("Backfill: rejected-frame archive failed (trim=\(trim)) — holding ack so the strap re-sends.")
+                    return
+                }
+            }
 
             // RAW: only persisted when the research toggle is ON. Default OFF → decoded-only; the
             // chunk is still durably committed (decoded) so the trim is safe to advance + ack.

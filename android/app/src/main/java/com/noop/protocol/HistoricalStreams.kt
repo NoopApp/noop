@@ -234,6 +234,45 @@ private fun decodeWhoop5Historical(frame: ByteArray): Map<String, Any?>? {
     return out
 }
 
+/**
+ * The HISTORICAL_DATA (type-47) record frames in [rawFrames] that genuinely FAIL to decode — a CRC
+ * failure, or an unmapped firmware layout whose v24 plausibility gate (see [decodeHistorical]) also
+ * rejects it. These are exactly the record frames [extractHistoricalStreams] silently drops: their
+ * biometric payload would otherwise be lost forever once the strap trims the acked history.
+ *
+ * EXCLUDED (decode to zero rows BY DESIGN, never "lost" data — must NOT be counted):
+ *   - CONSOLE_LOGS (type-50) frames — the strap's own diagnostics text channel. On WHOOP 4.0 the
+ *     inner type byte is frame[4]; type-50 (0x32) is not type-47 so the family-aware type guard below
+ *     already skips it. On WHOOP 5/MG the inner type byte is at frame[8].
+ *   - WHOOP 5/MG v26 (raw PPG) records — deliberately unstored (see [decodeWhoop5Historical]), known
+ *     and skipped by design, not lost.
+ *   - Non-record frames (METADATA, EVENT, etc.) — not type-47, so never returned.
+ *
+ * The Backfiller archives these raw bytes BEFORE acking the trim, so a user on an unmapped firmware
+ * keeps their only copy (for a later release that maps the layout, and as the corpus that mapping
+ * needs) instead of permanently losing it while the UI reports a healthy sync (#77 / #91).
+ *
+ * Pure function (no I/O) so it is unit-testable against captured frames.
+ */
+fun rejectedHistoricalRecords(
+    rawFrames: List<ByteArray>,
+    family: DeviceFamily = DeviceFamily.WHOOP4,
+): List<ByteArray> {
+    // Inner packet-type byte: WHOOP 5/MG's longer puffin envelope puts it at frame[8]; WHOOP 4 at frame[4].
+    val typeIndex = if (family == DeviceFamily.WHOOP5) 8 else 4
+    return rawFrames.filter { frame ->
+        val t = frame.histU8(typeIndex) ?: return@filter false
+        if (t != PacketType.HISTORICAL_DATA.rawValue) return@filter false // type-50 console / metadata / etc.
+        // WHOOP 5/MG v26 = raw PPG block, deliberately not stored — known-skipped, not lost data.
+        if (family == DeviceFamily.WHOOP5 && frame.histU8(9) == 26) return@filter false
+        // A type-47 record that [decodeHistorical] cannot turn into usable biometrics — CRC failure or
+        // an unmapped layout the v24-fallback plausibility gate rejected. This is precisely what
+        // [extractHistoricalStreams] drops (`decodeHistorical(...) ?: continue`), so the rejected set
+        // matches the silently-lost set exactly.
+        decodeHistorical(frame, family) == null
+    }
+}
+
 // MARK: - METADATA classification (port of HistoricalMeta.swift)
 
 /** Classification of a METADATA frame (type 49) for the historical-offload state machine. */

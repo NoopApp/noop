@@ -182,16 +182,64 @@ object Motion {
     val interactive: Easing = CubicBezierEasing(0.2f, 0.0f, 0.0f, 1.0f)
 }
 
+// MARK: - Shared UI tokens (ported Android-side from the StrandDesign contract)
+
+object StrandAlpha {
+    const val subtleLine = 0.60f
+    const val selectedFill = 0.12f
+    const val selectedBorder = 0.55f
+    const val chartFillStrong = 0.28f
+    const val chartFillSoft = 0.04f
+    const val chartMarker = 0.35f
+    const val chartShadow = 0.28f
+    const val chartLabel = 0.95f
+    const val unselectedBar = 0.88f
+    const val warningFill = 0.12f
+    const val warningBorder = 0.40f
+}
+
 // MARK: - Metrics (ported from StrandDesign/Components.swift NoopMetrics)
 
 object Metrics {
+    val space2 = 2.dp
+    val space4 = 4.dp
+    val space6 = 6.dp
+    val space8 = 8.dp
+    val space10 = 10.dp
+    val space12 = 12.dp
+    val space14 = 14.dp
+    val space16 = 16.dp
+    val space18 = 18.dp
+    val space24 = 24.dp
     val cardRadius = 16.dp
+    val cornerXs = 2.dp
+    val cornerSm = 12.dp
+    val cornerBadge = 6.dp
+    val cornerPill = 50.dp
     val cardPadding = 16.dp
     val gap = 12.dp           // gap between cards
     val sectionGap = 28.dp    // gap between sections
     val screenPadding = 24.dp
     val tileHeight = 104.dp   // every metric tile is this tall
     val chartHeight = 220.dp
+    val divider = 1.dp
+    val compactChartHeight = chartHeight - 90.dp
+    val selectorTopUp = sectionGap - 20.dp
+    val iconButton = 36.dp
+    val iconSmall = 18.dp
+    val selectorPadding = 10.dp
+    val selectorSpacing = 8.dp
+    val sparkWidthWide = 64.dp
+    val sparkWidth = 58.dp
+    val sparkHeight = 22.dp
+    val stageStripHeight = 34.dp
+    val trendStripHeight = 120.dp
+    val sparklineHeight = 28.dp
+    val segmentBarHeight = 18.dp
+    val legendSwatch = 9.dp
+    val legendLineWidth = 14.dp
+    val legendLineHeight = 3.dp
+    val progressHeight = 10.dp
 }
 
 // MARK: - Typography (ported from StrandDesign/Typography.swift §9.2)
@@ -238,6 +286,11 @@ object NoopType {
 
     val bodyNumber = TextStyle(fontFamily = monoFamily, fontWeight = FontWeight.Normal, fontSize = 15.sp)
     val captionNumber = TextStyle(fontFamily = monoFamily, fontWeight = FontWeight.Medium, fontSize = 12.sp)
+    val metricInline = number(15f)
+    val chartValue = number(18f)
+    val chartValueLarge = number(22f)
+    val tileValue = number(24f)
+    val tileValueLarge = number(26f)
 
     const val overlineTracking = 0.8f
 }

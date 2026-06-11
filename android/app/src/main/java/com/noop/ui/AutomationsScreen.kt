@@ -27,8 +27,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.noop.ble.PuffinExperiment
 
 /**
  * Automations — turn the strap's physical inputs (double-tap, wrist on/off) and live
@@ -49,6 +51,11 @@ fun AutomationsScreen(viewModel: AppViewModel) {
     val alarmMinutes by viewModel.smartAlarmMinutes.collectAsStateWithLifecycle()
     // Illness watch is real + persisted (opt-OUT — the watch has always run on Android).
     val illnessWatch by viewModel.illnessWatchEnabled.collectAsStateWithLifecycle()
+    // The firmware alarm is EXPERIMENTAL: on a WHOOP 5/MG it is ONLY armed when the Experimental
+    // probes toggle is on — otherwise enabling the alarm silently arms nothing (#111). Read the flag
+    // so the UI can say so instead of promising a wake that never fires.
+    val ctx = LocalContext.current
+    val experimentalOn = PuffinExperiment.from(ctx).isEnabled
 
     ScreenScaffold(
         title = "Automations",
@@ -114,11 +121,11 @@ fun AutomationsScreen(viewModel: AppViewModel) {
         SettingsSection(
             icon = Icons.Filled.Alarm,
             title = "Smart alarm",
-            blurb = "Wake to a wrist buzz. This arms the strap's own firmware alarm, so it still fires if the phone is asleep or NOOP is closed.",
+            blurb = "Wake to a buzz from the strap's own firmware alarm. Experimental — we haven't yet confirmed the strap reliably fires this wake on our side, so keep a backup alarm and don't rely on it alone.",
         ) {
             ToggleRow(
                 label = "Enable smart alarm",
-                help = "Arms the strap to buzz at your wake time.",
+                help = "Arms the strap to buzz at your wake time. Experimental — see the note below.",
                 checked = smartAlarm,
                 onChange = { viewModel.setSmartAlarmEnabled(it) },
             )
@@ -134,13 +141,23 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                     )
                 }
                 RowDivider()
-                Text(
-                    if (live.bonded)
-                        "Armed on the strap itself, so it buzzes at your wake time even if your phone is asleep or NOOP is closed."
-                    else
-                        "Connect your strap to arm this — it's set on the strap's own firmware alarm, so it fires even when your phone or NOOP isn't running.",
-                    style = NoopType.footnote, color = Palette.textTertiary,
-                )
+                // A WHOOP 5/MG only arms when Experimental probes are on; without it the time is saved
+                // but the strap is NEVER armed, so call that out in amber rather than promise a wake (#111).
+                if (live.whoop5Detected && !experimentalOn) {
+                    Text(
+                        "Your WHOOP 5/MG won't arm this until Experimental mode is on (Settings → " +
+                            "Experimental). Right now your wake time is saved but the strap is NOT armed.",
+                        style = NoopType.footnote, color = Palette.statusWarning,
+                    )
+                } else {
+                    Text(
+                        if (live.bonded)
+                            "Armed on the strap itself, so it can buzz at your wake time even if your phone is asleep or NOOP is closed. Still experimental — we can't yet guarantee it fires, so keep a backup alarm."
+                        else
+                            "Connect your strap to arm this — it's set on the strap's own firmware alarm. Still experimental, so keep a backup alarm until you've confirmed it wakes you.",
+                        style = NoopType.footnote, color = Palette.textTertiary,
+                    )
+                }
             }
         }
 

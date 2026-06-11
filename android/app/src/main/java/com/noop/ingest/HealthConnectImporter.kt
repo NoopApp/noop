@@ -42,9 +42,11 @@ import kotlin.reflect.KClass
  *   - Daily "Apple-style" aggregates (steps / calories / VO2max / weight / avg-HR)
  *     -> [AppleDaily] under deviceId "apple-health".
  *   - WHOOP-style autonomic markers (resting-HR / HRV / sleep-minutes / SpO2 / respiration)
- *     -> [DailyMetric] under deviceId "my-whoop", BUT only for days that have NO existing
- *     "my-whoop" daily row. Real WHOOP data is richer (recovery/strain/stages), so we never
- *     clobber it — we only backfill days WHOOP doesn't already own.
+ *     -> [DailyMetric] under deviceId "my-whoop", BUT only for days the strap does NOT already
+ *     cover — where "cover" means either a raw "my-whoop" daily row OR a computed "my-whoop-noop"
+ *     row (the derived recovery/strain/sleep source). Strap data is richer (recovery/strain/
+ *     stages), so we never clobber it — we only backfill days the strap left empty. A strap-only
+ *     user has NO raw "my-whoop" rows, so the computed source is what marks their days as owned.
  *   - Exercise sessions -> [WorkoutRow] with source "health-connect".
  *
  * Permissions are assumed to have been granted by the UI (via the Health Connect permission
@@ -56,6 +58,12 @@ object HealthConnectImporter {
     const val SOURCE = "Health Connect"
 
     private const val WHOOP = "my-whoop"
+    // The computed/derived source IntelligenceEngine writes recovery/strain/sleep+stages under,
+    // namely "<importedDeviceId>-noop" with importedDeviceId == WHOOP. For a strap-only WHOOP user
+    // there are NO raw "my-whoop" daily rows — the strap's nights live only here — so the backfill
+    // guard below must treat a day the strap COMPUTED as already-owned too, or the sparse HC row
+    // (recovery/strain/stages all null) shadows it and blanks Today / regresses Sleep stages (#112).
+    private const val WHOOP_COMPUTED = "$WHOOP-noop"
     // Health Connect data is stored under its OWN source ("health-connect"), NOT the shared
     // "apple-health" bucket — otherwise it's mis-attributed to Apple Health in the UI (issue #34).
     // (The recovery/sleep backfill still lands under "my-whoop"; only the external-health aggregates
@@ -140,6 +148,10 @@ object HealthConnectImporter {
         fun bucket(day: String): DayAcc = acc.getOrPut(day) { DayAcc() }
 
         val workouts = ArrayList<WorkoutRow>()
+        // (startEpochS, endEpochS, kcal) of every active-calorie record, so an imported exercise
+        // session can be credited with the calories burned inside its window (#117). Garmin/Fit write
+        // ActiveCaloriesBurned as interval records; ExerciseSessionRecord itself carries no energy.
+        val activeKcalRecords = ArrayList<Triple<Long, Long, Double>>()
 
         try {
             // --- Steps ---
@@ -153,6 +165,7 @@ object HealthConnectImporter {
             // --- Active calories burned ---
             readAll(client, ActiveCaloriesBurnedRecord::class, filter) { r ->
                 bucket(dayOf(r.startTime)).activeKcal += r.energy.inKilocalories
+                activeKcalRecords.add(Triple(r.startTime.epochSecond, r.endTime.epochSecond, r.energy.inKilocalories))
             }
             // --- Heart rate (instantaneous samples) -> per-day average ---
             readAll(client, HeartRateRecord::class, filter) { r ->
@@ -225,7 +238,7 @@ object HealthConnectImporter {
                         sport = exerciseName(r),
                         source = HC_WORKOUT_SOURCE,
                         durationS = (endS - startS).toDouble().coerceAtLeast(0.0),
-                        energyKcal = null,
+                        energyKcal = sumActiveKcalInWindow(activeKcalRecords, startS, endS),
                         avgHr = null,
                         maxHr = null,
                         strain = null,
@@ -281,12 +294,13 @@ object HealthConnectImporter {
             )
         }
 
-        // Existing WHOOP-owned days: read ONCE so we never clobber richer WHOOP daily rows.
-        val whoopDays: Set<String> = try {
-            repo.days(WHOOP).map { it.day }.toSet()
-        } catch (e: Exception) {
-            emptySet()
-        }
+        // Days the strap already covers: read ONCE so we never clobber richer strap data. This is
+        // the UNION of raw imported "my-whoop" rows AND computed "my-whoop-noop" rows — the latter
+        // is the ONLY source for a strap-only WHOOP user (no raw daily rows exist), so without it
+        // the sparse HC backfill (recovery/strain/stages = null) shadows the computed day and blanks
+        // Today / regresses Sleep stages (#112). Each read is wrapped so a missing source is empty,
+        // not fatal; HC still gap-fills any day the strap did NOT cover.
+        val coveredDays: Set<String> = strapDays(repo, WHOOP) + strapDays(repo, WHOOP_COMPUTED)
 
         val appleRows = ArrayList<AppleDaily>(acc.size)
         val dailyRows = ArrayList<DailyMetric>(acc.size)
@@ -313,8 +327,8 @@ object HealthConnectImporter {
             }
 
             // DailyMetric (my-whoop): resting-HR / HRV / sleep-minutes / SpO2 / respiration,
-            // ONLY for days WHOOP does not already own.
-            if (day !in whoopDays) {
+            // ONLY for days the strap does not already cover (raw OR computed).
+            if (day !in coveredDays) {
                 val rhr = if (a.rhrCount > 0) round(a.rhrSum.toDouble() / a.rhrCount).toInt() else null
                 val hrv = if (a.hrvCount > 0) round1(a.hrvSum / a.hrvCount) else null
                 val sleep = if (a.hasSleep) round1(a.sleepMin) else null
@@ -418,6 +432,29 @@ object HealthConnectImporter {
         }
     }
 
+    // MARK: - strap-coverage helpers
+
+    /**
+     * The set of "YYYY-MM-DD" days the strap already covers under [deviceId], read defensively:
+     * a missing/empty source (the normal case for raw "my-whoop" on a strap-only user) yields an
+     * empty set rather than throwing. The caller unions the raw and computed sources (#112).
+     */
+    private suspend fun strapDays(repo: WhoopRepository, deviceId: String): Set<String> =
+        try {
+            coveredDaySet(repo.days(deviceId))
+        } catch (e: Exception) {
+            emptySet()
+        }
+
+    /**
+     * Pure mapper: the distinct local days carried by [rows]. Factored out (and internal) so the
+     * #112 skip-set semantics — a strap-only user is covered by their COMPUTED rows — can be
+     * unit-tested without Room/Context. Unioning two of these (raw + computed) is what stops the
+     * sparse Health Connect backfill from shadowing a day the strap already covered.
+     */
+    internal fun coveredDaySet(rows: List<DailyMetric>): Set<String> =
+        rows.mapTo(HashSet()) { it.day }
+
     // MARK: - field mapping helpers
 
     /** Sum of asleep-stage durations (minutes). Excludes AWAKE / OUT_OF_BED / UNKNOWN. */
@@ -445,6 +482,30 @@ object HealthConnectImporter {
         if (a.totalKcal <= 0.0) return null
         val basal = a.totalKcal - a.activeKcal
         return if (basal > 0.0) round1(basal) else null
+    }
+
+    /**
+     * Active-calorie kcal attributable to an exercise session: for every active-calorie record that
+     * overlaps [startS, endS], credit the kcal in proportion to the overlap fraction. Time-weighting
+     * (not a flat overlap test) means a per-minute record fully inside the session counts in full,
+     * while a day-spanning total record only contributes the session's slice — so neither under- nor
+     * grossly over-credits. Returns null when nothing overlaps, so an energy-less session stays blank
+     * rather than showing 0. (#117)
+     */
+    internal fun sumActiveKcalInWindow(
+        records: List<Triple<Long, Long, Double>>,
+        startS: Long,
+        endS: Long,
+    ): Double? {
+        if (endS <= startS) return null
+        var total = 0.0
+        for ((rStart, rEnd, kcal) in records) {
+            val overlap = minOf(endS, rEnd) - maxOf(startS, rStart)
+            if (overlap <= 0L) continue
+            val recLen = (rEnd - rStart).coerceAtLeast(1L)
+            total += kcal * (overlap.toDouble() / recLen.toDouble())
+        }
+        return total.takeIf { it > 0.0 }
     }
 
     /**

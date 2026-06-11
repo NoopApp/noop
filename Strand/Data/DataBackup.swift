@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import SQLite3
 import UniformTypeIdentifiers
 import WhoopStore
 
@@ -116,6 +117,14 @@ enum DataBackup {
             return .failure("That file isn't a NOOP backup — it doesn't look like a SQLite database.")
         }
 
+        // Reject the OTHER platform's backup honestly. The magic check passes for ANY SQLite
+        // file, so an Android (Room) backup would otherwise sail through, replace the GRDB
+        // database, and strand the user after the relaunch (the GRDB migration bookkeeping is
+        // absent). Probe the schema read-only and point the user at a path that does work.
+        if backupOrigin(of: sqliteTableNames(at: source)) == .android {
+            return .failure("This looks like an Android NOOP backup, which can't be restored on macOS — the two apps store data in different database layouts. Restore it on an Android device, or import your original WHOOP or Apple Health exports here instead.")
+        }
+
         let fm = FileManager.default
         let dbURL = URL(fileURLWithPath: dbPath)
 
@@ -168,6 +177,49 @@ enum DataBackup {
         types.append(.database)
         types.append(.data)
         return types
+    }
+
+    /// Which platform produced a NOOP backup, judged by its migrator's bookkeeping table.
+    enum BackupOrigin: Equatable { case mac, android, unknown }
+
+    /// Pure classification over a backup's `sqlite_master` table names: GRDB (this app) writes
+    /// `grdb_migrations`, Room (the Android app) writes `room_master_table`. `.unknown` (neither —
+    /// an empty or pre-migration file) falls through to the normal import path, where the
+    /// open-time migrator decides. Mirrors the Android `DataBackup.backupOriginOf`.
+    static func backupOrigin(of tableNames: Set<String>) -> BackupOrigin {
+        // This platform's marker wins on the (degenerate) both-present case: restoring here is the
+        // less destructive read.
+        if tableNames.contains("grdb_migrations") { return .mac }
+        if tableNames.contains("room_master_table") { return .android }
+        // Older Room layouts didn't carry `room_master_table`; treat the Room/AndroidX duo of
+        // `android_metadata` + an internal `sqlite_sequence` as an Android backup too.
+        if tableNames.contains("android_metadata") && tableNames.contains("sqlite_sequence") {
+            return .android
+        }
+        return .unknown
+    }
+
+    /// Every table name in a SQLite file, opened READ-ONLY through the system SQLite so the probed
+    /// file is never mutated. Returns an empty set on any failure — the caller treats that as
+    /// `.unknown` and falls through to the existing behaviour.
+    private static func sqliteTableNames(at url: URL) -> Set<String> {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            sqlite3_close(db)
+            return []
+        }
+        defer { sqlite3_close(db) }
+        var stmt: OpaquePointer?
+        let sql = "SELECT name FROM sqlite_master WHERE type = 'table'"
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        var names: Set<String> = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let c = sqlite3_column_text(stmt, 0) {
+                names.insert(String(cString: c))
+            }
+        }
+        return names
     }
 
     /// Read the first 16 bytes and check for the SQLite magic header.

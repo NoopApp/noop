@@ -121,11 +121,11 @@ fun SleepScreen(vm: AppViewModel) {
             SleepEmptyState()
         } else {
             Hero(model)
-            Spacer(Modifier.height(Metrics.sectionGap - 20.dp))
+            Spacer(Modifier.height(Metrics.selectorTopUp))
             MetricGrid(model)
-            Spacer(Modifier.height(Metrics.sectionGap - 20.dp))
+            Spacer(Modifier.height(Metrics.selectorTopUp))
             StagesVsTypical(model)
-            Spacer(Modifier.height(Metrics.sectionGap - 20.dp))
+            Spacer(Modifier.height(Metrics.selectorTopUp))
             DurationTrend(model)
         }
     }
@@ -133,50 +133,7 @@ fun SleepScreen(vm: AppViewModel) {
 
 @Composable
 private fun DaySelectorBar(selectedOffset: Int, onSelect: (Int) -> Unit) {
-    val base = LocalDate.now()
-    val blockShape = RoundedCornerShape(12.dp)
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        listOf(2, 1, 0).forEach { offset ->
-            val day = base.minusDays(offset.toLong())
-            val selected = selectedOffset == offset
-            val label = when (offset) {
-                0 -> "Today"
-                1 -> "Yesterday"
-                else -> "2 days ago"
-            }
-            val date = day.format(java.time.format.DateTimeFormatter.ofPattern("d MMM", Locale.US))
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(blockShape)
-                    .background(if (selected) Palette.accent.copy(alpha = 0.12f) else Palette.surfaceInset)
-                    .border(
-                        width = 1.dp,
-                        color = if (selected) Palette.accent.copy(alpha = 0.55f) else Palette.hairline,
-                        shape = blockShape,
-                    )
-                    .clickable { onSelect(offset) }
-                    .padding(vertical = 10.dp, horizontal = 10.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(
-                    text = label,
-                    style = NoopType.caption,
-                    color = if (selected) Palette.textPrimary else Palette.textSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = date,
-                    style = NoopType.captionNumber,
-                    color = if (selected) Palette.accent else Palette.textTertiary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-            }
-        }
-    }
+    ThreeDaySelectorBar(selectedOffset = selectedOffset, onSelect = onSelect)
 }
 
 // MARK: - 1. HERO — stage breakdown
@@ -211,13 +168,13 @@ private fun Hero(m: SleepModel) {
             val segments = m.realSegments ?: stageSegments(s)
             if (segments.isNotEmpty()) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Box(modifier = Modifier.fillMaxWidth().height(34.dp)) {
+                    Box(modifier = Modifier.fillMaxWidth().height(Metrics.stageStripHeight)) {
                         Hypnogram(
                             stages = segments,
-                            modifier = Modifier.fillMaxWidth().height(34.dp),
+                            modifier = Modifier.fillMaxWidth().height(Metrics.stageStripHeight),
                         )
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Metrics.space16)) {
                         StageLegend("Deep", Palette.sleepDeep)
                         StageLegend("Light", Palette.sleepLight)
                         StageLegend("REM", Palette.sleepREM)
@@ -238,14 +195,14 @@ private fun Hero(m: SleepModel) {
 @Composable
 private fun StageLegend(label: String, color: Color) {
     Row(
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        horizontalArrangement = Arrangement.spacedBy(Metrics.space6),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             modifier = Modifier
-                .height(9.dp)
-                .width(9.dp)
-                .clip(RoundedCornerShape(2.dp))
+                .height(Metrics.legendSwatch)
+                .width(Metrics.legendSwatch)
+                .clip(RoundedCornerShape(Metrics.cornerXs))
                 .background(color),
         )
         Text(label, style = NoopType.footnote, color = Palette.textTertiary)
@@ -342,7 +299,7 @@ private fun StagesVsTypical(m: SleepModel) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
         SectionHeader("Stages vs typical", overline = "Last night", trailing = "marker = your mean")
         NoopCard {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(Metrics.space14)) {
                 StageRow("Deep", last = s.deep, typical = m.typicalDeepMin, color = Palette.sleepDeep)
                 Hairline()
                 StageRow("REM", last = s.rem, typical = m.typicalRemMin, color = Palette.sleepREM)
@@ -355,7 +312,7 @@ private fun StagesVsTypical(m: SleepModel) {
 
 @Composable
 private fun Hairline() {
-    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Palette.hairline))
+    Box(modifier = Modifier.fillMaxWidth().height(Metrics.divider).background(Palette.hairline))
 }
 
 /** One stage bar: last-night minutes filled, with a vertical marker at the typical mean. */
@@ -372,7 +329,7 @@ private fun StageRow(label: String, last: Double, typical: Double?, color: Color
             "$sign${durationText(abs(diff))} vs typ"
         }
     }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(Metrics.space6)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Overline(label, modifier = Modifier.weight(1f))
             Text(durationText(last), style = NoopType.captionNumber, color = Palette.textPrimary)
@@ -381,7 +338,7 @@ private fun StageRow(label: String, last: Double, typical: Double?, color: Color
                     deltaText,
                     style = NoopType.footnote,
                     color = if (last >= (typical ?: last)) Palette.statusPositive else Palette.statusWarning,
-                    modifier = Modifier.padding(start = 8.dp),
+                    modifier = Modifier.padding(start = Metrics.space8),
                 )
             }
         }
@@ -391,8 +348,8 @@ private fun StageRow(label: String, last: Double, typical: Double?, color: Color
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(10.dp)
-                .clip(RoundedCornerShape(50))
+                .height(Metrics.progressHeight)
+                .clip(RoundedCornerShape(Metrics.cornerPill))
                 .background(Palette.surfaceInset)
                 .drawBehind {
                     // last-night fill
@@ -452,7 +409,7 @@ private fun DurationTrend(m: SleepModel) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     LineChart(
                         values = pts,
-                        modifier = Modifier.fillMaxWidth().height(Metrics.chartHeight - 90.dp),
+                        modifier = Modifier.fillMaxWidth().height(Metrics.compactChartHeight),
                         color = Palette.accent,
                         fill = true,
                         selectionEnabled = true,
@@ -482,7 +439,7 @@ private fun DurationTrend(m: SleepModel) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     BarChart(
                         values = m.trendDebtHours,
-                        modifier = Modifier.fillMaxWidth().height(Metrics.chartHeight - 90.dp),
+                        modifier = Modifier.fillMaxWidth().height(Metrics.compactChartHeight),
                         color = Palette.metricRose,
                         selectionEnabled = true,
                     )
@@ -498,30 +455,26 @@ private fun DurationTrend(m: SleepModel) {
 @Composable
 private fun TrendPlaceholder() {
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(Metrics.chartHeight - 90.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(Palette.surfaceInset),
+        modifier = Modifier.fillMaxWidth(),
         contentAlignment = Alignment.Center,
     ) {
-        Text("Not enough nights yet.", style = NoopType.subhead, color = Palette.textTertiary)
+        InsetChartPlaceholder(message = "Not enough nights yet.")
     }
 }
 
 @Composable
 private fun TrendLegend(items: List<Pair<String, Color>>) {
-    Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+    Row(horizontalArrangement = Arrangement.spacedBy(Metrics.space14)) {
         items.forEach { (label, color) ->
             Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(Metrics.space6),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(
                     modifier = Modifier
-                        .width(14.dp)
-                        .height(3.dp)
-                        .clip(RoundedCornerShape(50))
+                        .width(Metrics.legendLineWidth)
+                        .height(Metrics.legendLineHeight)
+                        .clip(RoundedCornerShape(Metrics.cornerPill))
                         .background(color),
                 )
                 Text(label, style = NoopType.footnote, color = Palette.textTertiary)
@@ -567,15 +520,15 @@ private fun ChartCard(
     footer: @Composable () -> Unit,
     chart: @Composable () -> Unit,
 ) {
-    NoopCard(padding = 16.dp) {
-        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    NoopCard(padding = Metrics.cardPadding) {
+        Column(verticalArrangement = Arrangement.spacedBy(Metrics.space14)) {
             Row(verticalAlignment = Alignment.Top) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(title, style = NoopType.headline, color = Palette.textPrimary)
                     Text(subtitle, style = NoopType.footnote, color = Palette.textSecondary)
                 }
                 if (trailing != null) {
-                    Text(trailing, style = NoopType.number(18f), color = Palette.textPrimary)
+                    Text(trailing, style = NoopType.chartValue, color = Palette.textPrimary)
                 }
             }
             chart()
@@ -609,7 +562,7 @@ private fun SparkTile(
     spark: List<Double>,
     sparkColor: Color,
 ) {
-    NoopCard(modifier = modifier.height(Metrics.tileHeight), padding = 14.dp) {
+    NoopCard(modifier = modifier.height(Metrics.tileHeight), padding = Metrics.space14) {
         Column(modifier = Modifier.fillMaxWidth()) {
             Overline(label)
             Spacer(Modifier.weight(1f))
@@ -617,7 +570,7 @@ private fun SparkTile(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         value,
-                        style = NoopType.number(24f),
+                        style = NoopType.tileValue,
                         color = accent,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -629,18 +582,13 @@ private fun SparkTile(
                             color = Palette.textTertiary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(top = 2.dp),
+                            modifier = Modifier.padding(top = Metrics.space2),
                         )
                     }
                 }
                 val tail = spark.takeLast(30)
                 if (tail.size >= 2) {
-                    Box(
-                        modifier = Modifier
-                            .padding(start = 8.dp, bottom = 2.dp)
-                            .width(58.dp)
-                            .height(22.dp),
-                    ) {
+                    SparkTailBox {
                         Sparkline(values = tail, color = sparkColor)
                     }
                 }

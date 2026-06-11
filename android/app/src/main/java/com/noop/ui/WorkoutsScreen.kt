@@ -107,6 +107,9 @@ fun WorkoutsScreen(vm: AppViewModel) {
     }
 
     ScreenScaffold(title = "Workouts", subtitle = "Every session, threaded together.") {
+        // Start (or stop) a workout right here, not only on Live — mirrors the Live control (#115).
+        WorkoutStartSection(vm)
+
         if (allRows.isEmpty()) {
             EmptyWorkouts(loaded, onAdd = { dialog = DialogTarget(null) })
         } else {

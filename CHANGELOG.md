@@ -17,6 +17,51 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 1.83 — Workout calories (manual sessions + Health Connect imports)
+
+- **Fixed (Mac and Android):** a workout you **start yourself** now estimates its calories from your
+  heart rate — the same model NOOP uses for auto-detected workouts — instead of leaving the field
+  blank. (#117)
+- **Fixed (Android):** workouts imported from **Health Connect** (e.g. Garmin) now show their
+  calories. NOOP credits each session with the active calories burned inside its time window (a
+  Health Connect exercise record carries no energy of its own, so this stitches them together). (#117)
+
+---
+
+## 1.82 — Stop losing strap history we can't yet decode + a board of fixes
+
+- **Fixed (Mac and Android):** NOOP no longer **destroys strap history it can't yet decode**. If a
+  history chunk arrived with a bad checksum or a firmware record layout we haven't mapped, NOOP used
+  to acknowledge it anyway — and the strap then **freed (erased)** that data while the screen said
+  "synced". NOOP now archives those raw records **on-device before acknowledging**, and if it can't
+  save them it leaves them on the strap to retry. An unrecognised firmware can no longer cost you
+  your data. (#77, #91)
+- **Fixed (Android):** a **Health Connect sync no longer blanks a strap-only day**. With no WHOOP
+  import, a sync could write a sparse record that hid your on-device recovery/strain and regressed
+  your sleep stages; Health Connect now only fills days your strap didn't already cover. Nothing was
+  deleted — this restores it. (#112)
+- **Fixed (Android):** the Today screen's **Steps, Calories and Weight** tiles now show real data
+  instead of always "no data"; Weight falls back to your profile figure when there's no measured
+  reading. (#107)
+- **New (Mac):** **Google Gemini** as a third bring-your-own-key AI Coach provider (with OpenAI and
+  Anthropic).
+- **New (Mac):** a clear **"Standard HR mode"** note when the radio falls back to low-bandwidth heart
+  rate (#80); a guard that **refuses an Android backup on Mac** instead of overwriting your database;
+  and imported **Apple Health body-weight** now shows up.
+
+---
+
+## 1.81 — Start a workout from the Workouts screen + an honest Smart-alarm note
+
+- **New (Android):** start a workout straight from the **Workouts** screen, not only from Live — the
+  same searchable sport picker and GPS toggle, with a compact running banner and an **End** button
+  while a session is in progress.
+- **Changed (Android):** the **Smart alarm** now says plainly that it's experimental, and that a
+  WHOOP 5/MG only arms it when **Experimental mode** is on — so your wake time is no longer silently
+  saved against a strap that was never armed. Keep a backup alarm until you've confirmed it wakes you.
+
+---
+
 ## 1.80 — Journal logging + an Imperial/Metric units toggle
 
 - **New (Mac and Android):** a journal card on Insights — quick yes/no chips for behaviours (caffeine,

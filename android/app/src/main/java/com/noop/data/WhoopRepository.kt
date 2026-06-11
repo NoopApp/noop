@@ -391,10 +391,29 @@ class WhoopRepository(private val dao: WhoopDao) {
             // otherwise blank them on days the import also covers. (#78)
             for (d in imported) {
                 val c = byDay[d.day]
+                // Per-FIELD coalesce: the imported row wins for every column it actually has, but any
+                // column it leaves null is gap-filled from the computed row. A real WHOOP import has
+                // its scores/stages set, so "d.x ?: c.x" is a no-op there. A Health Connect import,
+                // though, writes a "my-whoop" row with recovery/strain/sleep-stages NULL — without this
+                // it would BLANK a strap-computed day (and a stale one already written stays blanked).
+                // Coalescing every nullable field both prevents that and HEALS days already shadowed. (#112)
                 byDay[d.day] = if (c == null) d else d.copy(
+                    totalSleepMin = d.totalSleepMin ?: c.totalSleepMin,
+                    efficiency = d.efficiency ?: c.efficiency,
+                    deepMin = d.deepMin ?: c.deepMin,
+                    remMin = d.remMin ?: c.remMin,
+                    lightMin = d.lightMin ?: c.lightMin,
+                    disturbances = d.disturbances ?: c.disturbances,
+                    restingHr = d.restingHr ?: c.restingHr,
+                    avgHrv = d.avgHrv ?: c.avgHrv,
+                    recovery = d.recovery ?: c.recovery,
+                    strain = d.strain ?: c.strain,
+                    exerciseCount = d.exerciseCount ?: c.exerciseCount,
+                    spo2Pct = d.spo2Pct ?: c.spo2Pct,
+                    skinTempDevC = d.skinTempDevC ?: c.skinTempDevC,
+                    respRateBpm = d.respRateBpm ?: c.respRateBpm,
                     steps = d.steps ?: c.steps,
                     activeKcalEst = d.activeKcalEst ?: c.activeKcalEst,
-                    respRateBpm = d.respRateBpm ?: c.respRateBpm,
                 )
             }
             return byDay.values.sortedBy { it.day }

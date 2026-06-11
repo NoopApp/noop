@@ -452,6 +452,13 @@ class WhoopBleClient(
      */
     private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /**
+     * Durable archive for undecodable history record frames (#77/#91). Written BEFORE the strap is
+     * acked, so an unrecognised firmware layout can't cost the user their only copy: the ack frees
+     * the strap's records, and this archive is the only remaining copy until the layout is mapped.
+     */
+    private val rawHistoryArchive = RawHistoryArchive(context)
+
     /** The offload state machine. Ack callback writes HISTORICAL_DATA_RESULT (with response). */
     private val backfiller = Backfiller(
         repository = repository,
@@ -459,6 +466,21 @@ class WhoopBleClient(
         cursorStore = cursorStore,
         ackTrim = { trim, endData -> ackHistoricalChunk(trim, endData) },
         onChunkCommitted = { batch -> onBackfillChunkCommitted(batch) },
+        // #77/#91: archive undecodable frames before the ack. append() returns ok=true (written, or
+        // archive-full → still safe to ack) and THROWS only on a genuine write failure → return false
+        // so finishChunk holds the cursor/ack and the strap re-sends. The throw is mapped to the
+        // boolean contract HERE so nothing can escape into the offload drain loop.
+        rejectedSink = { frames, trim ->
+            try {
+                val r = rawHistoryArchive.append(frames, trim, connectedFamily)
+                if (r.written) log("Backfill: ${frames.size} undecodable frame(s) archived before ack")
+                else log("Backfill: ${frames.size} undecodable frame(s) NOT archived (archive full) — acking anyway")
+                r.ok
+            } catch (t: Throwable) {
+                log("Backfill: reject-archive write FAILED (${t.message}) — holding ack so the strap re-sends")
+                false
+            }
+        },
         log = { s -> log(s) },
     )
 
@@ -2014,15 +2036,25 @@ class WhoopBleClient(
         if (backfillDraining) return
         backfillDraining = true
         ioScope.launch {
-            while (true) {
-                val f = backfillFrameQueue.poll() ?: break
-                backfiller.ingest(f)
-                // If the Backfiller consumed all historical data, exit the session cleanly.
-                if (backfilling && !backfiller.isBackfilling) {
-                    handler.post { exitBackfilling("HISTORY_COMPLETE") }
+            // A throw from ingest() must NEVER leave backfillDraining stuck true (that would wedge the
+            // offload — every later frame returns early and the queue never drains). finally guarantees
+            // the flag is cleared even if a chunk handler throws. (#77/#91 hardening.)
+            try {
+                while (true) {
+                    val f = backfillFrameQueue.poll() ?: break
+                    try {
+                        backfiller.ingest(f)
+                    } catch (t: Throwable) {
+                        log("Backfill: drain error (${t.message}) — skipping frame, offload continues")
+                    }
+                    // If the Backfiller consumed all historical data, exit the session cleanly.
+                    if (backfilling && !backfiller.isBackfilling) {
+                        handler.post { exitBackfilling("HISTORY_COMPLETE") }
+                    }
                 }
+            } finally {
+                backfillDraining = false
             }
-            backfillDraining = false
         }
     }
 

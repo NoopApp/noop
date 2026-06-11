@@ -202,74 +202,10 @@ fun LiveScreen(viewModel: AppViewModel) {
             )
         }
 
-        // GPS workout sport picker — pick a sport (searchable) + GPS toggle, then start.
+        // GPS workout sport picker — the shared sheet (also used on the Workouts screen, #115).
         var showSportPicker by remember { mutableStateOf(false) }
         if (showSportPicker) {
-            var query by remember { mutableStateOf("") }
-            var selected by remember { mutableStateOf(WorkoutSport.default) }
-            var gpsOn by remember(selected) { mutableStateOf(selected.isDistanceSport) }
-            val filtered = WorkoutSport.all.filter { it.name.contains(query, ignoreCase = true) }
-            // GPS needs ACCESS_FINE_LOCATION, which is NOT granted by the BLE flow on Android 12+.
-            // Request it before starting; if denied, the workout still starts (without a route). (#101)
-            val startWithGps = rememberRequestLocation { granted ->
-                viewModel.startWorkout(selected, gpsEnabled = gpsOn && granted)
-                showSportPicker = false
-            }
-            AlertDialog(
-                onDismissRequest = { showSportPicker = false },
-                title = { Text("Start a workout") },
-                text = {
-                    Column {
-                        OutlinedTextField(
-                            value = query, onValueChange = { query = it },
-                            label = { Text("Search sport") }, singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Column(modifier = Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState())) {
-                            filtered.forEach { sp ->
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.fillMaxWidth()
-                                        .clickable { selected = sp; gpsOn = sp.isDistanceSport }
-                                        .padding(vertical = 10.dp),
-                                ) {
-                                    Text(
-                                        sp.name, style = NoopType.body,
-                                        color = if (sp == selected) Palette.accent else Palette.textPrimary,
-                                    )
-                                    if (sp.isDistanceSport) {
-                                        Spacer(Modifier.width(6.dp))
-                                        Text("· GPS", style = NoopType.footnote, color = Palette.textTertiary)
-                                    }
-                                }
-                            }
-                        }
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                        ) {
-                            Text("Track GPS route", style = NoopType.body, color = Palette.textPrimary)
-                            Spacer(Modifier.weight(1f))
-                            Switch(checked = gpsOn, onCheckedChange = { gpsOn = it })
-                        }
-                    }
-                },
-                confirmButton = {
-                    Button(onClick = {
-                        if (gpsOn) {
-                            startWithGps() // requests location, then starts in the callback (#101)
-                        } else {
-                            viewModel.startWorkout(selected, gpsEnabled = false)
-                            showSportPicker = false
-                        }
-                    }) {
-                        Text("Start ${selected.name}")
-                    }
-                },
-                dismissButton = {
-                    OutlinedButton(onClick = { showSportPicker = false }) { Text("Cancel") }
-                },
-            )
+            StartWorkoutSheet(vm = viewModel, onDismiss = { showSportPicker = false })
         }
 
         // Manual workout — start/stop a session yourself; records HR + strain until you end it.

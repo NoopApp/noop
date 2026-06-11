@@ -85,7 +85,7 @@ private fun pointsFor(
 private fun DrawScope.drawBaseline(color: Color = Palette.hairline) {
     val y = size.height / 2f
     drawLine(
-        color = color.copy(alpha = 0.6f),
+        color = color.copy(alpha = StrandAlpha.subtleLine),
         start = Offset(0f, y),
         end = Offset(size.width, y),
         strokeWidth = 1f,
@@ -108,7 +108,7 @@ fun Sparkline(
     Canvas(
         modifier = modifier
             .fillMaxWidth()
-            .height(28.dp),
+            .height(Metrics.sparklineHeight),
     ) {
         val strokePx = 2f
         val pad = strokePx
@@ -222,8 +222,8 @@ fun LineChart(
                     path = fillPath,
                     brush = Brush.verticalGradient(
                         colors = listOf(
-                            color.copy(alpha = 0.28f),
-                            color.copy(alpha = 0.04f),
+                            color.copy(alpha = StrandAlpha.chartFillStrong),
+                            color.copy(alpha = StrandAlpha.chartFillSoft),
                             Color.Transparent,
                         ),
                         startY = 0f,
@@ -247,20 +247,20 @@ fun LineChart(
             if (selectionEnabled && selectedIndex in pts.indices) {
                 val p = pts[selectedIndex]
                 drawLine(
-                    color = color.copy(alpha = 0.35f),
+                    color = color.copy(alpha = StrandAlpha.chartMarker),
                     start = Offset(p.x, 0f),
                     end = Offset(p.x, size.height),
                     strokeWidth = 1.5f,
                     cap = StrokeCap.Round,
                 )
                 drawCircle(color = color, radius = 5f, center = p)
-                drawCircle(color = Color.Black.copy(alpha = 0.28f), radius = 9f, center = p)
+                drawCircle(color = Palette.surfaceBase.copy(alpha = StrandAlpha.chartShadow), radius = 9f, center = p)
                 drawCircle(color = color, radius = 4.5f, center = p)
                 drawContext.canvas.nativeCanvas.apply {
                     val paint = android.graphics.Paint().apply {
                         isAntiAlias = true
                         textSize = 30f
-                        this.color = color.copy(alpha = 0.95f).toArgb()
+                        this.color = color.copy(alpha = StrandAlpha.chartLabel).toArgb()
                         typeface = android.graphics.Typeface.create(
                             android.graphics.Typeface.DEFAULT,
                             android.graphics.Typeface.BOLD,
@@ -405,7 +405,7 @@ fun BarChart(
                 val left = cx - barWidth / 2f
                 val top = size.height - barHeight
                 drawLine(
-                    color = if (selectionEnabled && i == selectedIndex) color else color.copy(alpha = 0.88f),
+                    color = if (selectionEnabled && i == selectedIndex) color else color.copy(alpha = StrandAlpha.unselectedBar),
                     start = Offset(cx, size.height),
                     end = Offset(cx, (top + capRadius).coerceAtMost(size.height)),
                     strokeWidth = barWidth,
@@ -419,7 +419,7 @@ fun BarChart(
                     val paint = android.graphics.Paint().apply {
                         isAntiAlias = true
                         textSize = 30f
-                        this.color = color.copy(alpha = 0.95f).toArgb()
+                        this.color = color.copy(alpha = StrandAlpha.chartLabel).toArgb()
                         typeface = android.graphics.Typeface.create(
                             android.graphics.Typeface.DEFAULT,
                             android.graphics.Typeface.BOLD,
@@ -454,7 +454,7 @@ fun Hypnogram(
     Canvas(
         modifier = modifier
             .fillMaxWidth()
-            .height(18.dp),
+            .height(Metrics.segmentBarHeight),
     ) {
         val w = size.width
         val h = size.height
@@ -502,7 +502,7 @@ fun Hypnogram(
 fun SegmentBar(
     segments: List<Pair<Color, Float>>,
     modifier: Modifier,
-    height: Dp = 18.dp,
+    height: Dp = Metrics.segmentBarHeight,
 ) {
     Canvas(modifier = modifier.fillMaxWidth().height(height)) {
         val w = size.width

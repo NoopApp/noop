@@ -52,6 +52,10 @@ final class Collector {
 
     /// Set once the GET_CLOCK correlation lands (E1). Until then, frames buffer un-persisted.
     var clockRef: ClockRef?
+    /// Strap family for the LIVE decode path. WHOOP 4.0 (default) parses the 4.0 envelope; 5/MG
+    /// parses the puffin envelope (records sit at +4 offsets). Set by BLEManager.configureCollector‐
+    /// Family alongside an identity clockRef — 5/MG live timestamps are already real-unix seconds.
+    var family: DeviceFamily = .whoop4
     /// On-demand bounded raw-capture window. ORs into the raw-persist gate so a "capture
     /// activity sample" action can persist raw even when `enableRawCapture` is off. The window's
     /// monotonic deadline auto-expires so a missed stop callback can't leak raw forever.
@@ -124,7 +128,7 @@ final class Collector {
         let frames = buffer
         buffer.removeAll(keepingCapacity: true)
 
-        let parsed = frames.map { parseFrame($0) }
+        let parsed = frames.map { parseFrame($0, family: family) }
         let streams = extractStreams(parsed, deviceClockRef: ref.device, wallClockRef: ref.wall)
         do {
             try await store.insert(streams, deviceId: deviceId)   // DECODED FIRST (durable)

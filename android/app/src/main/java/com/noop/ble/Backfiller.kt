@@ -8,6 +8,7 @@ import com.noop.protocol.Framing
 import com.noop.protocol.HistoricalMeta
 import com.noop.protocol.classifyHistoricalMeta
 import com.noop.protocol.extractHistoricalStreams
+import com.noop.protocol.rejectedHistoricalRecords
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -35,10 +36,13 @@ import kotlinx.coroutines.sync.withLock
  * never reordered, matching the Swift serial-drain task. The owning [WhoopBleClient] feeds frames
  * in arrival order from a single drain coroutine.
  *
- * RAW CAPTURE: the Swift Backfiller optionally persists raw frames (research toggle, default OFF).
- * The Android data layer has no raw-frame outbox table, so raw persistence is intentionally omitted
+ * RAW CAPTURE: the Swift Backfiller optionally persists ALL raw frames (research toggle, default OFF);
+ * the Android data layer has no raw-frame outbox table, so that bulk capture is intentionally omitted
  * here — decoded rows are the product of record and are still durably committed before the trim is
- * advanced, exactly as in the Swift default (raw-off) configuration. See the FLAG in the port notes.
+ * advanced, exactly as in the Swift default (raw-off) configuration. The ONE exception is the
+ * undecodable-record archive (#77 / #91): record frames that fail decode are persisted via
+ * [rejectedSink] BEFORE the trim is acked, because the strap frees acked history and those bytes would
+ * otherwise be the user's permanently-lost only copy. See the FLAG in the port notes.
  */
 class Backfiller(
     private val repository: WhoopRepository,
@@ -63,6 +67,17 @@ class Backfiller(
      * an unmapped layout are dropped, the chunk looks empty, the trim acks past them). Without this a
      * "zero data" strap log shows healthy "acked chunk" lines while data is being discarded (#77). */
     private val log: (String) -> Unit = {},
+    /**
+     * Durable archive for HISTORICAL_DATA record frames that FAILED decode, called BEFORE the chunk
+     * is acked. The strap frees acked history, so these raw bytes are the user's ONLY remaining copy
+     * of an unmapped firmware's records — archiving them preserves the data for a later release that
+     * maps the layout AND provides the corpus that mapping needs (#77 / #91). Return false ONLY when
+     * the archive could not be made durable (a write failure — NOT the archive-full case): finishChunk
+     * then does NOT advance the cursor or ack, so the strap keeps the records and re-sends them (same
+     * invariant as a failed repository insert). The default keeps old behaviour for tests/callers that
+     * do not wire an archive (no archive → nothing to preserve → proceed).
+     */
+    private val rejectedSink: (frames: List<ByteArray>, trim: Long) -> Boolean = { _, _ -> true },
     /**
      * The (device, wall) clock reference. type-47 records carry their OWN real unix timestamp so
      * the offset is a no-op for them; this is supplied only for the REALTIME_RAW_DATA fallback and
@@ -161,18 +176,31 @@ class Backfiller(
         if (frames.isNotEmpty()) {
             val ref = clockRef
             val decoded = extractHistoricalStreams(frames, ref.device, ref.wall, family)
-            // DIAGNOSTIC (#77): frames arrived but produced no rows — they were dropped (CRC fail /
-            // unmapped layout / out-of-range timestamp), so this chunk persists nothing yet still acks
-            // below and the strap trims past it. Surface it loudly so a "zero data" strap log reveals
-            // the silent loss instead of looking healthy. (Observability only — behaviour unchanged
-            // pending a confirmed root cause; not acking here would wedge the offload on a re-send loop.)
-            if (decoded.isEmpty) {
-                log("Backfill: WARNING ${frames.size} frame(s) decoded to 0 rows (trim=$trim) — dropped (CRC/layout/timestamp); nothing persisted for this chunk")
-                // #91: dump a hex sample of the rejected frames so an unmapped firmware's record
-                // layout can be mapped from a user's strap log — the count alone can't be decoded.
-                frames.take(3).forEachIndexed { i, f ->
+            // #77 / #91: HISTORICAL_DATA record frames that fail decode (CRC failure, or an unmapped
+            // layout the v24 fallback's plausibility gate also rejects) used to be acked anyway — the
+            // strap trims acked history, so the user's ONLY copy of those records was permanently
+            // destroyed while the UI reported "History synced". Classify PER FRAME (a type-50 console
+            // frame decodes to 0 rows BY DESIGN and must not raise the alarm — the old chunk-level
+            // isEmpty check counted it and could waste the hex sample on it; it also missed mixed chunks
+            // where one good row hid the losses). Archive the rejects durably FIRST, and only then allow
+            // the ack below. The WHOOP4 happy path (zero rejects) is unchanged.
+            val rejected = rejectedHistoricalRecords(frames, family)
+            if (rejected.isNotEmpty()) {
+                log(
+                    "Backfill: WARNING ${rejected.size} record frame(s) decoded to 0 rows " +
+                        "(trim=$trim) — archiving raw bytes before ack (CRC/unmapped layout)",
+                )
+                // #91: a hex sample in the strap log so an unmapped firmware's record layout can be
+                // mapped from a shared log — now guaranteed to be actual record frames, not console text.
+                rejected.take(3).forEachIndexed { i, f ->
                     val hex = f.take(64).joinToString("") { "%02x".format(it) }
                     log("Backfill: rejected frame[$i] ${f.size}B: $hex${if (f.size > 64) "…" else ""}")
+                }
+                // Archive must be durable BEFORE the ack. A false return means a genuine write failure
+                // (NOT the archive-full case, which returns true) — hold the cursor/ack so the strap
+                // re-sends the chunk on the next offload. No data loss either way.
+                if (!rejectedSink(rejected, trim)) {
+                    return
                 }
             }
             try {

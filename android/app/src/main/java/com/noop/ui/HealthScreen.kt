@@ -85,7 +85,7 @@ fun HealthScreen(vm: AppViewModel, onVitalClick: (String) -> Unit = {}) {
             // ScreenScaffold applies a 20dp arrangement gap between its direct children;
             // a small top-up reaches the section gap (28dp) used between macOS sections.
             HeartRateSection(live = live, hrMax = hrMax)
-            Spacer(Modifier.height(Metrics.sectionGap - 20.dp))
+            Spacer(Modifier.height(Metrics.selectorTopUp))
             VitalsSection(
                 title = "Vital Signs",
                 overline = "Latest readings",
@@ -206,7 +206,7 @@ private fun HeartRateSection(live: LiveState, hrMax: Int) {
             trailing = if (derived) "from R-R" else null,
         )
 
-        NoopCard(padding = 18.dp) {
+        NoopCard(padding = Metrics.space18) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 // Card header: title + subtitle on the left, live bpm read-out right.
                 Row(
@@ -227,7 +227,7 @@ private fun HeartRateSection(live: LiveState, hrMax: Int) {
                     }
                     Text(
                         text = if (hasLiveHr) "$displayHr bpm" else "—",
-                        style = NoopType.number(15f),
+                        style = NoopType.metricInline,
                         color = if (hasLiveHr) zoneColor else Palette.textTertiary,
                     )
                 }
@@ -289,7 +289,7 @@ private fun zoneLabel(hasLiveHr: Boolean, zone: Int, fraction: Double): String {
 
 @Composable
 private fun HeartRateFooter(zone: String, percentMax: String, maxHr: String, state: String) {
-    Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+    Row(modifier = Modifier.fillMaxWidth().padding(top = Metrics.space4)) {
         FooterStat("Zone", zone, Modifier.weight(1f))
         FooterStat("% Max", percentMax, Modifier.weight(1f))
         FooterStat("Max HR", maxHr, Modifier.weight(1f))
@@ -299,7 +299,7 @@ private fun HeartRateFooter(zone: String, percentMax: String, maxHr: String, sta
 
 @Composable
 private fun FooterStat(label: String, value: String, modifier: Modifier = Modifier) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(Metrics.space2)) {
         Overline(label)
         Text(value, style = NoopType.captionNumber, color = Palette.textPrimary)
     }
@@ -552,13 +552,13 @@ private fun VitalTile(
     caption: String = vital.stateCaption,
     accent: Color = vital.accent,
 ) {
-    NoopCard(modifier = modifier.height(Metrics.tileHeight), padding = 14.dp) {
+    NoopCard(modifier = modifier.height(Metrics.tileHeight), padding = Metrics.space14) {
         Column {
             Overline(vital.label)
             Spacer(Modifier.weight(1f))
             Text(
                 text = value,
-                style = NoopType.number(26f),
+                style = NoopType.tileValueLarge,
                 color = accent,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -569,7 +569,7 @@ private fun VitalTile(
                 color = Palette.textTertiary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 2.dp),
+                modifier = Modifier.padding(top = Metrics.space2),
             )
         }
     }
@@ -626,7 +626,7 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
                         Overline("Latest")
                         Text(
                             text = "${detail.format(latest.second)} ${detail.unit}".trim(),
-                            style = NoopType.number(22f),
+                            style = NoopType.chartValueLarge,
                             color = detail.color,
                         )
                         Text(
@@ -651,7 +651,7 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(1.dp)
+                        .height(Metrics.divider)
                         .background(Palette.hairline),
                 )
                 Row(modifier = Modifier.fillMaxWidth()) {
@@ -677,50 +677,7 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
 
 @Composable
 private fun RecentDaySelectorBar(selectedOffset: Int, onSelect: (Int) -> Unit) {
-    val base = LocalDate.now()
-    val blockShape = RoundedCornerShape(12.dp)
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        listOf(2, 1, 0).forEach { offset ->
-            val day = base.minusDays(offset.toLong())
-            val selected = selectedOffset == offset
-            val label = when (offset) {
-                0 -> "Today"
-                1 -> "Yesterday"
-                else -> "2 days ago"
-            }
-            val date = day.format(DateTimeFormatter.ofPattern("d MMM", Locale.US))
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(blockShape)
-                    .background(if (selected) Palette.accent.copy(alpha = 0.12f) else Palette.surfaceInset)
-                    .border(
-                        width = 1.dp,
-                        color = if (selected) Palette.accent.copy(alpha = 0.55f) else Palette.hairline,
-                        shape = blockShape,
-                    )
-                    .clickable { onSelect(offset) }
-                    .padding(vertical = 10.dp, horizontal = 10.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(
-                    text = label,
-                    style = NoopType.caption,
-                    color = if (selected) Palette.textPrimary else Palette.textSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = date,
-                    style = NoopType.captionNumber,
-                    color = if (selected) Palette.accent else Palette.textTertiary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-            }
-        }
-    }
+    ThreeDaySelectorBar(selectedOffset = selectedOffset, onSelect = onSelect)
 }
 
 private fun latestVitals(days: List<DailyMetric>, tempUnit: TemperatureUnit): List<Vital> {

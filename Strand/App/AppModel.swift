@@ -209,10 +209,15 @@ final class AppModel: ObservableObject {
         let avg = Int((Double(samples.map(\.bpm).reduce(0, +)) / Double(samples.count)).rounded())
         let peak = samples.map(\.bpm).max() ?? 0
         let strain = StrainScorer.strain(samples, maxHR: Double(profile.hrMax), sex: profile.sex)
+        // Estimate calories from the captured HR window (same Keytel/Harris–Benedict model the
+        // auto-detector uses) so a manual session shows energy too, not just duration/strain. (#117)
+        let up = UserProfile(weightKg: profile.weightKg, heightCm: profile.heightCm,
+                             age: Double(profile.age), sex: profile.sex)
+        let kcal = Calories.estimateBoutCalories(samples, profile: up, hrmax: Double(profile.hrMax), restingHR: nil).0
         let row = WorkoutRow(
             startTs: Int(w.start.timeIntervalSince1970), endTs: Int(end.timeIntervalSince1970),
             sport: "Workout", source: "manual", durationS: end.timeIntervalSince(w.start),
-            energyKcal: nil, avgHr: avg, maxHr: peak, strain: strain,
+            energyKcal: kcal > 0 ? kcal : nil, avgHr: avg, maxHr: peak, strain: strain,
             distanceM: nil, zonesJSON: nil, notes: nil)
         lastWorkout = row
         buzz(loops: 2)

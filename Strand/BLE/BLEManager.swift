@@ -257,12 +257,18 @@ public final class BLEManager: NSObject, ObservableObject {
         let enableRawCapture = UserDefaults.standard.bool(forKey: "enableRawCapture")
         collector = Collector(store: store, deviceId: deviceId,
                               enableRawCapture: enableRawCapture)
+        // The store can finish bootstrapping AFTER connect(model:) already ran (both wait on
+        // poweredOn), so apply the family/clock configuration here too — whichever runs last wins.
+        configureCollectorFamily()
         backfiller = Backfiller(store: store, deviceId: deviceId,
                                 ackTrim: { [weak self] trim, endData in
                                     self?.ackHistoricalChunk(trim: trim, endData: endData)
                                 },
                                 enableRawCapture: enableRawCapture,
-                                log: { [weak self] s in self?.log(s) })
+                                log: { [weak self] s in self?.log(s) },
+                                rejectedSink: { [weak self] frames, trim, family in
+                                    self?.archiveRejectedFrames(frames, trim: trim, family: family) ?? true
+                                })
         // Strand: no server uploader/sync — all data stays on-device.
     }
 
@@ -288,6 +294,11 @@ public final class BLEManager: NSObject, ObservableObject {
         // and tell the router which decoder to use. Fresh per connection so no stale bytes carry over.
         reassembler = Reassembler(family: model.deviceFamily)
         router.family = model.deviceFamily
+        // Live 5/MG persistence: point the Collector's decode at the selected family and install the
+        // identity clock ref for a 5/MG (its live timestamps are already real unix). WHOOP 4.0 keeps
+        // the GET_CLOCK correlation flow untouched. Re-applied after bootstrapStore builds the
+        // collector so whichever runs last wins.
+        configureCollectorFamily()
         guard central.state == .poweredOn else {
             log("Bluetooth not powered on (state=\(central.state.rawValue)); cannot scan yet")
             return
@@ -450,6 +461,24 @@ public final class BLEManager: NSObject, ObservableObject {
         log("→ \(command.label) payload=\(hex(payload))")
     }
 
+    /// Point the Collector's live decode at the selected family. For a 5/MG, also install an identity
+    /// clock ref: live puffin REALTIME_DATA timestamps are already real-unix seconds, so device==wall
+    /// makes toWall a no-op (the same idiom the Backfiller uses for 5/MG history). For a WHOOP 4.0 the
+    /// collector takes the manager's GET_CLOCK correlation (nil until it lands — the normal 4.0 flow);
+    /// this also evicts a stale identity ref a prior 5/MG session installed when the user switches
+    /// straps, which would otherwise mis-stamp WHOOP4 device-epoch frames as wall-clock. Idempotent;
+    /// called from connect() AND after the async store bootstrap builds the collector, so the
+    /// configuration lands regardless of which finishes first.
+    private func configureCollectorFamily() {
+        collector?.family = selectedModel.deviceFamily
+        if selectedModel.deviceFamily == .whoop5 {
+            let now = Int(Date().timeIntervalSince1970)
+            collector?.clockRef = ClockRef(device: now, wall: now)
+        } else {
+            collector?.clockRef = clockRef   // the WHOOP4 correlation, nil until GET_CLOCK lands
+        }
+    }
+
     /// Refresh the battery reading on demand. Source is FAMILY-SPECIFIC (#77): on a WHOOP 4.0 the
     /// standard 0x2A19 characteristic is a STUB that reports a constant 100 — the real charge only
     /// comes from the proprietary GET_BATTERY_LEVEL command (COMMAND_RESPONSE, u16/10). Reading both
@@ -518,6 +547,8 @@ public final class BLEManager: NSObject, ObservableObject {
         backfilling = true
         state.backfilling = true
         state.syncChunksThisSession = 0
+        state.rejectedFramesThisSession = 0
+        state.rejectedFramesUnarchived = 0
         historicalAckLogCounter = 0
         // Payload MUST be [0x00], NOT empty: verified on-device that this strap serves type-47 only with
         // [0x00] (empty → 0 frames on a clean stable link with ~2k records pending); the Mac ground-truth
@@ -621,12 +652,50 @@ public final class BLEManager: NSObject, ObservableObject {
         // the flags directly) — that's not a sync failure, and the next connect re-offloads.
         if reason == "HISTORY_COMPLETE" {
             state.lastSyncedAt = Date().timeIntervalSince1970
-            state.lastSyncError = nil
+            // #77 / #91: a sync that COMPLETED but discarded records must not read as a clean
+            // "History synced" — the wording distinguishes bytes saved on this Mac from bytes the
+            // full archive could not preserve, so "saved" is never claimed falsely.
+            let archived = state.rejectedFramesThisSession
+            let unarchived = state.rejectedFramesUnarchived
+            if unarchived > 0 {
+                state.lastSyncError = "Synced, but \(archived + unarchived) record(s) couldn't be decoded (unrecognised strap firmware layout), and the on-device archive is full — the \(unarchived) newest weren't preserved. Please share a strap log so the layout can be mapped."
+            } else if archived > 0 {
+                state.lastSyncError = "Synced, but \(archived) record(s) couldn't be decoded (unrecognised strap firmware layout). The raw bytes were saved on this Mac — please share a strap log so the layout can be mapped."
+            } else {
+                state.lastSyncError = nil
+            }
             UserDefaults.standard.set(state.lastSyncedAt, forKey: "lastSyncedAt")
         } else if reason == "timeout" {
             state.lastSyncError = "Sync interrupted — the strap went quiet. It will retry on the next sync."
         }
         checkStrapLiveness()         // safety-net: strap ahead of us AND our frontier frozen ⇒ stuck?
+    }
+
+    /// On-device archive for HISTORICAL_DATA record frames that failed decode (#77 / #91).
+    private let rejectedHistoryArchive = RawHistoryArchive()
+
+    /// Durably archive undecodable record frames (append-only JSONL, fsynced) BEFORE the Backfiller
+    /// acks the trim — the user's only remaining copy of an unmapped firmware's records once the
+    /// strap frees them, and the corpus a later layout mapping re-ingests. Updates the session
+    /// counters that drive the honest sync status. Returns false ONLY on a genuine write failure,
+    /// which makes the Backfiller hold the cursor/ack so the strap re-sends the chunk (no data loss
+    /// either way). Frames carry sensor payloads, not identifiers — no serials/MACs are archived.
+    private func archiveRejectedFrames(_ frames: [[UInt8]], trim: UInt32, family: DeviceFamily) -> Bool {
+        switch rejectedHistoryArchive.archive(frames, trim: trim, family: family) {
+        case .written(let count):
+            state.rejectedFramesThisSession += count
+            return true
+        case .capReached(let count):
+            // Cap reached: succeed WITHOUT writing (wedging the offload over a full archive would be
+            // worse; ample sample bytes exist by now), counted separately so the sync status never
+            // claims "saved" for bytes that were not.
+            state.rejectedFramesUnarchived += count
+            log("Backfill: rejected-frame archive is FULL — \(count) frame(s) NOT preserved (acking anyway so the offload can finish)")
+            return true
+        case .failed:
+            log("Backfill: rejected-frame archive FAILED — holding ack so the strap re-sends")
+            return false
+        }
     }
 
     /// After an offload, judge liveness: stuck = strap reports records newer than our frontier AND our
@@ -993,6 +1062,10 @@ extension BLEManager: CBCentralManagerDelegate {
         backfilling = false
         state.backfilling = false
         state.syncChunksThisSession = 0
+        // A mid-sync disconnect bypasses exitBackfilling, so clear the reject counters here too —
+        // otherwise a stale non-zero count survives until the next beginBackfill. (#77/#91)
+        state.rejectedFramesThisSession = 0
+        state.rejectedFramesUnarchived = 0
         backfillTimeout?.cancel()
         backfillTimeout = nil
         backfillFrameQueue.removeAll()
@@ -1406,9 +1479,11 @@ extension BLEManager: CBPeripheralDelegate {
         default:
             // EXPERIMENTAL WHOOP 5.0/MG puffin notify chars (fd4b0003/0004/0005/0007): reassemble with
             // the family-aware reassembler and route through the family-aware FrameRouter so the UI
-            // reflects arriving frames. We deliberately do NOT run the WHOOP4 backfill / collector /
-            // clock paths here — puffin biometric + historical decode is still a stub. Live HR and
-            // battery come from the standard 0x2A37 / 0x2A19 profiles handled above.
+            // reflects arriving frames. The historical offload uses the WHOOP4 backfill machinery
+            // (family-aware), and live puffin frames are now persisted too — see below. (Clock: the
+            // Collector runs an identity ref for 5/MG via configureCollectorFamily, since live puffin
+            // timestamps are already real-unix seconds.) Live HR/battery still also come from the
+            // standard 0x2A37 / 0x2A19 profiles handled above.
             if BLEManager.whoop5NotifyChars.contains(characteristic.uuid) {
                 for frame in reassembler.feed(bytes) {
                     if backfilling, BLEManager.isOffloadFrame(frame, family: .whoop5) {
@@ -1423,6 +1498,12 @@ extension BLEManager: CBPeripheralDelegate {
                         continue
                     }
                     router.handle(frame: frame)
+                    // NOTE: we deliberately do NOT ingest live 5/MG REALTIME_DATA into the Collector
+                    // here. For a 5/MG the standard 0x2A37 Heart-Rate profile is already the RELIABLE,
+                    // continuously-persisted live source (see didUpdateValueFor 0x2A37 → ingestStandardHR);
+                    // decoding HR a second time off the puffin stream stored a duplicate row per heartbeat
+                    // at a slightly different second (strap-unix vs Mac-receive), inflating the sample
+                    // store. 0x2A37 stays the single authoritative live HR/RR source for 5/MG.
                     // Capture for protocol mapping (no-op unless the Settings toggle is on). PR #20.
                     puffinRecorder.capture(frame: frame, char: characteristic.uuid)
                 }
