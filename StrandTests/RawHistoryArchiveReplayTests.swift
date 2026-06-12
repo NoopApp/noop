@@ -24,6 +24,17 @@ final class RawHistoryArchiveReplayTests: XCTestCase {
         func cursor(_ name: String) async throws -> Int? { nil }
     }
 
+    /// A store whose insert always fails — stands in for a transient DB error during replay.
+    private final class ThrowingStore: BackfillStoreWriting {
+        struct Boom: Error {}
+        func insert(_ streams: Streams, deviceId: String) async throws
+            -> (hr: Int, rr: Int, events: Int, battery: Int,
+                spo2: Int, skinTemp: Int, resp: Int, gravity: Int) { throw Boom() }
+        func enqueueRawBatch(_ meta: RawBatchMeta, frames: [[UInt8]]) async throws {}
+        func setCursor(_ name: String, _ value: Int) async throws {}
+        func cursor(_ name: String) async throws -> Int? { nil }
+    }
+
     private func bytes(_ s: String) -> [UInt8] {
         var out = [UInt8](); out.reserveCapacity(s.count / 2); var i = s.startIndex
         while i < s.endIndex { let j = s.index(i, offsetBy: 2)
@@ -52,7 +63,7 @@ final class RawHistoryArchiveReplayTests: XCTestCase {
         XCTAssertEqual(archive.readAll().count, 3, "every archived line should read back")
 
         let store = CaptureStore()
-        let rows = await archive.replay(into: store, deviceId: "test")
+        let rows = try await archive.replay(into: store, deviceId: "test")
         XCTAssertEqual(rows, 3, "all three v25 records should retro-decode to a gravity sample")
         XCTAssertEqual(store.insertedGravity, 3, "decoded gravity should be forwarded to the store")
     }
@@ -62,7 +73,29 @@ final class RawHistoryArchiveReplayTests: XCTestCase {
             .appendingPathComponent("noop-replay-empty-\(UUID().uuidString)", isDirectory: true)
         let archive = RawHistoryArchive(directory: dir)
         XCTAssertEqual(archive.readAll().count, 0)
-        let rows = await archive.replay(into: CaptureStore(), deviceId: "test")
+        let rows = try await archive.replay(into: CaptureStore(), deviceId: "test")
         XCTAssertEqual(rows, 0)
+    }
+
+    /// A failed store insert must PROPAGATE, not be swallowed — that's what lets bootstrapStore keep
+    /// the replay gate un-advanced so these records (only copy: the archive) retry next launch.
+    func testReplayThrowsWhenStoreFailsSoGateCanHold() async throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("noop-replay-throw-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let archive = RawHistoryArchive(directory: dir)
+        let frame = bytes("aa50000c2f190013390000140d2b6a4075010068a2010032fdbcfd98fdd3fdccfd47ffb00366064f073e06c103d3016cffa2fc87fa2ffae5fdbe03140675060c0510012dff1bfec0018f3c500500010068dc8f44")
+        if case .failed = archive.archive([frame], trim: 70476, family: .whoop4) {
+            return XCTFail("archive write should not fail")
+        }
+
+        do {
+            _ = try await archive.replay(into: ThrowingStore(), deviceId: "test")
+            XCTFail("replay must rethrow a store-insert failure")
+        } catch is ThrowingStore.Boom {
+            // expected — bootstrapStore's catch leaves the gate un-advanced.
+        }
     }
 }

@@ -116,8 +116,10 @@ struct RawHistoryArchive {
     /// The strap freed these records when they were acked, so this archive is the ONLY way banked
     /// history backfills after a newly-landed layout (e.g. WHOOP 4.0 v25). Idempotent: offloaded rows
     /// dedupe by (deviceId, ts), so a re-run can't double-insert. Returns rows recovered (for logging).
+    /// Throws if a store insert fails — the caller MUST NOT advance the replay gate in that case, or
+    /// these records (whose only surviving copy is this archive) would never be retried.
     @discardableResult
-    func replay(into store: BackfillStoreWriting, deviceId: String) async -> Int {
+    func replay(into store: BackfillStoreWriting, deviceId: String) async throws -> Int {
         let archived = readAll()
         var rows = 0
         for family in Set(archived.map(\.family)) {
@@ -126,7 +128,7 @@ struct RawHistoryArchive {
             // clock ref is correct here — the same fallback the Backfiller uses when clockRef is nil.
             let streams = extractHistoricalStreams(parsed, deviceClockRef: 0, wallClockRef: 0)
             rows += streams.gravity.count
-            _ = try? await store.insert(streams, deviceId: deviceId)
+            _ = try await store.insert(streams, deviceId: deviceId)
         }
         return rows
     }
