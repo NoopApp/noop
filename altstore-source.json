@@ -4,7 +4,7 @@
   "description": "NOOP pairs directly with your WHOOP 4 or 5 strap over Bluetooth, stores everything in a local SQLite database, and computes recovery, strain, HRV and sleep entirely on-device. No WHOOP account. No cloud. No subscription. Import your existing WHOOP CSV or Apple Health export to bring your full history in one shot.\n\nNOOP is an independent, unofficial, non-commercial interoperability project. It is not affiliated with, endorsed by, or connected to WHOOP, Inc. Not a medical device — every derived metric is an approximation.",
   "iconURL": "https://opengraph.githubassets.com/767d9a12bffa9a9e6d1604e468cef63956494dc36a271cd7d99160a1c99eff6b/NoopApp/noop",
   "website": "https://github.com/NoopApp/noop",
-  "tintColor": "#1C98B",
+  "tintColor": "#8B9690",
   "apps": [
     {
       "name": "NOOP",
