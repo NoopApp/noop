@@ -79,7 +79,7 @@ struct IntelligenceView: View {
                 HStack(spacing: 0) {
                     stat("Charge", d.recovery.map { "\(Int($0.rounded()))%" } ?? "—", recoveryColor(d.recovery))
                     stat("Effort", d.strain.map { String(format: "%.1f", $0) } ?? "—", StrandPalette.metricCyan)
-                    stat("Rest", d.sleepMin.map { "\(Int(($0 / 60).rounded()))h \(Int($0.truncatingRemainder(dividingBy: 60)))m" } ?? "—", StrandPalette.metricPurple)
+                    stat("Rest", d.sleepMin.map { "\(Int($0 / 60))h \(Int($0.truncatingRemainder(dividingBy: 60)))m" } ?? "—", StrandPalette.metricPurple)
                     stat("HRV", d.hrv.map { "\(Int($0.rounded()))" } ?? "—", StrandPalette.metricPurple)
                     stat("RHR", d.rhr.map { "\($0)" } ?? "—", StrandPalette.metricRose)
                 }
