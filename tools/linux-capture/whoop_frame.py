@@ -134,8 +134,9 @@ def build_puffin_command(cmd: int, seq: int = 0, payload: bytes = b"\x00",
 # WHOOP 5 / MG (puffin): the maverick haptic, opcode 0x13 = RUN_HAPTIC_PATTERN_MAVERICK (NOT 79 — a
 # real-MG capture showed the strap rejecting RUN_HAPTICS_PATTERN=79 with COMMAND_RESPONSE result=0x03).
 # Body = [0x01, effects(u8…), loopControl u16 LE, overallLoop] — here the "notify" preset (effects
-# 47,152). Decoded from the official maverick app binary (noop issue #48) and shipped in Strand's
-# BLEManager.send(). On real hardware the strap acknowledges with COMMAND_RESPONSE(type 36, cmd 0x13).
+# 47,152). This is the exact command the official app sends, matched byte-for-byte (noop issue #48),
+# and shipped in Strand's BLEManager.send(). On real hardware the strap acknowledges with
+# COMMAND_RESPONSE(type 36, cmd 0x13).
 MAVERICK_HAPTIC_CMD = 0x13
 MAVERICK_HAPTIC_NOTIFY = bytes([0x01, 47, 152, 0, 0, 0, 0, 0, 0, 0, 0, 0])  # 12-byte "notify" preset
 

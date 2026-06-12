@@ -617,8 +617,8 @@ UTC-correct.
 
 The WHOOP 5 / MG does **not** honour `RUN_HAPTICS_PATTERN`=79 — a real-MG capture showed the strap
 rejecting 79 with `COMMAND_RESPONSE result=0x03`. The 5.0 firmware instead drives haptics with the
-**maverick** opcode **`0x13`** (`RUN_HAPTIC_PATTERN_MAVERICK`=19), decoded from the official maverick
-app binary (#48) and shipped in `BLEManager.send()`:
+**maverick** opcode **`0x13`** (`RUN_HAPTIC_PATTERN_MAVERICK`=19) — the exact command the official app
+sends, matched byte-for-byte (#48), and shipped in `BLEManager.send()`:
 
 ```text
 puffin cmd 0x13, body = [0x01, effects…, loopControl u16 LE, overallLoop]
