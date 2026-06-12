@@ -36,10 +36,13 @@ struct SleepView: View {
     /// when it differs from the current inputs we rebuild the model.
     @State private var modelKey: SleepInputKey?
 
-    /// Which night the hero hypnogram shows: 0 = last night, N = N sleep-sessions back.
-    /// Read directly in `hero()` so ◀/▶ re-pick the night instantly (the decode is cheap);
-    /// the memoized trend `model` stays cached since the trends are night-independent.
+    /// Which night the hero hypnogram shows: 0 = last night, N = N days back.
+    /// Read directly in `hero()` so ◀/▶ re-pick the day instantly.
     @State private var nightOffset = 0
+
+    /// Every sleep block, un-deduplicated (loaded via repo.allSleepSessions). `repo.sleeps` keeps
+    /// only one session per night, which hid split sleep / naps and undercounted multi-block days.
+    @State private var allSessions: [CachedSleepSession] = []
 
     var body: some View {
         // Resolve the memoized model for THIS render. `dataKey` is O(1)-ish (counts + last-row
@@ -75,6 +78,9 @@ struct SleepView: View {
                     model = resolved
                 }
             }
+            // Load EVERY sleep block (un-deduplicated) so the per-day hero can merge split
+            // sleep/naps into the dashboard's per-day total. `repo.sleeps` keeps only one/night.
+            .task(id: repo.refreshSeq) { allSessions = await repo.allSleepSessions() }
         }
     }
 
@@ -84,7 +90,7 @@ struct SleepView: View {
     /// (increasing offset), ▶ goes newer; each is disabled at its bound.
     @ViewBuilder
     private func nightNavHeader(_ night: Night) -> some View {
-        let lastIndex = max(repo.sleeps.count - 1, 0)
+        let lastIndex = max(sleepDays().count - 1, 0)
         HStack(spacing: 12) {
             Button { if nightOffset < lastIndex { nightOffset += 1 } } label: {
                 Image(systemName: "chevron.left")
@@ -99,7 +105,7 @@ struct SleepView: View {
                         : "\(nightOffset) NIGHT\(nightOffset == 1 ? "" : "S") AGO")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
-                Text("\(night.dateLabel) · \(night.onsetText)–\(night.wakeText)")
+                Text("\(night.spanLabel) · \(night.onsetText)–\(night.wakeText)")
                     .font(StrandFont.headline)
                     .foregroundStyle(StrandPalette.textPrimary)
             }
@@ -118,7 +124,7 @@ struct SleepView: View {
     private func hero(_ model: SleepModel) -> some View {
         // The hero shows the night chosen by `nightOffset` (◀/▶), falling back to the
         // memoized latest when a navigated session has no usable stages.
-        let night = decodedNight(at: nightOffset) ?? model.night
+        let night = aggregatedNight(at: nightOffset) ?? model.night
         let s = night.stages
         let intervals = night.intervals
         let isPersisted = (night.realSegments?.count ?? 0) >= 2
@@ -434,22 +440,60 @@ struct SleepView: View {
     /// dict was decoded before, so a Bluetooth-only user's night vanished from this tab entirely
     /// while Intelligence showed it (#77). Computed nights also carry their REAL timeline now —
     /// the hypnogram draws genuine segments instead of the synthetic reconstruction.
-    private var latestNight: Night? { decodedNight(at: 0) }
+    private var latestNight: Night? { aggregatedNight(at: 0) }
 
-    /// The night `offset` sleep-sessions back from the most recent (0 = last night), decoded
-    /// into a `Night`. Used by the hero's ◀/▶ navigation to browse past nights' hypnograms.
-    private func decodedNight(at offset: Int) -> Night? {
-        let sleeps = repo.sleeps
-        guard !sleeps.isEmpty else { return nil }
-        let idx = min(max(sleeps.count - 1 - offset, 0), sleeps.count - 1)
-        let s = sleeps[idx]
-        if let stages = decodeStages(s.stagesJSON), stages.total > 0 {
-            return Night(session: s, stages: stages)
+    /// Sleep sessions grouped by the LOCAL calendar day of their WAKE (end) — newest day first,
+    /// each group's sessions sorted by onset. Multiple blocks in one day (split sleep / naps) form
+    /// ONE group, so the hero's totals match the dashboard's per-day figures.
+    private func sleepDays() -> [[CachedSleepSession]] {
+        let cal = Calendar.current
+        var byDay: [Date: [CachedSleepSession]] = [:]
+        // Use ALL blocks when loaded; fall back to repo.sleeps for the first frame before the load.
+        let sessions = allSessions.isEmpty ? repo.sleeps : allSessions
+        for s in sessions {
+            let day = cal.startOfDay(for: Date(timeIntervalSince1970: TimeInterval(s.endTs)))
+            byDay[day, default: []].append(s)
         }
-        if let seg = decodeSegments(s.stagesJSON, sessionStart: s.startTs), seg.stages.total > 0 {
-            return Night(session: s, stages: seg.stages, realSegments: seg.intervals)
+        return byDay.keys.sorted(by: >).map { byDay[$0]!.sorted { $0.startTs < $1.startTs } }
+    }
+
+    /// The aggregated night `offset` days back (0 = most recent day), or nil.
+    private func aggregatedNight(at offset: Int) -> Night? {
+        let days = sleepDays()
+        guard !days.isEmpty else { return nil }
+        return mergeDay(days[min(max(offset, 0), days.count - 1)])
+    }
+
+    /// Merge a day's sleep blocks into ONE Night: summed asleep stages, a single continuous
+    /// timeline (each block rebased to the day's onset, Awake filling the gaps between blocks),
+    /// span = first onset → last wake. Asleep total then matches the dashboard's per-day figure.
+    private func mergeDay(_ sessions: [CachedSleepSession]) -> Night? {
+        guard let first = sessions.first, let last = sessions.last else { return nil }
+        let onset = first.startTs, wake = last.endTs
+        var awake = 0.0, light = 0.0, deep = 0.0, rem = 0.0
+        var segs: [SleepInterval] = []
+        for s in sessions {
+            // Each block's segments are placed at their REAL clock offset from the day's onset, so
+            // the time you were UP between blocks stays an empty GAP in the hypnogram (not filled
+            // awake). Stage totals sum only WITHIN blocks → in-bed excludes the gap (honest efficiency).
+            let shift = TimeInterval(s.startTs - onset)
+            if let d = decodeSegments(s.stagesJSON, sessionStart: s.startTs) {
+                awake += d.stages.awake; light += d.stages.light; deep += d.stages.deep; rem += d.stages.rem
+                for iv in d.intervals {
+                    segs.append(SleepInterval(stage: iv.stage, start: iv.start + shift, end: iv.end + shift))
+                }
+            } else if let st = decodeStages(s.stagesJSON) {   // imported dict-of-minutes (no timeline)
+                awake += st.awake; light += st.light; deep += st.deep; rem += st.rem
+            }
         }
-        return nil
+        let asleep = light + deep + rem
+        guard asleep > 0 else { return nil }
+        let stages = Stages(awake: awake, light: light, deep: deep, rem: rem)   // total = in-bed (no gaps)
+        let eff = stages.total > 0 ? asleep / stages.total : nil   // 0–1 fraction for efficiencyPct
+        let synth = CachedSleepSession(startTs: onset, endTs: wake, efficiency: eff,
+                                       restingHr: nil, avgHrv: nil, stagesJSON: nil)
+        let realSegs = segs.count >= 2 ? segs.sorted { $0.start < $1.start } : nil
+        return Night(session: synth, stages: stages, realSegments: realSegs)
     }
 
     /// Mean total sleep duration (minutes) across nights with data — the "typical".
@@ -846,7 +890,17 @@ private struct Night {
 
     var onsetText: String { Night.timeFmt.string(from: Date(timeIntervalSince1970: TimeInterval(session.startTs))) }
     var wakeText: String { Night.timeFmt.string(from: Date(timeIntervalSince1970: TimeInterval(session.endTs))) }
-    var dateLabel: String { Night.dateFmt.string(from: Date(timeIntervalSince1970: TimeInterval(session.startTs))) }
+    var dateLabel: String { Night.dateFmt.string(from: onsetDate) }
+
+    /// Onset→wake date span. Most nights cross midnight (e.g. 9pm→9am next day), so show
+    /// BOTH days ("Wed 11 Jun → Thu 12 Jun"); a same-day nap shows the single date.
+    var spanLabel: String {
+        let wake = Date(timeIntervalSince1970: TimeInterval(session.endTs))
+        if Calendar.current.isDate(onsetDate, inSameDayAs: wake) {
+            return Night.dateFmt.string(from: onsetDate)
+        }
+        return "\(Night.dateFmt.string(from: onsetDate)) → \(Night.dateFmt.string(from: wake))"
+    }
 
     private static let timeFmt: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "HH:mm"; return f

@@ -155,6 +155,25 @@ final class Repository: ObservableObject {
         return (try? await store.sleepSessions(deviceId: deviceId, from: from, to: to, limit: limit)) ?? []
     }
 
+    /// ALL sleep sessions (imported + on-device computed), UN-deduplicated, oldest→newest. Unlike
+    /// `sleeps` (which keeps one session per night for the dashboard), this preserves every block,
+    /// so the Sleep screen can show split sleep / naps and aggregate them into per-day totals.
+    func allSleepSessions(days: Int = 4000) async -> [CachedSleepSession] {
+        guard let store = await ensureStore() else { return [] }
+        let now = Int(Date().timeIntervalSince1970)
+        let lo = now - days * 86_400, hi = now + 86_400
+        let imported = (try? await store.sleepSessions(deviceId: deviceId, from: lo, to: hi, limit: 4000)) ?? []
+        let computed = (try? await store.sleepSessions(deviceId: computedDeviceId, from: lo, to: hi, limit: 4000)) ?? []
+        // Imported wins per night (matches the dashboard); computed fills nights the import doesn't cover.
+        var importedDays = Set<Int>()
+        let cal = Calendar.current
+        for s in imported { importedDays.insert(Int(cal.startOfDay(for: Date(timeIntervalSince1970: TimeInterval(s.endTs))).timeIntervalSince1970)) }
+        let compKept = computed.filter { s in
+            !importedDays.contains(Int(cal.startOfDay(for: Date(timeIntervalSince1970: TimeInterval(s.endTs))).timeIntervalSince1970))
+        }
+        return (imported + compKept).sorted { $0.startTs < $1.startTs }
+    }
+
     // MARK: - Metric explorer reads (generic substrate)
 
     /// Daily series for any metric key from a given source ("my-whoop" / "apple-health").
