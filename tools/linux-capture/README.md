@@ -83,6 +83,7 @@ the Python capture side does not require Swift.
 | `whoop_sync.py` | **WHOOP 4.0 durable historical offload.** Connect → drain the on-device store (cmd 22 + `HISTORY_END` ack loop) into a device-scoped SQLite DB with **persist-before-ack** + auto-reconnect/resume. Subcommands: `sync` / `status` / `devices` / `export` / `label`. See [Historical sync](#historical-sync-whoop_syncpy). |
 | `whoop_frame.py` | CRC8 / CRC16-Modbus / CRC32, frame builders (`build_command_frame`, `build_puffin_command`), the family-aware `Reassembler`, and the standard-HR parser. Stdlib only. |
 | `pair_probe.py` | One-shot WHOOP 5 bonding probe: scan → connect → `pair()` → test `fd4b` access. `python3 pair_probe.py <MAC>`. |
+| `ppg_hr.py` | Derive a per-second HR from the WHOOP 5 **v26 optical PPG** (issue #156); fills `feat_second.ppg_hr` during decode. `python3 ppg_hr.py <capture.json>` validates it against the v18 HR. Stdlib only. |
 | `test_whoop_frame.py` | Unit tests for framing / reassembly / HR parsing (no `bleak` needed). |
 | `requirements.txt` | `bleak` (runtime dep for capture only). |
 
@@ -275,6 +276,8 @@ themselves and risk diverging on the offsets.
 | `skin_temp_raw` | raw ADC | skin-temperature sensor reading. **Not °C** — absolute raw count (the app derives a personal-baseline deviation; we keep the raw value). WHOOP 4 (v24) only |
 | `resp_raw` | raw ADC | respiration-related raw reading. WHOOP 4 (v24) only |
 | `record_version` | int | source record layout: **24** = WHOOP 4; **18 / 26** = WHOOP 5. Tells the consumer which columns are real vs NULL for this row |
+| `ppg_hr` | bpm (float) | heart rate **derived from the v26 optical PPG** (autocorrelation), filling the timeline where the strap recorded PPG bursts instead of v18 summaries. Kept **separate** from `hr` — use `COALESCE(hr, ppg_hr)`; NULL unless this second had a confident PPG estimate |
+| `ppg_hr_conf` | 0–1 (float) | peak autocorrelation behind `ppg_hr` (a confidence/quality measure) |
 
 > **Provenance via NULLs.** WHOOP 5 **v18** leaves the optical region unmapped (no verified offsets), so
 > `spo2_*` / `skin_temp_raw` / `resp_raw` are **NULL** there; WHOOP 4 **v24** fills them. Per project rule
@@ -294,6 +297,13 @@ themselves and risk diverging on the offsets.
 | `sample_idx` | int 0–23 | position within the 24-sample (≈ 24 Hz) burst for that second |
 | `channel` | int | raw optical channel id as the decoder reports it. **No colour claim** — which physical LED (green/red/IR) each id maps to is unverified, so the raw id is surfaced as-is |
 | `value` | relative ADC (signed) | one waveform sample. A **relative** optical intensity (AC+DC, uncalibrated) — useful for pulse shape / HR / perfusion features, **not** an absolute measurement |
+
+> **PPG → HR (`ppg_hr.py`, issue #156).** On v26-heavy nights the strap records the PPG waveform
+> instead of the v18 per-second summary, so `hr`/motion go sparse and sleep is hard to compute. The
+> decode stage turns each second's PPG into a heart rate (windowed autocorrelation) and writes it to
+> `feat_second.ppg_hr`, keeping the biometric timeline continuous. Validated against the v18 HR at the
+> same timestamps (~2–4 bpm median error). It is HR only — PPG carries no body motion — so it improves
+> HR continuity, not actigraphy. Standalone check: `python3 ppg_hr.py <capture.json>`.
 
 `feat_event` — strap lifecycle events (useful for non-wear masking and context):
 

@@ -722,7 +722,8 @@ def main():
         db = WhoopDB(args.db); did = _need_device(db, args.address)
         res = decode_features.decode_new(db, did, full=args.full)
         print(f"decode: {res['frames']} frames → feat_second updated "
-              f"({res['decoded']} decoded, {res['skipped']} skipped); "
+              f"({res['decoded']} decoded, {res['skipped']} skipped, "
+              f"{res.get('ppg_hr', 0)} v26 PPG-HR seconds); "
               f"cursor last_decoded_frame_id={res['cursor']}")
 
 

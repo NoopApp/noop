@@ -11,6 +11,8 @@ import shutil
 import subprocess
 import tempfile
 
+import ppg_hr
+
 FEATURE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS feat_second (
     device_id INTEGER NOT NULL, unix INTEGER NOT NULL,
@@ -18,6 +20,7 @@ CREATE TABLE IF NOT EXISTS feat_second (
     rr_count INTEGER, rr_mean_ms REAL, rmssd REAL,
     spo2_red INTEGER, spo2_ir INTEGER, skin_temp_raw INTEGER, skin_temp_c REAL, resp_raw INTEGER,
     record_version INTEGER,
+    ppg_hr REAL, ppg_hr_conf REAL,
     PRIMARY KEY (device_id, unix)
 );
 CREATE TABLE IF NOT EXISTS feat_rr (
@@ -46,6 +49,11 @@ def apply_schema(conn):
     cols = {r[1] for r in conn.execute("PRAGMA table_info(feat_second)")}
     if "skin_temp_c" not in cols:
         conn.execute("ALTER TABLE feat_second ADD COLUMN skin_temp_c REAL")
+    # PPG-derived HR from the 5.0 v26 optical buffer (issue #156) — separate from the measured `hr`
+    # so consumers can COALESCE(hr, ppg_hr) without conflating the two sources.
+    if "ppg_hr" not in cols:
+        conn.execute("ALTER TABLE feat_second ADD COLUMN ppg_hr REAL")
+        conn.execute("ALTER TABLE feat_second ADD COLUMN ppg_hr_conf REAL")
     conn.commit()
 
 
@@ -258,7 +266,11 @@ def decode_new(db, device_id, full=False, decode_fn=None):
             skipped += 1
         mapped.append(m)
     apply_rows(db.db, device_id, mapped)
+    # Final stage: derive per-second HR from any v26 optical PPG just stored (issue #156). Recomputes
+    # over all of the device's feat_ppg so windows that span this batch's boundary are complete; safe
+    # to re-run (idempotent upsert) and only writes the separate ppg_hr column, never the measured hr.
+    ppg_hr_rows = ppg_hr.derive_ppg_hr(db.db, device_id)
     new_cursor = max(f[0] for f in frames)
     db.set_state(device_id, "last_decoded_frame_id", str(new_cursor))
     return {"frames": len(frames), "decoded": len(frames) - skipped,
-            "skipped": skipped, "cursor": new_cursor}
+            "skipped": skipped, "cursor": new_cursor, "ppg_hr": ppg_hr_rows}
