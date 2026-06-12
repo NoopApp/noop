@@ -107,6 +107,7 @@ class Family:
             self._unix_off = 11                                 # type-47 record unix (mapped)
             self._hr_off = 21                                   # type-47 heart_rate (mapped)
             self._hist_ver = None                               # whoop4 decodes regardless of version
+            self._set_clock = wf.build_whoop4_set_clock         # 9-byte SET_CLOCK body (older 4.0 fw)
         elif model == "whoop5":
             self.service = "fd4b0001-cce1-4033-93ce-002d5875f58a"
             self.cmd_write = "fd4b0002-cce1-4033-93ce-002d5875f58a"
@@ -126,6 +127,7 @@ class Family:
             self._unix_off = 15
             self._hr_off = 22
             self._hist_ver = (9, 18)
+            self._set_clock = wf.build_whoop5_set_clock         # 8-byte puffin SET_CLOCK body
         else:
             raise SystemExit(f"unknown model {model!r} (use whoop4 or whoop5)")
 
@@ -169,6 +171,9 @@ class Family:
 
     def cmd(self, c, seq=0, payload=b"\x00"):
         return self._cmd(c, seq=seq & 0xFF, payload=payload)
+
+    def set_clock(self, now_unix, seq=2):
+        return self._set_clock(now_unix, seq=seq & 0xFF)
 
 
 # --- durable, device-scoped store -----------------------------------------------------------------
@@ -382,6 +387,76 @@ async def _acquire(address, tries=6):
             return dev
         print(f"  acquire: {address} not advertising (try {i + 1}/{tries})", flush=True)
     return None
+
+
+async def preflight_clock(fam, args):
+    """Before syncing, read the strap RTC and set it to now if it has drifted past
+    `args.clock_threshold` seconds — mirrors the app's ClockPolicy (only write on real drift, so we
+    don't gratuitously reset). A strap left offline for months loses its clock, which would otherwise
+    mis-date every captured/recorded frame.
+
+    Self-contained: its own short connection that reads the clock and (if needed) sets it, so it never
+    perturbs the verified offload/realtime session. Best-effort — any failure is logged and the sync
+    proceeds anyway. Skip entirely with `--no-clock-check`."""
+    from bleak import BleakClient
+    from bleak.exc import BleakError
+
+    dev = await _acquire(args.address, tries=3)
+    if dev is None:
+        print("  clock-check: strap not advertising — skipping (the sync will acquire it next).", flush=True)
+        return
+    rtcs = []
+
+    def on_n(_c, d):
+        r = wf.frame_rtc(bytes(d), fam.model)
+        if r is not None:
+            rtcs.append(r)
+
+    async def wait_rtc(window):
+        rtcs.clear()
+        waited = 0.0
+        while waited < window and not rtcs:
+            await asyncio.sleep(0.5)
+            waited += 0.5
+        return rtcs[-1] if rtcs else None
+
+    try:
+        async with BleakClient(dev) as client:
+            for u in fam.notify:
+                try:
+                    await client.start_notify(u, on_n)
+                except Exception:
+                    pass
+            if fam.opener is not None:
+                await client.write_gatt_char(fam.cmd_write, fam.opener, response=True)
+                await asyncio.sleep(0.5)
+            # Enable the stream so timestamped EVENT/REALTIME frames flow (the clock read-back).
+            for c, sq in ((CMD_SEND_R10_R11_REALTIME, 3), (CMD_TOGGLE_REALTIME_HR, 4)):
+                try:
+                    await client.write_gatt_char(fam.cmd_write, fam.cmd(c, seq=sq, payload=b"\x01"))
+                except Exception:
+                    pass
+
+            rtc = await wait_rtc(10.0)
+            if rtc is None:
+                print("  clock-check: no timestamped frames to read — skipping.", flush=True)
+                return
+            drift = int(time.time()) - rtc
+            print(f"  clock-check: strap RTC {rtc} ({_fmt(rtc)}), drift {drift:+d}s "
+                  f"(threshold {args.clock_threshold}s)", flush=True)
+            if abs(drift) <= args.clock_threshold:
+                print("  clock-check: within threshold — OK.", flush=True)
+                return
+
+            now = int(time.time())
+            await client.write_gatt_char(fam.cmd_write, fam.set_clock(now, seq=5), response=True)
+            after = await wait_rtc(8.0)
+            if after is not None and abs(int(time.time()) - after) <= max(5, args.clock_threshold):
+                print(f"  clock-check: SET_CLOCK ok — strap now {after} ({_fmt(after)}).", flush=True)
+            else:
+                print("  clock-check: SET_CLOCK written but not confirmed (continuing anyway).", flush=True)
+    except (BleakError, asyncio.TimeoutError, OSError, EOFError) as e:
+        print(f"  clock-check: error ({e}) — continuing without it.", flush=True)
 
 
 async def _session(client, s, db, fam, args, stop_all):
@@ -601,6 +676,8 @@ async def run_realtime(args):
     from bleak.exc import BleakError
     fam = Family(args.model)
     db = WhoopDB(args.db)
+    if not args.no_clock_check:
+        await preflight_clock(fam, args)
     dev = await _acquire(args.address, tries=args.tries)
     if dev is None:
         print("could not find the strap advertising — wear/tap it (phone BT OFF) and retry.", flush=True)
@@ -665,6 +742,8 @@ async def run(args):
     from bleak.exc import BleakError
     fam = Family(args.model)
     db = WhoopDB(args.db)
+    if not args.no_clock_check:
+        await preflight_clock(fam, args)
     dev = await _acquire(args.address, tries=args.tries)
     if dev is None:
         print("could not find the strap advertising — nudge it (move it / off charger) and retry.", flush=True)
@@ -815,6 +894,10 @@ def main():
     sp.add_argument("--stall", type=float, default=15.0)
     sp.add_argument("--max", type=float, default=3000.0)
     sp.add_argument("--tries", type=int, default=6)
+    sp.add_argument("--clock-threshold", type=int, default=30, metavar="SECONDS",
+                    help="set the strap clock first if it has drifted more than this (default 30)")
+    sp.add_argument("--no-clock-check", action="store_true",
+                    help="skip the pre-sync clock check (see whoop_setclock.py)")
 
     rp = sub.add_parser("realtime", help="capture the live HR + R-R + IMU stream into the store")
     rp.add_argument("--model", choices=["whoop4", "whoop5"], default="whoop4")
@@ -827,6 +910,10 @@ def main():
     rp.add_argument("--flush", type=float, default=2.0, help="persist buffered frames to the DB every N s")
     rp.add_argument("--tries", type=int, default=8, help="acquire/advertise retries per (re)connect")
     rp.add_argument("--out", default=None, help="also export this device's whole store to capture.json")
+    rp.add_argument("--clock-threshold", type=int, default=30, metavar="SECONDS",
+                    help="set the strap clock first if it has drifted more than this (default 30)")
+    rp.add_argument("--no-clock-check", action="store_true",
+                    help="skip the pre-capture clock check (see whoop_setclock.py)")
 
     ep = sub.add_parser("export")
     ep.add_argument("--db", default="captures/whoop.db")

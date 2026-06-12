@@ -203,13 +203,20 @@ python3 whoop_setclock.py --model whoop4 --address AA:BB:CC:DD:EE:FF
 
 Exit codes: `0` clock OK or successfully set, `2` strap not found, `3` written but couldn't verify.
 
-**Check the clock before every sync.** A sync from a strap with a bad clock yields correctly-*valued*
-but wrongly-*dated* biometrics. Recommended pre-sync step:
+**The clock is checked automatically before every sync.** A sync from a strap with a bad clock yields
+correctly-*valued* but wrongly-*dated* biometrics, so `whoop_sync.py sync` and `realtime` run this same
+check first: they read the RTC and set it to now only if it has drifted past `--clock-threshold`
+(default 30 s), then proceed. It's a self-contained preflight that doesn't perturb the capture session,
+and it's best-effort (any error is logged and the sync continues). Disable with `--no-clock-check`.
 
 ```bash
-python3 whoop_setclock.py --model whoop4 --address <MAC> --if-drift 30 && \
+# clock is checked + fixed (if >30s off) automatically, then the capture runs
 python3 whoop_sync.py realtime --model whoop4 --address <MAC> --subject <name> --db captures/<name>.db
+python3 whoop_sync.py realtime --model whoop4 --address <MAC> ... --clock-threshold 10   # stricter
+python3 whoop_sync.py realtime --model whoop4 --address <MAC> ... --no-clock-check       # skip it
 ```
+
+`whoop_setclock.py` remains the standalone tool for an explicit check/set outside a sync.
 
 > **Firmware gotcha (hardware-verified).** Older WHOOP 4 firmware (e.g. `41.17.6.0`) latches the RTC
 > **only** with the **9-byte** `SET_CLOCK` body (`u32 LE + 5 zero`); the 8-byte form newer firmware
