@@ -308,6 +308,18 @@ public final class BLEManager: NSObject, ObservableObject {
                                     if console { self?.state.consoleChunksThisSession += 1 }
                                 })
         // Strand: no server uploader/sync — all data stays on-device.
+
+        // Retro-decode: when the decoder gains a historical layout (e.g. WHOOP 4.0 v25), re-run every
+        // archived undecodable frame through it and insert whatever now decodes — the only path by
+        // which already-acked banked history backfills after an update. Gated so it runs ONCE per
+        // decoder version, not every launch; idempotent if it somehow re-runs (rows dedupe by ts).
+        // Note: the archive carries no deviceId, so replayed rows attribute to the current strap.
+        let decoderVersion = 2   // bump whenever a historical layout is added/changed (v25 = 2)
+        if UserDefaults.standard.integer(forKey: "rejectArchiveReplayedVersion") < decoderVersion {
+            let rows = await rejectedHistoryArchive.replay(into: store, deviceId: deviceId)
+            if rows > 0 { log("Backfill: retro-decoded \(rows) record(s) from the reject archive after a decoder update.") }
+            UserDefaults.standard.set(decoderVersion, forKey: "rejectArchiveReplayedVersion")
+        }
     }
 
     /// Designated initializer for testing and preview use: accepts a pre-built Collector.

@@ -90,4 +90,44 @@ struct RawHistoryArchive {
             return .failed
         }
     }
+
+    /// Every archived frame with its strap family, oldest first — the read-back of the JSONL that
+    /// `archive` writes. Malformed lines are skipped; an absent/empty file yields []. (Hand-parsed to
+    /// match the hand-built writer: the only dynamic fields are `family` and the [0-9a-f] `frameHex`.)
+    func readAll() -> [(frame: [UInt8], family: DeviceFamily)] {
+        guard let text = try? String(contentsOf: fileURL, encoding: .utf8) else { return [] }
+        return text.split(separator: "\n").compactMap { line in
+            guard let fr = line.range(of: "\"family\":\""),
+                  let hr = line.range(of: "\"frameHex\":\"") else { return nil }
+            let fam = String(line[fr.upperBound...].prefix { $0 != "\"" })
+            let hex = line[hr.upperBound...].prefix { $0 != "\"" }
+            guard let family = DeviceFamily(rawValue: fam), hex.count % 2 == 0 else { return nil }
+            var bytes = [UInt8](); bytes.reserveCapacity(hex.count / 2); var i = hex.startIndex
+            while i < hex.endIndex {
+                let j = hex.index(i, offsetBy: 2)
+                guard let b = UInt8(hex[i..<j], radix: 16) else { return nil }
+                bytes.append(b); i = j
+            }
+            return (bytes, family)
+        }
+    }
+
+    /// Re-decode every archived frame through the CURRENT decoder and insert whatever now decodes.
+    /// The strap freed these records when they were acked, so this archive is the ONLY way banked
+    /// history backfills after a newly-landed layout (e.g. WHOOP 4.0 v25). Idempotent: offloaded rows
+    /// dedupe by (deviceId, ts), so a re-run can't double-insert. Returns rows recovered (for logging).
+    @discardableResult
+    func replay(into store: BackfillStoreWriting, deviceId: String) async -> Int {
+        let archived = readAll()
+        var rows = 0
+        for family in Set(archived.map(\.family)) {
+            let parsed = archived.filter { $0.family == family }.map { parseFrame($0.frame, family: family) }
+            // type-47 records carry their own real-unix ts (clock offset ignored), so an identity
+            // clock ref is correct here — the same fallback the Backfiller uses when clockRef is nil.
+            let streams = extractHistoricalStreams(parsed, deviceClockRef: 0, wallClockRef: 0)
+            rows += streams.gravity.count
+            try? await store.insert(streams, deviceId: deviceId)
+        }
+        return rows
+    }
 }
