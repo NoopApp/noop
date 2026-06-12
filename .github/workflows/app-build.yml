@@ -44,6 +44,7 @@ concurrency:
 
 jobs:
   build:
+    if: github.event_name != 'release'
     runs-on: macos-15
     strategy:
       fail-fast: false
@@ -130,11 +131,21 @@ jobs:
           # ---- build the download URL from the standard GitHub releases path-
           DOWNLOAD_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${ASSET_NAME}"
 
+          # ---- download IPA and extract CFBundleVersion from Info.plist ------
+          echo "Downloading IPA to read CFBundleVersion..."
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "*-ios.ipa" --output noop.ipa
+          unzip -q noop.ipa "Payload/*.app/Info.plist" -d ipa_extracted
+          INFO_PLIST=$(find ipa_extracted/Payload -name Info.plist | head -1)
+          BUILD_VERSION=$(python3 -c "import plistlib,sys; p=plistlib.load(open(sys.argv[1],'rb')); print(p['CFBundleVersion'])" "$INFO_PLIST")
+          rm -rf noop.ipa ipa_extracted
+          echo "CFBundleVersion: $BUILD_VERSION"
+
           # ---- emit outputs -------------------------------------------------
-          echo "version=$VERSION"       >> "$GITHUB_OUTPUT"
-          echo "date=$ISO_DATE"         >> "$GITHUB_OUTPUT"
-          echo "size=$ASSET_SIZE"       >> "$GITHUB_OUTPUT"
-          echo "download_url=$DOWNLOAD_URL" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION"             >> "$GITHUB_OUTPUT"
+          echo "date=$ISO_DATE"               >> "$GITHUB_OUTPUT"
+          echo "size=$ASSET_SIZE"             >> "$GITHUB_OUTPUT"
+          echo "download_url=$DOWNLOAD_URL"   >> "$GITHUB_OUTPUT"
+          echo "build_version=$BUILD_VERSION" >> "$GITHUB_OUTPUT"
           # Store description in an env file to preserve newlines
           {
             echo "ENTRY_DESCRIPTION<<EOF"
@@ -147,10 +158,11 @@ jobs:
       - name: Prepend version to altstore-source.json
         if: steps.build_entry.outputs.skip != 'true'
         env:
-          VERSION:      ${{ steps.build_entry.outputs.version }}
-          DATE:         ${{ steps.build_entry.outputs.date }}
-          SIZE:         ${{ steps.build_entry.outputs.size }}
-          DOWNLOAD_URL: ${{ steps.build_entry.outputs.download_url }}
+          VERSION:         ${{ steps.build_entry.outputs.version }}
+          DATE:            ${{ steps.build_entry.outputs.date }}
+          SIZE:            ${{ steps.build_entry.outputs.size }}
+          DOWNLOAD_URL:    ${{ steps.build_entry.outputs.download_url }}
+          BUILD_VERSION:   ${{ steps.build_entry.outputs.build_version }}
         run: |
           set -euo pipefail
 
@@ -159,7 +171,7 @@ jobs:
           # Build the new version object. jq handles all JSON escaping.
           NEW_VERSION=$(jq -n \
             --arg version      "$VERSION" \
-            --arg buildVersion "1" \
+            --arg buildVersion "$BUILD_VERSION" \
             --arg date         "$DATE" \
             --arg desc         "$ENTRY_DESCRIPTION" \
             --arg url          "$DOWNLOAD_URL" \
