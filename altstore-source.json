@@ -24,7 +24,7 @@
           "downloadURL": "https://github.com/NoopApp/noop/releases/download/v2.6.2/NOOP-v2.6.2-ios.ipa",
           "size": 5557504,
           "minOSVersion": "16.0"
-        },
+        }
       ],
       "appPermissions": {
         "entitlements": [
