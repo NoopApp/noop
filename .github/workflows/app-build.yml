@@ -6,6 +6,11 @@
 # silently break iOS (or regress macOS). It is anonymity-safe: CODE_SIGNING_ALLOWED=NO,
 # no secrets, no signing identity, no artifacts uploaded — it only checks that it builds.
 # (The shipped macOS .app is still produced and anonymized by hand; this is a compile gate.)
+#
+# A second job (update-altstore-source) runs only when a GitHub Release is published.
+# It looks for a *-ios.ipa asset on the release, measures its size, prepends a new
+# version entry to altstore-source.json, and commits the result back to main so the
+# AltStore source URL always reflects the latest release automatically.
 name: App build (macOS + iOS)
 
 on:
@@ -29,6 +34,8 @@ on:
       - 'Packages/**'
       - 'project.yml'
       - '.github/workflows/app-build.yml'
+  release:
+    types: [published]
   workflow_dispatch:
 
 concurrency:
@@ -62,3 +69,126 @@ jobs:
           -destination '${{ matrix.destination }}'
           CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
           build
+
+  # ---------------------------------------------------------------------------
+  # Runs only when a GitHub Release is published.
+  # Finds the *-ios.ipa asset, measures its byte size, and prepends a new
+  # version entry to altstore-source.json, then commits back to main.
+  # ---------------------------------------------------------------------------
+  update-altstore-source:
+    if: github.event_name == 'release' && github.event.action == 'published'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # needed to push the updated source file
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Find iOS IPA asset and build version entry
+        id: build_entry
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+          RELEASE_DATE: ${{ github.event.release.published_at }}
+        run: |
+          set -euo pipefail
+
+          # ---- locate the IPA asset ----------------------------------------
+          ASSET_JSON=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets \
+            | jq '[.assets[] | select(.name | test("-ios\\.ipa$"; "i"))]')
+
+          ASSET_COUNT=$(echo "$ASSET_JSON" | jq 'length')
+          if [ "$ASSET_COUNT" -eq 0 ]; then
+            echo "No *-ios.ipa asset found on release $TAG — skipping AltStore source update."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+          ASSET_NAME=$(echo "$ASSET_JSON" | jq -r '.[0].name')
+          ASSET_URL=$(echo "$ASSET_JSON"  | jq -r '.[0].url')
+          ASSET_SIZE=$(echo "$ASSET_JSON" | jq -r '.[0].size')
+
+          # ---- derive version number from tag (strip leading 'v') -----------
+          VERSION="${TAG#v}"
+
+          # ---- ISO date from published_at (YYYY-MM-DD) ----------------------
+          ISO_DATE=$(echo "$RELEASE_DATE" | cut -c1-10)
+
+          # ---- sanitise release body for JSON (escape quotes/backslashes) ---
+          DESCRIPTION=$(echo "$RELEASE_BODY" \
+            | sed 's/\\/\\\\/g' \
+            | sed 's/"/\\"/g' \
+            | sed ':a;N;$!ba;s/\n/\\n/g')
+
+          # ---- build the download URL from the standard GitHub releases path-
+          DOWNLOAD_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${ASSET_NAME}"
+
+          # ---- emit outputs -------------------------------------------------
+          echo "version=$VERSION"       >> "$GITHUB_OUTPUT"
+          echo "date=$ISO_DATE"         >> "$GITHUB_OUTPUT"
+          echo "size=$ASSET_SIZE"       >> "$GITHUB_OUTPUT"
+          echo "download_url=$DOWNLOAD_URL" >> "$GITHUB_OUTPUT"
+          # Store description in an env file to preserve newlines
+          {
+            echo "ENTRY_DESCRIPTION<<EOF"
+            echo "$RELEASE_BODY"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
+
+          echo "Found IPA: $ASSET_NAME ($ASSET_SIZE bytes) → $DOWNLOAD_URL"
+
+      - name: Prepend version to altstore-source.json
+        if: steps.build_entry.outputs.skip != 'true'
+        env:
+          VERSION:      ${{ steps.build_entry.outputs.version }}
+          DATE:         ${{ steps.build_entry.outputs.date }}
+          SIZE:         ${{ steps.build_entry.outputs.size }}
+          DOWNLOAD_URL: ${{ steps.build_entry.outputs.download_url }}
+        run: |
+          set -euo pipefail
+
+          SOURCE_FILE="altstore-source.json"
+
+          # Build the new version object. jq handles all JSON escaping.
+          NEW_VERSION=$(jq -n \
+            --arg version      "$VERSION" \
+            --arg buildVersion "1" \
+            --arg date         "$DATE" \
+            --arg desc         "$ENTRY_DESCRIPTION" \
+            --arg url          "$DOWNLOAD_URL" \
+            --argjson size     "$SIZE" \
+            '{
+              version:            $version,
+              buildVersion:       $buildVersion,
+              date:               $date,
+              localizedDescription: $desc,
+              downloadURL:        $url,
+              size:               $size,
+              minOSVersion:       "16.0"
+            }')
+
+          # Prepend into apps[0].versions array (index 0 = latest per AltStore spec)
+          jq --argjson entry "$NEW_VERSION" \
+            '.apps[0].versions = [$entry] + .apps[0].versions' \
+            "$SOURCE_FILE" > tmp_source.json && mv tmp_source.json "$SOURCE_FILE"
+
+          echo "Updated $SOURCE_FILE — new head version: $VERSION"
+          jq '.apps[0].versions[0]' "$SOURCE_FILE"
+
+      - name: Commit and push updated source
+        if: steps.build_entry.outputs.skip != 'true'
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add altstore-source.json
+          git commit -m "chore: update AltStore source for $TAG"
+          git push origin main
