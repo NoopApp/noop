@@ -2,7 +2,7 @@
   "name": "NOOP",
   "subtitle": "Offline WHOOP companion — your strap, your data, your device.",
   "description": "NOOP pairs directly with your WHOOP 4 or 5 strap over Bluetooth, stores everything in a local SQLite database, and computes recovery, strain, HRV and sleep entirely on-device. No WHOOP account. No cloud. No subscription. Import your existing WHOOP CSV or Apple Health export to bring your full history in one shot.\n\nNOOP is an independent, unofficial, non-commercial interoperability project. It is not affiliated with, endorsed by, or connected to WHOOP, Inc. Not a medical device — every derived metric is an approximation.",
-  "iconURL": "https://github.com/NoopApp/noop/blob/main/Strand/Resources/Assets.xcassets/AppIcon.appiconset/icon_512x512.png",
+  "iconURL": "https://raw.githubusercontent.com/NoopApp/noop/main/Strand/Resources/Assets.xcassets/AppIcon.appiconset/icon_512x512.png",
   "website": "https://github.com/NoopApp/noop",
   "tintColor": "44E2B0",
   "apps": [
@@ -12,7 +12,7 @@
       "developerName": "NoopApp",
       "subtitle": "Offline WHOOP companion. No cloud, no account.",
       "localizedDescription": "NOOP pairs directly with your WHOOP 4 or 5 strap over Bluetooth and computes recovery, strain, HRV and sleep entirely on your iPhone — no WHOOP account, no cloud, no subscription.\n\nFeatures:\n• Live heart rate and R-R interval stream from the strap\n• On-device recovery, strain and sleep scoring\n• HRV haptic breathing biofeedback (Breathe screen)\n• Silent haptic HIIT timer (Intervals screen)\n• Import WHOOP CSV export or Apple Health export\n• Full history: sleep hypnograms, workout detail, trends, correlations\n• Optional AI Coach (bring your own API key — the only feature that ever uses the network)\n• Everything else is 100% offline\n\nNOOP is an independent, unofficial, non-commercial interoperability project. Not affiliated with WHOOP, Inc. Not a medical device.",
-      "iconURL": "https://github.com/NoopApp/noop/blob/main/Strand/Resources/Assets.xcassets/AppIcon.appiconset/icon_512x512.png",
+      "iconURL": "https://raw.githubusercontent.com/NoopApp/noop/main/Strand/Resources/Assets.xcassets/AppIcon.appiconset/icon_512x512.png",
       "tintColor": "44E2B0",
       "category": "utilities",
       "versions": [
