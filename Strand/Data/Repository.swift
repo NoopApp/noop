@@ -184,6 +184,33 @@ final class Repository: ObservableObject {
         return (try? await store.sleepSessions(deviceId: deviceId, from: from, to: to, limit: limit)) ?? []
     }
 
+    /// Every sleep BLOCK across BOTH sources, UN-deduplicated — so a split-sleep day (a nap
+    /// + a main sleep, or any night recorded as multiple blocks) keeps ALL of its blocks.
+    /// `sleeps` collapses each day to a single winner for the dashboard; this does not.
+    ///
+    /// Crucially this reads the on-device COMPUTED source (`computedDeviceId`) directly, not
+    /// just the imported `deviceId`. A Bluetooth-only user (no WHOOP/Apple-Health import) has
+    /// every block under the computed source, so a loader that only un-dedupes the imported
+    /// device sees nothing to expand and silently falls back to the deduped one-per-day list —
+    /// hiding the day's extra blocks. Imported blocks still win on any day they cover (matching
+    /// the dashboard's imported-wins merge); computed blocks fill days with no import.
+    /// Oldest→newest by onset.
+    func allSleepSessions(days: Int = 4000) async -> [CachedSleepSession] {
+        guard let store = await ensureStore() else { return [] }
+        let now = Int(Date().timeIntervalSince1970)
+        let lo = now - days * 86_400, hi = now + 86_400
+        let imported = (try? await store.sleepSessions(deviceId: deviceId, from: lo, to: hi, limit: 4000)) ?? []
+        let computed = (try? await store.sleepSessions(deviceId: computedDeviceId, from: lo, to: hi, limit: 4000)) ?? []
+        let cal = Calendar.current
+        func endDay(_ s: CachedSleepSession) -> Date {
+            cal.startOfDay(for: Date(timeIntervalSince1970: TimeInterval(s.endTs)))
+        }
+        var importedDays = Set<Date>()
+        for s in imported { importedDays.insert(endDay(s)) }
+        let computedKept = computed.filter { !importedDays.contains(endDay($0)) }
+        return (imported + computedKept).sorted { $0.startTs < $1.startTs }
+    }
+
     // MARK: - Metric explorer reads (generic substrate)
 
     /// Daily series for any metric key from a given source ("my-whoop" / "apple-health").

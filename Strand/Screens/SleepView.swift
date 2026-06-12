@@ -46,13 +46,11 @@ struct SleepView: View {
     /// `decodedNight` JSON-decodes, which must never run per body pass (1Hz HR ticks). (#160)
     @State private var navNight: Night?
 
-    /// Every sleep BLOCK, UN-deduplicated — `repo.sleeps` keeps one session per night for the
-    /// dashboard, which collapses split-sleep nights (a nap + a main sleep on the same day) into
-    /// a single block. The hero's ◀/▶ should be able to browse each individual block so it lines
-    /// up with the export. Derived locally from reads SleepView already has (`repo.sleepSessions`
-    /// = all imported sessions un-deduped, plus the computed-only nights `repo.sleeps` already
-    /// resolved) so Repository stays untouched. Oldest→newest. Falls back to `repo.sleeps` until
-    /// loaded. (#170)
+    /// Every sleep BLOCK across both sources, UN-deduplicated (`repo.allSleepSessions`) — `repo.sleeps`
+    /// keeps one winner per night for the dashboard, collapsing split-sleep days (a nap + a main
+    /// sleep on the same day) into a single block. The hero groups these by day (`navDays`) and
+    /// merges each day into one Night, so a split day reads as one correctly-totalled night with the
+    /// gaps preserved. Oldest→newest. Falls back to `repo.sleeps` until loaded. (#170)
     @State private var allSessions: [CachedSleepSession] = []
 
     var body: some View {
@@ -100,37 +98,19 @@ struct SleepView: View {
                     navNight = nil
                 }
             }
-            // Load EVERY sleep block (un-deduplicated) so the hero's ◀/▶ can browse split-sleep
-            // naps the dashboard collapses. Re-runs whenever a sync/import bumps refreshSeq.
-            // Snaps the browse back to the newest block once the fuller list arrives. (#170)
+            // Load EVERY sleep block across BOTH sources (un-deduplicated) so the hero's ◀/▶ can
+            // browse split-sleep days the dashboard collapses — including Bluetooth-only nights,
+            // whose blocks live under the computed source. Re-runs whenever a sync/import bumps
+            // refreshSeq; snaps back to the newest day and rebuilds the model so offset 0 reflects
+            // the freshly-loaded blocks. (#170)
             .task(id: repo.refreshSeq) {
-                allSessions = await loadAllSessions()
+                allSessions = await repo.allSleepSessions()
                 nightOffset = 0
                 navNight = nil
+                modelKey = dataKey
+                model = buildModel()
             }
         }
-    }
-
-    /// Build the UN-deduplicated block list locally, WITHOUT touching Repository: start from every
-    /// imported session (`repo.sleepSessions` is not collapsed per-night), then add the nights that
-    /// only the on-device computed source covers — those are exactly the `repo.sleeps` winners whose
-    /// end-day no imported session lands on. This reproduces the dashboard's imported-wins / computed-
-    /// fills merge while preserving same-day naps + split sleep. Oldest→newest by onset. (#170)
-    @MainActor
-    private func loadAllSessions() async -> [CachedSleepSession] {
-        let now = Int(Date().timeIntervalSince1970)
-        let span = 4000 * 86_400
-        let imported = await repo.sleepSessions(from: now - span, to: now + 86_400, limit: 4000)
-        let cal = Calendar.current
-        func endDay(_ s: CachedSleepSession) -> Date {
-            cal.startOfDay(for: Date(timeIntervalSince1970: TimeInterval(s.endTs)))
-        }
-        var importedDays = Set<Date>()
-        for s in imported { importedDays.insert(endDay(s)) }
-        // `repo.sleeps` carries one winner per night (imported OR computed). Keep only its
-        // computed-only nights — the imported ones are already in `imported`, un-deduped.
-        let computedOnly = repo.sleeps.filter { !importedDays.contains(endDay($0)) }
-        return (imported + computedOnly).sorted { $0.startTs < $1.startTs }
     }
 
     // MARK: - 1. HERO — stage breakdown
@@ -197,9 +177,10 @@ struct SleepView: View {
         )
     }
 
-    /// "date · onset–wake" — the nav header's trailing line.
+    /// "date · onset–wake" — the nav header's trailing line. A day whose sleep crosses midnight
+    /// (onset and wake on different calendar dates) shows the span, e.g. "Fri 13 → Sat 14 Jun".
     private func headerLine(_ night: Night) -> String {
-        "\(night.dateLabel) · \(night.onsetText)–\(night.wakeText)"
+        "\(night.spanLabel) · \(night.onsetText)–\(night.wakeText)"
     }
 
     /// Full-width proportional stacked stage bar (fallback when no intervals).
@@ -486,37 +467,78 @@ struct SleepView: View {
     /// the hypnogram draws genuine segments instead of the synthetic reconstruction.
     private var latestNight: Night? { decodedNight(at: 0) }
 
-    /// The browsable BLOCK list: every sleep session un-deduplicated (incl. same-day naps / split
-    /// sleep) so ◀/▶ matches the export. Falls back to `repo.sleeps` (one-per-night) until the
-    /// fuller list loads, so the hero is never empty during the first frame. (#170)
+    /// The browsable block list: every sleep session un-deduplicated (incl. same-day naps / split
+    /// sleep). Falls back to `repo.sleeps` (one-per-night) until the fuller list loads, so the hero
+    /// is never empty during the first frame. (#170)
     private var navSessions: [CachedSleepSession] {
         allSessions.isEmpty ? repo.sleeps : allSessions
     }
 
-    /// The block `offset` sessions back from the most recent (0 = last night/last block), decoded
-    /// into a `Night`. Backs the hero's ◀/▶ navigation via the `navNight` cache — JSON-decodes, so it
-    /// only runs from `buildModel()` and the onChange handlers, never per render. The index clamp
-    /// is a belt-and-braces guard; the offset itself resets to 0 on every data change. (#160, #170)
-    private func decodedNight(at offset: Int) -> Night? {
-        let sleeps = navSessions
-        guard !sleeps.isEmpty else { return nil }
-        let idx = min(max(sleeps.count - 1 - offset, 0), sleeps.count - 1)
-        let s = sleeps[idx]
-        if let stages = decodeStages(s.stagesJSON), stages.total > 0 {
-            return Night(session: s, stages: stages)
+    /// The browsable DAY list: every block grouped by the calendar day it ENDS on (matching the
+    /// dashboard's per-night merge), newest day first, blocks within a day oldest→newest. Each day
+    /// is ONE ◀/▶ stop, so a split-sleep day reads as a single night and the "N nights ago" label
+    /// stays truthful — two blocks of the same day are never "1 night ago" AND "2 nights ago". (#170)
+    private var navDays: [[CachedSleepSession]] {
+        let cal = Calendar.current
+        func endDay(_ s: CachedSleepSession) -> Date {
+            cal.startOfDay(for: Date(timeIntervalSince1970: TimeInterval(s.endTs)))
         }
-        if let seg = decodeSegments(s.stagesJSON, sessionStart: s.startTs), seg.stages.total > 0 {
-            return Night(session: s, stages: seg.stages, realSegments: seg.intervals)
+        let groups = Dictionary(grouping: navSessions, by: endDay)
+        return groups.keys.sorted(by: >).map { key in
+            (groups[key] ?? []).sorted { $0.startTs < $1.startTs }
         }
-        return nil
     }
 
-    /// The raw session row `offset` back from the newest block, clamped to bounds. Backs the honest
-    /// no-stage-data header when a navigated session doesn't decode to usable stages. (#160, #170)
+    /// Merge all of a day's blocks into ONE `Night`: stage minutes summed, each block's timeline
+    /// concatenated onto a single axis with the REAL gap between blocks preserved, efficiency
+    /// recomputed over time-in-bed (carried on the synthetic session so a navigated day never
+    /// borrows `repo.today`'s efficiency). Returns nil if no block decodes to usable stages. (#170)
+    private func mergeDay(_ sessions: [CachedSleepSession]) -> Night? {
+        guard let first = sessions.first,
+              let last = sessions.max(by: { $0.endTs < $1.endTs }) else { return nil }
+        let onset = first.startTs, wake = last.endTs
+        var stages = Stages(awake: 0, light: 0, deep: 0, rem: 0)
+        var segs: [SleepInterval] = []
+        for s in sessions {
+            let shift = TimeInterval(s.startTs - onset)
+            if let seg = decodeSegments(s.stagesJSON, sessionStart: s.startTs), seg.stages.total > 0 {
+                stages.awake += seg.stages.awake; stages.light += seg.stages.light
+                stages.deep  += seg.stages.deep;  stages.rem   += seg.stages.rem
+                for iv in seg.intervals {
+                    segs.append(SleepInterval(stage: iv.stage, start: iv.start + shift, end: iv.end + shift))
+                }
+            } else if let st = decodeStages(s.stagesJSON), st.total > 0 {
+                stages.awake += st.awake; stages.light += st.light
+                stages.deep  += st.deep;  stages.rem   += st.rem
+            }
+        }
+        guard stages.asleep > 0 else { return nil }
+        let eff = stages.total > 0 ? stages.asleep / stages.total : nil   // fraction ≤ 1
+        let synth = CachedSleepSession(startTs: onset, endTs: wake, efficiency: eff,
+                                       restingHr: nil, avgHrv: nil, stagesJSON: nil)
+        let realSegs = segs.count >= 2 ? segs.sorted { $0.start < $1.start } : nil
+        return Night(session: synth, stages: stages, realSegments: realSegs)
+    }
+
+    /// The merged Night for the DAY `offset` stops back from the most recent (0 = last night).
+    /// Backs the hero's ◀/▶ navigation via the `navNight` cache — JSON-decodes, so it only runs
+    /// from `buildModel()` and the onChange handlers, never per render. (#160, #170)
+    private func decodedNight(at offset: Int) -> Night? {
+        let days = navDays
+        guard offset >= 0, offset < days.count else { return nil }
+        return mergeDay(days[offset])
+    }
+
+    /// A synthetic session spanning the DAY `offset` stops back (onset of its first block → wake of
+    /// its last), for the honest no-stage-data header when a day's blocks don't decode to usable
+    /// stages. (#160, #170)
     private func sessionRow(at offset: Int) -> CachedSleepSession? {
-        let sleeps = navSessions
-        guard !sleeps.isEmpty else { return nil }
-        return sleeps[min(max(sleeps.count - 1 - offset, 0), sleeps.count - 1)]
+        let days = navDays
+        guard offset >= 0, offset < days.count,
+              let first = days[offset].first,
+              let last = days[offset].max(by: { $0.endTs < $1.endTs }) else { return nil }
+        return CachedSleepSession(startTs: first.startTs, endTs: last.endTs,
+                                  efficiency: nil, restingHr: nil, avgHrv: nil, stagesJSON: nil)
     }
 
     /// Header above the hypnogram with ◀/▶ to browse past nights. ◀ goes older (increasing offset),
@@ -524,7 +546,7 @@ struct SleepView: View {
     /// hierarchy so the hero reads like every other section. (#160)
     @ViewBuilder
     private func nightNavHeader(trailing: String) -> some View {
-        let lastIndex = max(navSessions.count - 1, 0)
+        let lastIndex = max(navDays.count - 1, 0)
         let title: LocalizedStringKey = nightOffset == 0 ? "Last night"
             : (nightOffset == 1 ? "1 night ago" : "\(nightOffset) nights ago")
         HStack(spacing: 12) {
@@ -956,11 +978,26 @@ private struct Night {
     var wakeText: String { Night.timeFmt.string(from: Date(timeIntervalSince1970: TimeInterval(session.endTs))) }
     var dateLabel: String { Night.dateFmt.string(from: Date(timeIntervalSince1970: TimeInterval(session.startTs))) }
 
+    /// Date label that becomes a span when the night crosses midnight (onset on a different
+    /// calendar day from wake) — e.g. "Fri 13 → Sat 14 Jun" — otherwise a single date. Lets an
+    /// aggregated day that started the previous evening read honestly. (#170)
+    var spanLabel: String {
+        let onsetDay = Date(timeIntervalSince1970: TimeInterval(session.startTs))
+        let wakeDay  = Date(timeIntervalSince1970: TimeInterval(session.endTs))
+        let cal = Calendar.current
+        if cal.isDate(onsetDay, inSameDayAs: wakeDay) { return Night.dateFmt.string(from: onsetDay) }
+        return "\(Night.spanFmt.string(from: onsetDay)) → \(Night.dateFmt.string(from: wakeDay))"
+    }
+
     private static let timeFmt: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "HH:mm"; return f
     }()
     private static let dateFmt: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "EEE d MMM"; return f
+    }()
+    /// Onset side of a cross-midnight span — no month (the wake side carries it): "Fri 13".
+    private static let spanFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "EEE d"; return f
     }()
 }
 
