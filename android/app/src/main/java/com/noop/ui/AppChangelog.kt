@@ -25,7 +25,7 @@ object AppChangelog {
      * Bump this when you add a release below. The "What's New" sheet shows automatically when the
      * stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
      */
-    const val CURRENT_VERSION = "2.6.6"
+    const val CURRENT_VERSION = "2.6.7"
 
     data class Release(
         val version: String,
@@ -36,6 +36,14 @@ object AppChangelog {
 
     /** Newest first. */
     val releases: List<Release> = listOf(
+        Release(
+            version = "2.6.7",
+            title = "More-tab icons stop flickering colour",
+            date = "June 2026",
+            items = listOf(
+                "Fixed (iPhone): the icons on the More tab briefly flashed from green to blue a second after the screen opened. They now stay the app's accent green. Thanks @sebastianwoo (#184).",
+            ),
+        ),
         Release(
             version = "2.6.6",
             title = "iPhone Workouts table fits the screen",

@@ -18,6 +18,15 @@
       "screenshotURLs": [],
       "versions": [
         {
+          "version": "2.6.7",
+          "buildVersion": "38",
+          "date": "2026-06-12",
+          "localizedDescription": "More-tab icons no longer flicker green to blue.",
+          "downloadURL": "https://github.com/NoopApp/noop/releases/download/v2.6.7/NOOP-v2.6.7-ios.ipa",
+          "size": 5563111,
+          "minOSVersion": "17.0"
+        },
+        {
           "version": "2.6.6",
           "buildVersion": "37",
           "date": "2026-06-12",
@@ -64,12 +73,12 @@
           "NSHealthUpdateUsageDescription": "NOOP writes the metrics it computes from your strap back into Apple Health, on-device and only when you allow it."
         }
       },
-      "version": "2.6.6",
-      "buildVersion": "37",
+      "version": "2.6.7",
+      "buildVersion": "38",
       "versionDate": "2026-06-12",
-      "versionDescription": "iPhone Workouts table now fits the screen (scrolls sideways).",
-      "downloadURL": "https://github.com/NoopApp/noop/releases/download/v2.6.6/NOOP-v2.6.6-ios.ipa",
-      "size": 5563120,
+      "versionDescription": "More-tab icons no longer flicker green to blue.",
+      "downloadURL": "https://github.com/NoopApp/noop/releases/download/v2.6.7/NOOP-v2.6.7-ios.ipa",
+      "size": 5563111,
       "minOSVersion": "17.0"
     }
   ],

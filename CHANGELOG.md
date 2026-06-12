@@ -17,6 +17,12 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 2.6.7 — More-tab icons stop flickering colour
+
+- **Fixed (iPhone):** the icons on the **More** tab briefly flashed from green to blue a second after
+  the screen opened (the list was re-tinting them with iOS's default blue). They now stay the app's
+  accent green. Thanks @sebastianwoo. (#184)
+
 ## 2.6.6 — iPhone Workouts table fits the screen
 
 - **Fixed (iPhone):** the **Workouts → All Sessions** table ran off the side of the screen, clipping
