@@ -613,6 +613,55 @@ Haptics tie into the firmware **alarm**: `SET_ALARM_TIME` (66) arms a UTC alarm 
 NOOP is closed (event `STRAP_DRIVEN_ALARM_EXECUTED`=57); always `SET_CLOCK` first so the RTC is
 UTC-correct.
 
+### WHOOP 5 / MG haptic — the "maverick" opcode (hardware-verified)
+
+The WHOOP 5 / MG does **not** honour `RUN_HAPTICS_PATTERN`=79 — a real-MG capture showed the strap
+rejecting 79 with `COMMAND_RESPONSE result=0x03`. The 5.0 firmware instead drives haptics with the
+**maverick** opcode **`0x13`** (`RUN_HAPTIC_PATTERN_MAVERICK`=19), decoded from the official maverick
+app binary (#48) and shipped in `BLEManager.send()`:
+
+```text
+puffin cmd 0x13, body = [0x01, effects…, loopControl u16 LE, overallLoop]
+NOOP's "notify" preset → effects 47, 152  →  body = [01 2F 98 00 00 00 00 00 00 00 00 00]  (12 bytes)
+```
+
+The 12-byte body makes the inner record 15 bytes, so the puffin framing **pads it to a 4-byte
+boundary** (`pad4`, → 16) before the declared length and CRC32 — without the pad the strap rejects the
+frame. The strap acknowledges acceptance with `COMMAND_RESPONSE` (type 36) echoing
+`RUN_HAPTIC_PATTERN_MAVERICK(19)`.
+
+**Verified on real hardware (2026-06-12):** a bonded WHOOP 5 buzzed on this exact frame and returned a
+CRC-valid COMMAND_RESPONSE for every send. Frame builders live in `tools/linux-capture/whoop_frame.py`
+(`build_whoop5_buzz` / `build_whoop4_buzz`, unit-tested against the captured frame) and drive the
+`whoop_buzz.py` find-my-strap tool — see the linux-capture README.
+
+### SET_CLOCK — the payload length is firmware-specific (hardware-verified)
+
+`SET_CLOCK` (command **10**) sets the strap RTC. A strap left offline (no app) for months loses its
+clock: its RTC drifts/resets, and every frame it then emits — realtime *and* newly-written historical
+records — carries a bogus timestamp (we saw a real WHOOP 4 dated **1971**, its RTC counting up from
+~zero). The fix is to send the current unix time, exactly as the app does on each connect (it only
+re-sends when drift exceeds a threshold — `ClockPolicy` — to avoid gratuitous resets).
+
+The payload is `u32 unix-seconds LE` followed by zero subsecond bytes, but **the length is
+firmware-specific and load-bearing** — a wrong length is `COMMAND_RESPONSE`-ack'd but **not latched**:
+
+| Firmware | Body | Result |
+|---|---|---|
+| newer (app's default) | 8-byte `[u32 + 4 zero]` | latches on newer straps; on WHOOP 4 `41.17.6.0` → **no response at all** |
+| older WHOOP 4 `41.17.6.0` | **9-byte** `[u32 + 5 zero]` | **latches** — COMMAND_RESPONSE(cmd 10) + the event clock jumps to the set time |
+
+**Verified on real hardware (2026-06-12, WHOOP 4C fw 41.17.6.0):** the 8-byte form drew no response;
+the 9-byte form latched and the strap's event RTC jumped from 1971 to the correct 2026 time, ticking
++1/sec. So `build_whoop4_set_clock` sends the 9-byte form; newer firmware may want 8.
+
+Read-back to confirm a latch: the strap's RTC is the u32 LE timestamp in any EVENT or REALTIME frame —
+**but the offset differs by type**: WHOOP 4.0 REALTIME(40) `@6`, EVENT(48) `@8`; WHOOP 5.0 (puffin, +4
+rule) REALTIME(40) `@10`, EVENT(48) `@12` (`frame_rtc` in `whoop_frame.py`). Stored historical records
+keep the timestamp they were written with, so offloading old history does **not** require fixing the
+clock first — only future recordings do. Tooling: `whoop_setclock.py` (read + conditional set) and the
+read-only `whoop_probe.py` — see the linux-capture README.
+
 ---
 
 ## 7. Sensor inventory

@@ -81,9 +81,12 @@ the Python capture side does not require Swift.
 |---|---|
 | `whoop_capture.py` | Scan → connect → bond → subscribe → reassemble → write `capture.json`. `--probe` drives the post-hello command sequence. The RE workbench (whoop5-focused). |
 | `whoop_sync.py` | **WHOOP 4.0 durable historical offload.** Connect → drain the on-device store (cmd 22 + `HISTORY_END` ack loop) into a device-scoped SQLite DB with **persist-before-ack** + auto-reconnect/resume. Subcommands: `sync` / `status` / `devices` / `export` / `label`. See [Historical sync](#historical-sync-whoop_syncpy). |
-| `whoop_frame.py` | CRC8 / CRC16-Modbus / CRC32, frame builders (`build_command_frame`, `build_puffin_command`), the family-aware `Reassembler`, and the standard-HR parser. Stdlib only. |
+| `whoop_buzz.py` | **Find a misplaced strap.** Connect → vibrate the strap on repeat (and `--locate` to home in by signal strength). See [Find a lost strap](#find-a-lost-strap-whoop_buzzpy). |
+| `whoop_setclock.py` | **Read/fix the strap clock.** Reads the RTC, and sets it to now if it has drifted past a threshold (`--if-drift`). See [Strap clock](#strap-clock-whoop_setclockpy). |
+| `whoop_probe.py` | **Read-only status probe.** Reports the strap RTC + whether a historical store is present (`GET_CLOCK` / `GET_DATA_RANGE`) without writing anything. |
+| `whoop_frame.py` | CRC8 / CRC16-Modbus / CRC32, frame builders (`build_command_frame`, `build_puffin_command`, `build_whoop5_buzz` / `build_whoop4_buzz`), the family-aware `Reassembler`, and the standard-HR parser. Stdlib only. |
 | `pair_probe.py` | One-shot WHOOP 5 bonding probe: scan → connect → `pair()` → test `fd4b` access. `python3 pair_probe.py <MAC>`. |
-| `test_whoop_frame.py` | Unit tests for framing / reassembly / HR parsing (no `bleak` needed). |
+| `test_whoop_frame.py` | Unit tests for framing / reassembly / HR parsing / buzz frames (no `bleak` needed). |
 | `requirements.txt` | `bleak` (runtime dep for capture only). |
 
 ## Capture (`whoop_capture.py`)
@@ -136,6 +139,86 @@ python3 whoop_capture.py --model whoop5 --address $WHOOP_MAC --probe --duration 
 
 `--probe` sends the (4.0) command numbers re-framed for puffin after `CLIENT_HELLO`;
 `SEND_HISTORICAL_DATA` triggers a full historical offload. Without it you get only the hello response.
+
+## Find a lost strap (`whoop_buzz.py`)
+
+Misplaced your strap in the house? This connects and **vibrates it on repeat** so you can hear/feel it
+and walk over. It sends the same haptic the official app uses for alarms — safe and reversible (only
+the vibration motor runs; nothing is written to the data store, clock, alarm, or firmware).
+
+```bash
+# scan for any WHOOP 5, buzz 12× every 3 s
+python3 whoop_buzz.py
+
+# go straight to a known strap (find its MAC with `bluetoothctl devices`)
+python3 whoop_buzz.py --address AA:BB:CC:DD:EE:FF
+
+# buzz until you find it (Ctrl-C to stop), faster cadence
+python3 whoop_buzz.py --address AA:BB:CC:DD:EE:FF --count 0 --interval 1.5
+
+# WHOOP 4.0 strap
+python3 whoop_buzz.py --model whoop4 --address AA:BB:CC:DD:EE:FF
+```
+
+**Not in the same room?** `--locate` doesn't buzz — it prints the strap's live signal strength so you
+can play hot/cold (the bar grows as you get closer):
+
+```bash
+python3 whoop_buzz.py --locate --address AA:BB:CC:DD:EE:FF
+#   -52 dBm [██████████████████████████····]     ← close
+#   -88 dBm [██████·····························]  ← far / through a wall
+```
+
+Preconditions (same as capture): the strap must be **bonded to this machine** (run `pair_probe.py`
+once — see [WHOOP 5: bonding](#whoop-5-bonding-do-this-once)), the **phone's Bluetooth must be OFF**
+(the strap accepts one central at a time), and the strap must be **awake and in range** (~10 m line of
+sight; a dead battery can't buzz).
+
+By default each buzz is confirmed against the strap's `COMMAND_RESPONSE` ack, so the tool tells you
+`acknowledged` vs `no ack yet` and exits non-zero if nothing was acknowledged — handy for scripting.
+Exit codes: `0` accepted, `2` strap not found/reachable, `3` connected but no buzz acknowledged.
+
+> Why a dedicated opcode: the WHOOP 5 / MG rejects the WHOOP 4.0 buzz command (79) and needs the
+> "maverick" haptic (`0x13`) instead — details in
+> [`docs/BLE_REVERSE_ENGINEERING.md` §6](../../docs/BLE_REVERSE_ENGINEERING.md).
+
+## Strap clock (`whoop_setclock.py`)
+
+A strap left offline (no app) for a long time loses its clock — its RTC drifts or resets, so realtime
+and newly-recorded historical frames get **bogus timestamps** (e.g. dated 1971). The phone app fixes
+this with `SET_CLOCK` on every connect; this does the same from Linux. It **reads the clock first and
+only writes if it has drifted** past `--if-drift` seconds (mirrors the app's `ClockPolicy` — no
+gratuitous resets), then re-reads to verify the new time latched.
+
+```bash
+# read-only: report the strap's current clock and how far it has drifted
+python3 whoop_setclock.py --model whoop4 --address AA:BB:CC:DD:EE:FF --check
+
+# set to now only if it's off by more than 30 s (otherwise leave it alone)
+python3 whoop_setclock.py --model whoop4 --address AA:BB:CC:DD:EE:FF --if-drift 30
+
+# force-set to now
+python3 whoop_setclock.py --model whoop4 --address AA:BB:CC:DD:EE:FF
+```
+
+Exit codes: `0` clock OK or successfully set, `2` strap not found, `3` written but couldn't verify.
+
+**Check the clock before every sync.** A sync from a strap with a bad clock yields correctly-*valued*
+but wrongly-*dated* biometrics. Recommended pre-sync step:
+
+```bash
+python3 whoop_setclock.py --model whoop4 --address <MAC> --if-drift 30 && \
+python3 whoop_sync.py realtime --model whoop4 --address <MAC> --subject <name> --db captures/<name>.db
+```
+
+> **Firmware gotcha (hardware-verified).** Older WHOOP 4 firmware (e.g. `41.17.6.0`) latches the RTC
+> **only** with the **9-byte** `SET_CLOCK` body (`u32 LE + 5 zero`); the 8-byte form newer firmware
+> uses draws *no* response and silently fails. `build_whoop4_set_clock` sends the 9-byte form. The
+> length is load-bearing — a wrong length is ack'd but not latched. Note also that the stored historical
+> records keep the (correct) timestamp they were written with, so offloading old history does **not**
+> need the clock fixed first — only future recordings do.
+
+> Already-offloaded data isn't re-dated by a later `SET_CLOCK`; fix the clock so *new* data is correct.
 
 ## Historical sync (`whoop_sync.py`)
 

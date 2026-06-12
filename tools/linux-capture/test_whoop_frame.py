@@ -189,6 +189,107 @@ class ReassemblerTests(unittest.TestCase):
         self.assertEqual(out, [wf.WHOOP5_CLIENT_HELLO])
 
 
+class BuzzFrameTests(unittest.TestCase):
+    def test_whoop5_buzz_matches_hardware_frame(self):
+        # Exact frame verified to vibrate a real WHOOP 5 (seq=2). If this changes, the strap rejects it.
+        self.assertEqual(
+            wf.build_whoop5_buzz(2).hex(),
+            "aa0114000001e1e1230213012f9800000000000000000000e1a1feb4",
+        )
+
+    def test_whoop5_buzz_is_crc_valid_and_4_aligned(self):
+        f = wf.build_whoop5_buzz(7)
+        self.assertTrue(wf.verify_whoop5_frame(f))
+        self.assertEqual((len(f) - 12) % 4, 0)   # inner record padded to a 4-byte boundary
+
+    def test_whoop5_buzz_uses_maverick_opcode_not_79(self):
+        # Inner record starts at offset 8; the cmd byte is two past the type. Must be 0x13, never 79.
+        self.assertEqual(wf.build_whoop5_buzz(0)[10], wf.MAVERICK_HAPTIC_CMD)
+        self.assertEqual(wf.MAVERICK_HAPTIC_CMD, 0x13)
+
+    def test_whoop4_buzz_opcode_and_payload(self):
+        f = wf.build_whoop4_buzz(2, pattern=2, loops=3)
+        self.assertEqual(f[0], 0xAA)
+        self.assertEqual(f[4], wf.COMMAND_TYPE)              # inner type at offset 4 on 4.0
+        self.assertEqual(f[6], wf.WHOOP4_RUN_HAPTICS_PATTERN)
+        self.assertEqual(f[7:12], bytes([2, 3, 0, 0, 0]))   # [patternId, numLoops, 0, 0, 0]
+
+    def test_buzz_frame_dispatch(self):
+        self.assertEqual(wf.buzz_frame("whoop5", 2), wf.build_whoop5_buzz(2))
+        self.assertEqual(wf.buzz_frame("whoop4", 2), wf.build_whoop4_buzz(2))
+        with self.assertRaises(ValueError):
+            wf.buzz_frame("whoopX", 0)
+
+
+class SetClockTests(unittest.TestCase):
+    def test_payload_is_exactly_8_bytes(self):
+        # Length is load-bearing: a wrong-length SET_CLOCK is ack'd but not latched.
+        self.assertEqual(len(wf.set_clock_payload(1781264461)), 8)
+
+    def test_payload_is_unix_le_plus_zero_subseconds(self):
+        p = wf.set_clock_payload(1781264461)
+        self.assertEqual(int.from_bytes(p[0:4], "little"), 1781264461)
+        self.assertEqual(p[4:8], bytes(4))
+
+    def test_whoop4_set_clock_uses_9_byte_body(self):
+        # fw 41.17.6.0 latches ONLY the 9-byte [u32+5 zero] form (hardware-verified). Frame = AA + len(2)
+        # + crc8 + [type,seq,cmd] + 9-byte body + crc32(4) = 7 + 9 + 4 = 20 bytes; body is frame[7:16].
+        f = wf.build_whoop4_set_clock(1781265100, seq=4)
+        self.assertEqual(len(f), 20)
+        body = f[7:16]
+        self.assertEqual(len(body), 9)
+        self.assertEqual(int.from_bytes(body[0:4], "little"), 1781265100)
+        self.assertEqual(body[4:9], bytes(5))
+
+    def test_whoop4_set_clock_frame_crc_and_opcode(self):
+        f = wf.build_whoop4_set_clock(1781264461, seq=2)
+        self.assertEqual(f[0], 0xAA)
+        self.assertEqual(f[4], wf.COMMAND_TYPE)
+        self.assertEqual(f[6], wf.CMD_SET_CLOCK)
+        # CRC32 over the inner [type,seq,cmd,payload] must check out.
+        self.assertEqual(f[-4] | (f[-3] << 8) | (f[-2] << 16) | (f[-1] << 24), wf.crc32(f[4:-4]))
+
+    def test_whoop5_set_clock_is_valid_and_4_aligned(self):
+        f = wf.build_whoop5_set_clock(1781264461, seq=2)
+        self.assertTrue(wf.verify_whoop5_frame(f))
+        self.assertEqual((len(f) - 12) % 4, 0)
+
+
+class FrameRtcTests(unittest.TestCase):
+    # Real frames captured from the WHOOP 4 — the RTC offset differs by type (REALTIME@6, EVENT@8).
+    W4_REALTIME = bytes.fromhex("aa1800ff28024bd3e401185c000000000000000000000180839d1322")  # ts@6
+    W4_EVENT = bytes.fromhex("aa100057304e2100a6dce401387f000051a29b91")                      # ts@8
+    W4_EVENT_SET = bytes.fromhex("aa10005730051000c1f22b6a005800008954aea0")                  # post-SET_CLOCK
+
+    def test_whoop4_realtime_rtc_at_offset_6(self):
+        self.assertEqual(wf.frame_rtc(self.W4_REALTIME, "whoop4"), 31773515)
+
+    def test_whoop4_event_rtc_at_offset_8(self):
+        # The bug that broke clock verification: events are @8, not @6.
+        self.assertEqual(wf.frame_rtc(self.W4_EVENT, "whoop4"), 31775910)
+
+    def test_whoop4_event_reads_real_unix_after_set(self):
+        self.assertEqual(wf.frame_rtc(self.W4_EVENT_SET, "whoop4"), 1781265089)  # 2026-06-12
+
+    def test_non_event_frame_returns_none(self):
+        # A COMMAND_RESPONSE (type 36) is neither EVENT nor REALTIME.
+        self.assertIsNone(wf.frame_rtc(bytes.fromhex("aa010c00010027112439130202010100ece3b768"), "whoop4"))
+
+
+class CommandResponseTests(unittest.TestCase):
+    def test_detects_whoop5_haptic_ack(self):
+        # Real captured COMMAND_RESPONSE acknowledging the maverick haptic on a WHOOP 5.
+        resp = bytes.fromhex("aa010c00010027112439130202010100ece3b768")
+        self.assertEqual(wf.command_response_cmd(resp, "whoop5"), 0x13)
+
+    def test_buzz_frame_is_not_a_command_response(self):
+        self.assertIsNone(wf.command_response_cmd(wf.build_whoop5_buzz(2), "whoop5"))
+
+    def test_short_or_nonframe_is_none(self):
+        self.assertIsNone(wf.command_response_cmd(b"", "whoop5"))
+        self.assertIsNone(wf.command_response_cmd(b"\x00\x01\x02", "whoop4"))
+
+
 class HRParseTests(unittest.TestCase):
     def test_u8(self):
         self.assertEqual(wf.parse_standard_hr(bytes([0x00, 62])), 62)

@@ -127,6 +127,124 @@ def build_puffin_command(cmd: int, seq: int = 0, payload: bytes = b"\x00",
     return bytes(frame)
 
 
+# --- Haptics / buzz (find-my-strap) ---------------------------------------------------------------
+# Drive the strap's vibration motor. Safe and reversible — it only runs the haptic motor; it does not
+# touch the data store, clock, alarm, or firmware. Used by whoop_buzz.py to locate a misplaced strap.
+#
+# WHOOP 5 / MG (puffin): the maverick haptic, opcode 0x13 = RUN_HAPTIC_PATTERN_MAVERICK (NOT 79 — a
+# real-MG capture showed the strap rejecting RUN_HAPTICS_PATTERN=79 with COMMAND_RESPONSE result=0x03).
+# Body = [0x01, effects(u8…), loopControl u16 LE, overallLoop] — here the "notify" preset (effects
+# 47,152). Decoded from the official maverick app binary (noop issue #48) and shipped in Strand's
+# BLEManager.send(). On real hardware the strap acknowledges with COMMAND_RESPONSE(type 36, cmd 0x13).
+MAVERICK_HAPTIC_CMD = 0x13
+MAVERICK_HAPTIC_NOTIFY = bytes([0x01, 47, 152, 0, 0, 0, 0, 0, 0, 0, 0, 0])  # 12-byte "notify" preset
+
+# WHOOP 4.0: RUN_HAPTICS_PATTERN=79 with body [patternId, numLoops, 0, 0, 0]; the official app fires
+# patternId=2 (the graduated alarm buzz). RUN_ALARM=68 (body [0x01]) is the app-driven alarm fallback.
+WHOOP4_RUN_HAPTICS_PATTERN = 79
+WHOOP4_RUN_ALARM = 68
+
+COMMAND_RESPONSE_TYPE = 36   # PacketType.COMMAND_RESPONSE — the strap's per-command ack
+
+
+def _pad4(payload: bytes) -> bytes:
+    """Right-pad a puffin command body with zeros so the inner record (type+seq+cmd+payload) lands on
+    a 4-byte boundary, exactly as Framing.swift `puffinCommandFrame` (pad4) does. `build_puffin_command`
+    does not pad on its own, so any non-4-aligned body (e.g. the 12-byte haptic) must be padded here or
+    the declared length / CRC32 cover the wrong byte count and the strap rejects the frame (#48)."""
+    inner_len = 3 + len(payload)   # type + seq + cmd + payload
+    return payload + bytes((4 - inner_len % 4) % 4)
+
+
+def build_whoop5_buzz(seq: int = 0) -> bytes:
+    """WHOOP 5 / MG buzz frame: the maverick "notify" haptic (opcode 0x13), puffin-framed and pad4'd."""
+    return build_puffin_command(MAVERICK_HAPTIC_CMD, seq=seq, payload=_pad4(MAVERICK_HAPTIC_NOTIFY))
+
+
+def build_whoop4_buzz(seq: int = 0, pattern: int = 2, loops: int = 3) -> bytes:
+    """WHOOP 4.0 buzz frame: RUN_HAPTICS_PATTERN (79) with body [patternId, numLoops, 0, 0, 0]."""
+    return build_command_frame(WHOOP4_RUN_HAPTICS_PATTERN, seq=seq,
+                               payload=bytes([pattern & 0xFF, loops & 0xFF, 0, 0, 0]))
+
+
+def buzz_frame(family: str, seq: int = 0) -> bytes:
+    """Family-dispatched buzz frame ("whoop5" → maverick 0x13, "whoop4" → RUN_HAPTICS_PATTERN)."""
+    if family == "whoop5":
+        return build_whoop5_buzz(seq)
+    if family == "whoop4":
+        return build_whoop4_buzz(seq)
+    raise ValueError(f"unknown family {family!r}")
+
+
+# --- Clock ----------------------------------------------------------------------------------------
+# SET_CLOCK (command 10) sets the strap RTC. The phone app sends this on every connect when the strap's
+# clock has drifted (ClockPolicy). Needed here because a strap left offline for months loses its clock.
+CMD_SET_CLOCK = 10
+
+
+def set_clock_payload(now_unix: int, subsecond_bytes: int = 4) -> bytes:
+    """SET_CLOCK body: `u32 unix-seconds LE` + N zero subsecond bytes. The LENGTH is load-bearing — the
+    strap latches only the exact form its firmware expects and silently ignores the rest:
+      * 8-byte (`subsecond_bytes=4`) — the form the app uses for newer firmware (see BLEManager).
+      * 9-byte (`subsecond_bytes=5`) — what real WHOOP 4 fw 41.17.6.0 latches (hardware-verified below).
+    Default is 8 for back-compat; `build_whoop4_set_clock` overrides to 9."""
+    return bytes([now_unix & 0xFF, (now_unix >> 8) & 0xFF,
+                  (now_unix >> 16) & 0xFF, (now_unix >> 24) & 0xFF]) + bytes(subsecond_bytes)
+
+
+def build_whoop4_set_clock(now_unix: int, seq: int = 0) -> bytes:
+    """WHOOP 4.0 SET_CLOCK frame (CRC8 framing).
+
+    HARDWARE-VERIFIED (WHOOP 4C, fw 41.17.6.0, 2026-06-12): this firmware latches the RTC ONLY with the
+    9-byte body `[u32 LE + 5 zero]` — it returns a COMMAND_RESPONSE(cmd 10) and the strap's event clock
+    jumps to the set time. The 8-byte body (the app's newer-fw default) draws NO command-response at all
+    on this strap, so it never latches. Hence whoop4 uses 9 here; newer firmware may want 8."""
+    return build_command_frame(CMD_SET_CLOCK, seq=seq, payload=set_clock_payload(now_unix, 5))
+
+
+def build_whoop5_set_clock(now_unix: int, seq: int = 0) -> bytes:
+    """WHOOP 5.0 SET_CLOCK frame (puffin CRC16 framing). The 8-byte body is already 4-aligned (inner 11
+    → pad to 12), so pad to a 4-byte boundary like every puffin command."""
+    body = set_clock_payload(now_unix)
+    pad = (4 - (3 + len(body)) % 4) % 4
+    return build_puffin_command(CMD_SET_CLOCK, seq=seq, payload=body + bytes(pad))
+
+
+# EVENT (type 48) and REALTIME_DATA (type 40) frames both carry the strap RTC as a u32 LE timestamp,
+# but at DIFFERENT offsets per type. Verified against whoop-decode on real frames:
+#   WHOOP 4.0: REALTIME(40) timestamp @6, EVENT(48) event_timestamp @8.
+#   WHOOP 5.0 (puffin, +4 inner-record rule): REALTIME(40) timestamp @10, EVENT(48) event_timestamp @12.
+RTC_OFFSETS = {
+    ("whoop4", 40): (4, 6), ("whoop4", 48): (4, 8),
+    ("whoop5", 40): (8, 10), ("whoop5", 48): (8, 12),
+}
+
+
+def frame_rtc(frame: bytes, family: str):
+    """Return the strap RTC (unix secs) from an EVENT or REALTIME frame, else None. The trusted clock
+    read-back — reading the exact timestamp field (not scanning bytes) avoids false positives."""
+    if len(frame) < 6 or frame[0] != 0xAA:
+        return None
+    for (fam, t), (type_off, rtc_off) in RTC_OFFSETS.items():
+        if fam == family and len(frame) >= rtc_off + 4 and frame[type_off] == t:
+            return int.from_bytes(frame[rtc_off:rtc_off + 4], "little")
+    return None
+
+
+def command_response_cmd(frame: bytes, family: str):
+    """If `frame` is a COMMAND_RESPONSE (type 36), return the command number it acknowledges, else None.
+
+    The inner record starts at offset 8 on the 5.0 puffin frame and offset 4 on the 4.0 frame; the
+    command byte sits two bytes past the type. Lets the buzz tool confirm the strap actually accepted
+    a haptic (resp_cmd == the buzz opcode) instead of guessing from raw bytes."""
+    inner_off = 8 if family == "whoop5" else 4
+    if len(frame) < inner_off + 3 or frame[0] != 0xAA:
+        return None
+    if frame[inner_off] != COMMAND_RESPONSE_TYPE:
+        return None
+    return frame[inner_off + 2]
+
+
 # --- WHOOP 5.0 historical-offload helpers ---------------------------------------------------------
 # Packet types (PacketType enum, wire byte at the inner-record start, offset 8 on 5.0).
 PACKET_METADATA = 49
