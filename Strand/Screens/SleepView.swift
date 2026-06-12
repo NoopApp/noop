@@ -36,6 +36,11 @@ struct SleepView: View {
     /// when it differs from the current inputs we rebuild the model.
     @State private var modelKey: SleepInputKey?
 
+    /// Which night the hero hypnogram shows: 0 = last night, N = N sleep-sessions back.
+    /// Read directly in `hero()` so ◀/▶ re-pick the night instantly (the decode is cheap);
+    /// the memoized trend `model` stays cached since the trends are night-independent.
+    @State private var nightOffset = 0
+
     var body: some View {
         // Resolve the memoized model for THIS render. `dataKey` is O(1)-ish (counts + last-row
         // identity), so comparing it every render is cheap. When it matches the cached key we
@@ -75,20 +80,54 @@ struct SleepView: View {
 
     // MARK: - 1. HERO — stage breakdown
 
+    /// Header above the hypnogram with ◀/▶ to browse past nights. ◀ goes older
+    /// (increasing offset), ▶ goes newer; each is disabled at its bound.
+    @ViewBuilder
+    private func nightNavHeader(_ night: Night) -> some View {
+        let lastIndex = max(repo.sleeps.count - 1, 0)
+        HStack(spacing: 12) {
+            Button { if nightOffset < lastIndex { nightOffset += 1 } } label: {
+                Image(systemName: "chevron.left")
+                    .font(StrandFont.headline)
+                    .foregroundStyle(nightOffset >= lastIndex ? StrandPalette.textTertiary : StrandPalette.accent)
+            }
+            .buttonStyle(.plain)
+            .disabled(nightOffset >= lastIndex)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(nightOffset == 0 ? "LAST NIGHT"
+                        : "\(nightOffset) NIGHT\(nightOffset == 1 ? "" : "S") AGO")
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                Text("\(night.dateLabel) · \(night.onsetText)–\(night.wakeText)")
+                    .font(StrandFont.headline)
+                    .foregroundStyle(StrandPalette.textPrimary)
+            }
+            Spacer(minLength: 8)
+            Button { if nightOffset > 0 { nightOffset -= 1 } } label: {
+                Image(systemName: "chevron.right")
+                    .font(StrandFont.headline)
+                    .foregroundStyle(nightOffset == 0 ? StrandPalette.textTertiary : StrandPalette.accent)
+            }
+            .buttonStyle(.plain)
+            .disabled(nightOffset == 0)
+        }
+    }
+
     @ViewBuilder
     private func hero(_ model: SleepModel) -> some View {
-        let night = model.night
+        // The hero shows the night chosen by `nightOffset` (◀/▶), falling back to the
+        // memoized latest when a navigated session has no usable stages.
+        let night = decodedNight(at: nightOffset) ?? model.night
         let s = night.stages
-        // Intervals are reconstructed ONCE in the model build, not on every body pass
-        // (Night.intervals is a computed property and was previously evaluated twice here).
-        let intervals = model.intervals
+        let intervals = night.intervals
+        let isPersisted = (night.realSegments?.count ?? 0) >= 2
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-            SectionHeader("Last night", overline: "Sleep",
-                          trailing: "\(night.dateLabel) · \(night.onsetText)–\(night.wakeText)")
+            nightNavHeader(night)
             ChartCard(
                 title: "Stage breakdown",
                 subtitle: "\(durationText(night.timeInBed)) in bed · \(efficiencyText(night)) efficiency"
-                    + (model.isPersistedHypnogram ? " · stages approximate (on-device)" : ""),
+                    + (isPersisted ? " · stages approximate (on-device)" : ""),
                 trailing: durationText(s.asleep),
                 height: NoopMetrics.chartHeight,
                 chart: {
@@ -395,8 +434,15 @@ struct SleepView: View {
     /// dict was decoded before, so a Bluetooth-only user's night vanished from this tab entirely
     /// while Intelligence showed it (#77). Computed nights also carry their REAL timeline now —
     /// the hypnogram draws genuine segments instead of the synthetic reconstruction.
-    private var latestNight: Night? {
-        guard let s = repo.sleeps.last else { return nil }
+    private var latestNight: Night? { decodedNight(at: 0) }
+
+    /// The night `offset` sleep-sessions back from the most recent (0 = last night), decoded
+    /// into a `Night`. Used by the hero's ◀/▶ navigation to browse past nights' hypnograms.
+    private func decodedNight(at offset: Int) -> Night? {
+        let sleeps = repo.sleeps
+        guard !sleeps.isEmpty else { return nil }
+        let idx = min(max(sleeps.count - 1 - offset, 0), sleeps.count - 1)
+        let s = sleeps[idx]
         if let stages = decodeStages(s.stagesJSON), stages.total > 0 {
             return Night(session: s, stages: stages)
         }
