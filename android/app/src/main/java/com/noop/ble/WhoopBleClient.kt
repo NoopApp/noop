@@ -817,7 +817,8 @@ class WhoopBleClient(
                 // SET_CONFIG (the R22 deep-stream unlock) is allowed ONLY while the deep-data experiment
                 // is opted in — it writes a persistent feature flag to the strap, so it must never fire
                 // on a default install. Reversible; driven only by enableWhoop5DeepData(). (#174)
-                !(cmd == CommandNumber.SET_CONFIG && puffinExperiment.isDeepDataEnabled)) {
+                !(cmd == CommandNumber.SET_CONFIG && puffinExperiment.isDeepDataEnabled) &&
+                !(cmd == CommandNumber.SET_DEVICE_CONFIG && puffinExperiment.broadcastHr)) {
                 log("send(${cmd.name}) skipped — no WHOOP 5/MG framing for this command yet")
                 return
             }
@@ -1652,6 +1653,29 @@ class WhoopBleClient(
      * Reversible — it only changes which data the strap emits. After it runs, wear + sync and share the
      * strap log so we can confirm the deeper records start flowing.
      */
+    /**
+     * Make the strap advertise its heart rate as a standard BLE HR sensor by writing the device-config
+     * flag whoop_live_hr_in_adv_ind_pkt = "1" (on) / "0" (off) via SET_CONFIG (0x78). Validated on real
+     * hardware: with it on, the strap advertises 0x180D + the live HR in its manufacturer data, so a
+     * Garmin (Edge/watch), Zwift or gym HR client pairs to it directly. Reversible; opt-in. (Broadcast HR)
+     */
+    fun setBroadcastHr(on: Boolean) {
+        if (connectedFamily != DeviceFamily.WHOOP5) {
+            log("Broadcast HR: needs a WHOOP 5.0/MG strap — ignored."); return
+        }
+        val s = _state.value
+        if (!s.connected || !s.bonded) {
+            log("Broadcast HR: connect and bond a 5/MG strap first — ignored."); return
+        }
+        val value = if (on) 0x31 else 0x30   // ASCII '1' / '0'
+        send(
+            CommandNumber.SET_DEVICE_CONFIG,
+            byteArrayOf(0x01) + Whoop5Config.deviceConfigBody("whoop_live_hr_in_adv_ind_pkt", value),
+            withResponse = true,
+        )
+        log("Broadcast HR: wrote whoop_live_hr_in_adv_ind_pkt=" + (if (on) "1" else "0"))
+    }
+
     fun enableWhoop5DeepData() {
         if (connectedFamily != DeviceFamily.WHOOP5) {
             log("Deep-data: needs a WHOOP 5.0/MG strap — ignored."); return
@@ -2047,6 +2071,7 @@ class WhoopBleClient(
             startWhoop5BackfillCapture()
         }
         if (connectedFamily == DeviceFamily.WHOOP5) {
+            if (PuffinExperiment.from(context).broadcastHr) setBroadcastHr(true)
             // Goose parity, hardware-validated (#78 fork): query the strap's stored range first and
             // fire the transfer on its SUCCESS response (PENDING precedes it). FAIL-OPEN: real
             // hardware sometimes swallows the first GET_DATA_RANGE entirely, so a 2s fallback fires
