@@ -114,6 +114,9 @@ final class AppModel: ObservableObject {
         // Smooth HR centrally so it's solid everywhere it's shown.
         live.$heartRate.sink { [weak self] _ in self?.ingestHR() }.store(in: &hrCancellables)
         live.$rr.sink { [weak self] _ in self?.ingestHR() }.store(in: &hrCancellables)
+        live.$connected.removeDuplicates().sink { [weak self] connected in
+            if !connected { self?.resetSmoothing() }
+        }.store(in: &hrCancellables)
 
         // Physical-input + wear hooks (fired live by FrameRouter).
         live.onDoubleTap = { [weak self] in self?.handleDoubleTap() }

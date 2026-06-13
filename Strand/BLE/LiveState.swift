@@ -22,7 +22,12 @@ public final class LiveState: ObservableObject {
     /// alarm, double-tap, history offload) only works when this is true.
     @Published public var encryptedBond: Bool = false
     @Published public var heartRate: Int? = nil
+    /// Latest R-R packet exactly as it arrived from the strap. Keep this as the "fresh packet"
+    /// surface for stress/breathing logic that reacts to arrivals.
     @Published public var rr: [Int] = []
+    /// Rolling UI buffer of recent R-R intervals. Standard BLE HR notifications often carry only
+    /// one or two intervals per packet, so the Live console needs a separate history to feel live.
+    @Published public private(set) var rrRecent: [Int] = []
     @Published public var batteryPct: Double? = nil
     /// Charging flag from the strap's BATTERY_LEVEL events — wire observation: u8 bit0 in the
     /// event payload (4.0 @26 / 5.0 @30), pushed ~every 8 min on captured links. nil until the
@@ -122,6 +127,22 @@ public final class LiveState: ObservableObject {
     public func setBattery(_ pct: Double) {
         batteryPct = pct
         onBatteryUpdate?(pct)
+    }
+
+    public func setRRIntervals(_ intervals: [Int], recentLimit: Int = 60) {
+        rr = intervals
+        let valid = intervals.filter { $0 > 0 }
+        guard !valid.isEmpty else { return }
+        rrRecent.append(contentsOf: valid)
+        if rrRecent.count > recentLimit {
+            rrRecent.removeFirst(rrRecent.count - recentLimit)
+        }
+    }
+
+    public func clearBiometrics() {
+        heartRate = nil
+        rr.removeAll()
+        rrRecent.removeAll()
     }
 
     public func append(log line: String) {

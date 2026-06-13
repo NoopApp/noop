@@ -218,7 +218,7 @@ struct LiveView: View {
     }
 
     private var rrStrip: some View {
-        let values = Array(live.rr.suffix(18))
+        let values = Array(live.rrRecent.suffix(18))
         return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .bottom, spacing: 5) {
                 if values.isEmpty {
@@ -265,7 +265,7 @@ struct LiveView: View {
     }
 
     private var rollingRMSSD: Double? {
-        let values = Array(live.rr.suffix(12)).map(Double.init)
+        let values = Array(live.rrRecent.suffix(12)).map(Double.init)
         guard values.count >= 3 else { return nil }
         let diffs = zip(values.dropFirst(), values).map { $0 - $1 }
         let meanSquare = diffs.map { $0 * $0 }.reduce(0, +) / Double(diffs.count)
@@ -313,10 +313,10 @@ struct LiveView: View {
                   icon: "waveform.path.ecg",
                   tint: displayHR == nil ? StrandPalette.textTertiary : StrandPalette.accent),
             .init(title: "R-R intervals",
-                  value: live.rr.isEmpty ? "Missing" : "\(live.rr.count) recent",
+                  value: live.rrRecent.isEmpty ? "Missing" : "\(live.rrRecent.count) recent",
                   detail: rollingRMSSD.map { "RMSSD \(Int($0.rounded())) ms" } ?? "Needs interval frames",
                   icon: "point.3.connected.trianglepath.dotted",
-                  tint: live.rr.isEmpty ? StrandPalette.textTertiary : StrandPalette.metricCyan),
+                  tint: live.rrRecent.isEmpty ? StrandPalette.textTertiary : StrandPalette.metricCyan),
             .init(title: "Connection",
                   value: activeConnection && live.encryptedBond ? "Encrypted" : activeConnection ? "Partial" : live.connected ? "Connected" : "Offline",
                   detail: activeConnection && live.encryptedBond ? "Controls unlocked" : "Standard HR is not full bond",
