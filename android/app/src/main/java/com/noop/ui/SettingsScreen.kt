@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Sensors
@@ -452,6 +453,34 @@ fun SettingsScreen(vm: AppViewModel) {
                             temperatureRaw = it
                             NoopPrefs.setTemperatureUnit(context, TemperatureUnit.fromRaw(it))
                         },
+                    )
+                }
+            }
+        }
+
+        // --- Appearance ---
+        SettingsSection(
+            icon = Icons.Filled.ColorLens,
+            title = "Accent color",
+            blurb = "Pick the accent used for buttons, highlights and selection. Your data and its colors (recovery, strain, sleep) are unaffected.",
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                AccentPreset.values().forEach { preset ->
+                    val selected = preset.color == Palette.accent
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(percent = 50))
+                            .background(preset.color)
+                            .border(
+                                width = if (selected) 2.dp else 0.dp,
+                                color = if (selected) Palette.textPrimary else Color.Transparent,
+                                shape = RoundedCornerShape(percent = 50),
+                            )
+                            .clickable {
+                                Palette.accent = preset.color
+                                AccentStore.save(context, preset)
+                            },
                     )
                 }
             }

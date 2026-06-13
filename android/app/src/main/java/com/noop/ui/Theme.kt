@@ -11,6 +11,9 @@ import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -42,11 +45,14 @@ object Palette {
     // Glow (§9.1)
     val glowAmbient = Color(0xFF1B2A3A)
 
-    // Accent — chrome, not data (§9.1)
-    val accent = Color(0xFF18C98B)       // health green
-    val accentHover = Color(0xFF2FE0A0)
-    val accentMuted = Color(0xFF10271F)  // dark-green tint (selected rows)
-    val focusRing = Color(0xFF18C98B)
+    // Accent — chrome, not data (§9.1). USER-CONFIGURABLE: `accent` is Compose state, so the ~190
+    // read sites recompose when the user picks a preset (see AccentPreset / AccentStore). hover/muted/
+    // focusRing derive from it so the chrome stays coherent for any hue. The data/semantic colors below
+    // (recovery, strain, sleep, zones, status) are deliberately NOT driven by this — they keep meaning.
+    var accent by mutableStateOf(AccentPreset.default.color)   // health green by default
+    val accentHover: Color get() = lerp(accent, Color.White, 0.20f)
+    val accentMuted: Color get() = lerp(accent, surfaceBase, 0.86f)   // dark tint (selected rows)
+    val focusRing: Color get() = accent
     const val disabledOpacity = 0.45f
 
     // Recovery gradient — traffic light (low red → high green).
@@ -297,7 +303,9 @@ object NoopType {
 
 // MARK: - Material3 bridge
 
-private val NoopColorScheme = darkColorScheme(
+// Built per-composition (a function, not a constant) so MaterialTheme-driven components track the
+// live `Palette.accent` when the user changes it — reading it here registers the snapshot dependency.
+private fun noopColorScheme() = darkColorScheme(
     primary = Palette.accent,
     onPrimary = Palette.surfaceBase,
     primaryContainer = Palette.accentMuted,
@@ -349,7 +357,7 @@ fun NoopTheme(content: @Composable () -> Unit) {
     // that keys off it stays satisfied.
     isSystemInDarkTheme()
     MaterialTheme(
-        colorScheme = NoopColorScheme,
+        colorScheme = noopColorScheme(),
         typography = NoopMaterialTypography,
         shapes = NoopShapes,
         content = content,

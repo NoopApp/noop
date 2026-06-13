@@ -63,6 +63,10 @@ class MainActivity : ComponentActivity() {
             requestBlePermissions()
         }
 
+        // Apply the saved accent color before the first composition so there's no green flash for
+        // users who picked a different accent (Palette.accent is Compose state; this is a plain write).
+        AccentStore.apply(this)
+
         setContent {
             NoopTheme {
                 NoopRoot()
