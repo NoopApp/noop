@@ -78,6 +78,7 @@ struct TodayView: View {
                     )
                 }
                 heroSection
+                recoveryCoachSection
                 heartRateTrendSection
                 readinessSection
                 metricsSection
@@ -172,6 +173,348 @@ struct TodayView: View {
         case .watch:   return StrandPalette.statusWarning
         case .bad:     return StrandPalette.metricRose
         }
+    }
+
+    // MARK: Recovery Coach — explainable daily recommendation from personal baselines.
+
+    private var recoveryCoachSection: some View {
+        let coach = Self.recoveryCoach(days: repo.days,
+                                       today: repo.today,
+                                       calibrationNights: recoveryCalibration)
+        return VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+            SectionHeader("Recovery Coach",
+                          overline: "Explainable daily guidance",
+                          trailing: coach.contextLabel)
+            NoopCard {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .center, spacing: 12) {
+                        Image(systemName: coach.icon)
+                            .font(.system(size: 24, weight: .semibold))
+                            .foregroundStyle(coachToneColor(coach.tone))
+                            .frame(width: 36, height: 36)
+                            .background(coachToneColor(coach.tone).opacity(0.12), in: Circle())
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(coach.title)
+                                .font(StrandFont.headline)
+                                .foregroundStyle(StrandPalette.textPrimary)
+                            Text(coach.summary)
+                                .font(StrandFont.subhead)
+                                .foregroundStyle(StrandPalette.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 8)
+                        StatePill(LocalizedStringKey(coach.badge), tone: coach.tone, showsDot: false)
+                    }
+
+                    if coach.drivers.isEmpty {
+                        Text(coach.emptyState)
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: 220), spacing: NoopMetrics.gap)],
+                            alignment: .leading,
+                            spacing: NoopMetrics.gap
+                        ) {
+                            ForEach(coach.drivers) { driver in
+                                coachDriver(driver)
+                            }
+                        }
+                    }
+
+                    Divider().overlay(StrandPalette.hairline)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("TODAY'S FOCUS")
+                            .font(StrandFont.overline)
+                            .tracking(StrandFont.overlineTracking)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: 132), spacing: 8)],
+                            alignment: .leading,
+                            spacing: 8
+                        ) {
+                            ForEach(coach.focus, id: \.self) { item in
+                                Text(verbatim: item)
+                                    .font(StrandFont.footnote)
+                                    .foregroundStyle(StrandPalette.textSecondary)
+                                    .lineLimit(2)
+                                    .minimumScaleFactor(0.8)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(StrandPalette.surfaceInset, in: Capsule())
+                                    .overlay(Capsule().stroke(StrandPalette.hairline, lineWidth: 1))
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private func coachDriver(_ driver: RecoveryCoachDriver) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: driver.icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(coachToneColor(driver.tone))
+                .frame(width: 22, height: 22)
+                .background(coachToneColor(driver.tone).opacity(0.12), in: Circle())
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(driver.label)
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                    Spacer(minLength: 8)
+                    Text(driver.value)
+                        .font(StrandFont.captionNumber)
+                        .foregroundStyle(coachToneColor(driver.tone))
+                }
+                Text(driver.detail)
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, minHeight: 78, alignment: .topLeading)
+        .background(StrandPalette.surfaceInset, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(StrandPalette.hairline, lineWidth: 1))
+    }
+
+    private func coachToneColor(_ tone: StrandTone) -> Color {
+        switch tone {
+        case .neutral:  return StrandPalette.textSecondary
+        case .accent:   return StrandPalette.accent
+        case .positive: return StrandPalette.statusPositive
+        case .warning:  return StrandPalette.statusWarning
+        case .critical: return StrandPalette.statusCritical
+        }
+    }
+
+    private static func recoveryCoach(days: [DailyMetric],
+                                      today explicitToday: DailyMetric?,
+                                      calibrationNights: Int?) -> RecoveryCoachModel {
+        let sorted = days.sorted { $0.day < $1.day }
+        guard let today = explicitToday ?? sorted.last else {
+            return RecoveryCoachModel(
+                title: "Collect a baseline",
+                summary: "Wear the strap overnight or import history before taking a recovery read.",
+                badge: "NO DATA",
+                contextLabel: "No data",
+                tone: .neutral,
+                icon: "moon.zzz",
+                drivers: [],
+                focus: ["Wear tonight", "Import history", "Check strap fit"],
+                emptyState: "Recovery guidance appears after NOOP has at least a few nights of HRV and resting-heart-rate history."
+            )
+        }
+
+        let previous = Array(sorted.filter { $0.day < today.day }.suffix(28))
+        let drivers = recoveryDrivers(today: today, previous: previous)
+        let contextLabel: String = {
+            let n = previous.count
+            if n >= 21 { return "High context" }
+            if n >= 7 { return "Early context" }
+            return "Low context"
+        }()
+
+        guard let recovery = today.recovery else {
+            let n = calibrationNights.map { "\($0) of \(Baselines.minNightsSeed)" } ?? "\(previous.count) nights"
+            return RecoveryCoachModel(
+                title: "Keep collecting",
+                summary: "Charge is still calibrating. Use the drivers below as early signals, not a hard training call.",
+                badge: "CALIBRATING",
+                contextLabel: n,
+                tone: .neutral,
+                icon: "gauge.with.dots.needle.33percent",
+                drivers: drivers,
+                focus: ["Bank sleep", "Keep load steady", "Wear overnight"],
+                emptyState: "The coach needs more nights to explain recovery cleanly."
+            )
+        }
+
+        let criticals = drivers.filter { $0.tone == .critical }.count
+        let warnings = drivers.filter { $0.tone == .warning }.count
+        let positive = drivers.filter { $0.tone == .positive || $0.tone == .accent }.count
+
+        if recovery >= 75, criticals == 0, warnings <= 1 {
+            return RecoveryCoachModel(
+                title: "Push if the session matters",
+                summary: "Charge is high and the main recovery drivers are not blocking intensity.",
+                badge: "PUSH",
+                contextLabel: contextLabel,
+                tone: .positive,
+                icon: "bolt.heart.fill",
+                drivers: drivers,
+                focus: ["Hard session ok", "Warm up fully", "Fuel early"],
+                emptyState: "No driver detail yet."
+            )
+        }
+        if recovery >= 55, criticals == 0 {
+            return RecoveryCoachModel(
+                title: positive > warnings ? "Build today" : "Train, but cap the upside",
+                summary: "Charge is usable. Keep quality work controlled and let the weakest driver set the ceiling.",
+                badge: "BUILD",
+                contextLabel: contextLabel,
+                tone: .accent,
+                icon: "figure.run",
+                drivers: drivers,
+                focus: ["Zone 2 or strength", "Avoid hero sets", "Watch HR drift"],
+                emptyState: "No driver detail yet."
+            )
+        }
+        if recovery >= 35, criticals <= 1 {
+            return RecoveryCoachModel(
+                title: "Keep it light",
+                summary: "Charge is soft enough that intensity should be optional, not the plan.",
+                badge: "LIGHT",
+                contextLabel: contextLabel,
+                tone: .warning,
+                icon: "figure.walk",
+                drivers: drivers,
+                focus: ["Walk or mobility", "Short aerobic work", "Early bedtime"],
+                emptyState: "No driver detail yet."
+            )
+        }
+        return RecoveryCoachModel(
+            title: "Recover first",
+            summary: "Charge is low or the driver stack is stressed. Protect sleep, hydration, and easy movement.",
+            badge: "RECOVER",
+            contextLabel: contextLabel,
+            tone: .critical,
+            icon: "bed.double.fill",
+            drivers: drivers,
+            focus: ["No max efforts", "Hydrate", "Sleep priority"],
+            emptyState: "No driver detail yet."
+        )
+    }
+
+    private static func recoveryDrivers(today: DailyMetric, previous: [DailyMetric]) -> [RecoveryCoachDriver] {
+        [
+            hrvDriver(today: today, previous: previous),
+            rhrDriver(today: today, previous: previous),
+            restDriver(today: today, previous: previous),
+            respDriver(today: today, previous: previous),
+            skinTempDriver(today: today),
+            loadDriver(today: today, previous: previous)
+        ].compactMap { $0 }
+    }
+
+    private static func hrvDriver(today: DailyMetric, previous: [DailyMetric]) -> RecoveryCoachDriver? {
+        guard let current = today.avgHrv, let baseline = mean(previous.compactMap(\.avgHrv)) else { return nil }
+        let delta = current - baseline
+        let tone: StrandTone = delta <= -12 ? .critical : delta <= -5 ? .warning : delta >= 5 ? .positive : .neutral
+        return RecoveryCoachDriver(id: "hrv",
+                                   icon: "waveform.path.ecg",
+                                   label: "HRV",
+                                   value: "\(Int(current.rounded())) ms",
+                                   detail: "\(signed(delta, decimals: 0, unit: "ms")) vs 28-day baseline",
+                                   tone: tone)
+    }
+
+    private static func rhrDriver(today: DailyMetric, previous: [DailyMetric]) -> RecoveryCoachDriver? {
+        guard let current = today.restingHr.map(Double.init),
+              let baseline = mean(previous.compactMap { $0.restingHr.map(Double.init) })
+        else { return nil }
+        let delta = current - baseline
+        let tone: StrandTone = delta >= 6 ? .critical : delta >= 3 ? .warning : delta <= -3 ? .positive : .neutral
+        return RecoveryCoachDriver(id: "rhr",
+                                   icon: "heart.fill",
+                                   label: "Resting HR",
+                                   value: "\(Int(current.rounded())) bpm",
+                                   detail: "\(signed(delta, decimals: 0, unit: "bpm")) vs personal baseline",
+                                   tone: tone)
+    }
+
+    private static func restDriver(today: DailyMetric, previous: [DailyMetric]) -> RecoveryCoachDriver? {
+        guard let current = today.totalSleepMin, let baseline = mean(previous.compactMap(\.totalSleepMin)) else { return nil }
+        let delta = current - baseline
+        let tone: StrandTone = delta <= -90 ? .critical : delta <= -30 ? .warning : delta >= 30 ? .positive : .neutral
+        return RecoveryCoachDriver(id: "rest",
+                                   icon: "moon.stars.fill",
+                                   label: "Rest",
+                                   value: formatMinutes(current),
+                                   detail: "\(signed(delta, decimals: 0, unit: "min")) vs typical sleep",
+                                   tone: tone)
+    }
+
+    private static func respDriver(today: DailyMetric, previous: [DailyMetric]) -> RecoveryCoachDriver? {
+        guard let current = today.respRateBpm, let baseline = mean(previous.compactMap(\.respRateBpm)) else { return nil }
+        let delta = current - baseline
+        let absDelta = abs(delta)
+        let tone: StrandTone = absDelta >= 2.0 ? .critical : absDelta >= 1.0 ? .warning : absDelta <= 0.4 ? .positive : .neutral
+        return RecoveryCoachDriver(id: "resp",
+                                   icon: "lungs.fill",
+                                   label: "Respiration",
+                                   value: String(format: "%.1f rpm", current),
+                                   detail: "\(signed(delta, decimals: 1, unit: "rpm")) vs normal",
+                                   tone: tone)
+    }
+
+    private static func skinTempDriver(today: DailyMetric) -> RecoveryCoachDriver? {
+        guard let temp = today.skinTempDevC, abs(temp) <= 5 else { return nil }
+        let absTemp = abs(temp)
+        let tone: StrandTone = absTemp >= 1.0 ? .critical : absTemp >= 0.7 ? .warning : .neutral
+        return RecoveryCoachDriver(id: "skin-temp",
+                                   icon: "thermometer.medium",
+                                   label: "Skin temp",
+                                   value: signed(temp, decimals: 1, unit: "C"),
+                                   detail: "overnight deviation from baseline",
+                                   tone: tone)
+    }
+
+    private static func loadDriver(today: DailyMetric, previous: [DailyMetric]) -> RecoveryCoachDriver? {
+        guard let yesterday = previous.last?.strain else { return nil }
+        let earlier = previous.dropLast().compactMap(\.strain)
+        guard let baseline = mean(earlier) else { return nil }
+        let delta = yesterday - baseline
+        let tone: StrandTone = delta >= 5 ? .critical : delta >= 3 ? .warning : delta <= -2 ? .positive : .neutral
+        return RecoveryCoachDriver(id: "load",
+                                   icon: "flame.fill",
+                                   label: "Yesterday load",
+                                   value: String(format: "%.1f", yesterday),
+                                   detail: "\(signed(delta, decimals: 1, unit: "pts")) vs typical effort",
+                                   tone: tone)
+    }
+
+    private static func mean(_ values: [Double]) -> Double? {
+        guard !values.isEmpty else { return nil }
+        return values.reduce(0, +) / Double(values.count)
+    }
+
+    private static func signed(_ value: Double, decimals: Int, unit: String) -> String {
+        let sign = value > 0 ? "+" : value < 0 ? "-" : ""
+        let format = "%.\(decimals)f"
+        return "\(sign)\(String(format: format, abs(value))) \(unit)"
+    }
+
+    private static func formatMinutes(_ minutes: Double) -> String {
+        let whole = Int(minutes.rounded())
+        return "\(whole / 60)h \(whole % 60)m"
+    }
+
+    private struct RecoveryCoachModel {
+        let title: String
+        let summary: String
+        let badge: String
+        let contextLabel: String
+        let tone: StrandTone
+        let icon: String
+        let drivers: [RecoveryCoachDriver]
+        let focus: [String]
+        let emptyState: String
+    }
+
+    private struct RecoveryCoachDriver: Identifiable {
+        let id: String
+        let icon: String
+        let label: String
+        let value: String
+        let detail: String
+        let tone: StrandTone
     }
 
     // MARK: (a) HERO — RecoveryRing + Synthesis, filling the width equally.
