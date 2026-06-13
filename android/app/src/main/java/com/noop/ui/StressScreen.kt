@@ -269,6 +269,7 @@ private fun StressTrendSection(model: StressModel) {
                         modifier = Modifier.height(Metrics.chartHeight),
                         color = StressRamp.STEADY,
                         fill = true,
+                        selectionEnabled = true,
                     )
                     HorizontalDivider(color = Palette.hairline)
                     Row(modifier = Modifier.fillMaxWidth()) {
