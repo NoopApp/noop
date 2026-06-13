@@ -1,7 +1,13 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 @main
 struct StrandApp: App {
+    #if os(macOS)
+    @NSApplicationDelegateAdaptor(SingleInstanceAppDelegate.self) private var singleInstanceDelegate
+    #endif
     @StateObject private var model = AppModel()
 
     var body: some Scene {
@@ -34,3 +40,30 @@ struct StrandApp: App {
         .menuBarExtraStyle(.window)
     }
 }
+
+#if os(macOS)
+final class SingleInstanceAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        enforceSingleInstance()
+    }
+
+    private func enforceSingleInstance() {
+        guard let bundleID = Bundle.main.bundleIdentifier else { return }
+        let currentPID = ProcessInfo.processInfo.processIdentifier
+        let currentURL = Bundle.main.bundleURL.standardizedFileURL
+        let installedURL = URL(fileURLWithPath: "/Applications/NOOP.app").standardizedFileURL
+        let otherApps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            .filter { $0.processIdentifier != currentPID }
+        guard !otherApps.isEmpty else { return }
+
+        if currentURL == installedURL {
+            otherApps.forEach { _ = $0.terminate() }
+            return
+        }
+
+        let appToKeep = otherApps.first { $0.bundleURL?.standardizedFileURL == installedURL } ?? otherApps[0]
+        appToKeep.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        NSApp.terminate(nil)
+    }
+}
+#endif

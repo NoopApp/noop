@@ -1,15 +1,22 @@
 import CoreBluetooth
 import WhoopProtocol
 
-/// Which strap the user is pairing. The user picks this before scanning so we
-/// look for exactly one device family instead of guessing — a WHOOP 4.0 scan no
-/// longer waits forever on a WHOOP 5/MG wrist, and vice versa.
+/// Which strap the user is pairing. The user pick remains the preferred scan
+/// target, and reconnect can rotate to the other family if that preference is
+/// stale after an update or restore.
 public enum WhoopModel: String, CaseIterable, Identifiable, Hashable {
     case whoop4   = "WHOOP 4.0"
     case whoop5mg = "WHOOP 5.0 / MG"
 
     public var id: String { rawValue }
     public var displayName: String { rawValue }
+
+    var fallbackScanModel: WhoopModel {
+        switch self {
+        case .whoop4:   return .whoop5mg
+        case .whoop5mg: return .whoop4
+        }
+    }
 
     /// The protocol-layer device family this model maps to — drives framing (CRC8 vs CRC16),
     /// characteristic UUIDs, and the CLIENT_HELLO handshake.

@@ -161,6 +161,11 @@ public final class BLEManager: NSObject, ObservableObject {
     private var keepAliveTimer: DispatchSourceTimer?
     static let keepAliveIntervalSeconds = 30
     private var keepAliveTick = 0
+    /// If a persisted/missing strap-family preference points at the wrong service, a service-filtered BLE
+    /// scan can run forever even though the strap is nearby. Rotate between WHOOP families after short
+    /// misses and persist whichever family actually advertises.
+    private var scanFallbackWorkItem: DispatchWorkItem?
+    static let scanFallbackDelaySeconds: TimeInterval = 8
     /// Last time ANY notification arrived — drives the liveness watchdog.
     private var lastDataAt = Date()
     /// True while the Live screen wants the (heavy) realtime stream; keep-alive re-arms it.
@@ -380,15 +385,12 @@ public final class BLEManager: NSObject, ObservableObject {
             }
             return
         }
-        log("Scanning for \(model.displayName)…")
-        central.scanForPeripherals(
-            withServices: [model.scanService],
-            options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
-        )
+        startScan(for: model, allowFallback: true)
     }
 
     public func disconnect() {
         intentionalDisconnect = true
+        cancelScanFallback()
         // A user-initiated teardown is a clean slate: clear any #80 marginal-radio fallback so the next
         // (manual) reconnect attempts the full R10/R11 stream again rather than inheriting old suspicion.
         marginalRadio.reset()
@@ -1040,6 +1042,37 @@ public final class BLEManager: NSObject, ObservableObject {
         whoop5NotifyCharacteristics.removeAll()
     }
 
+    private func startScan(for model: WhoopModel, allowFallback: Bool) {
+        cancelScanFallback()
+        selectedModel = model
+        reassembler = Reassembler(family: model.deviceFamily)
+        router.family = model.deviceFamily
+        configureCollectorFamily()
+        central.stopScan()
+        log("Scanning for \(model.displayName)…")
+        central.scanForPeripherals(
+            withServices: [model.scanService],
+            options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
+        )
+        guard allowFallback else { return }
+        let fallback = model.fallbackScanModel
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.central.isScanning, !self.state.connected else { return }
+            self.log("No \(model.displayName) found yet — trying \(fallback.displayName)")
+            self.startScan(for: fallback, allowFallback: true)
+        }
+        scanFallbackWorkItem = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + BLEManager.scanFallbackDelaySeconds,
+            execute: work
+        )
+    }
+
+    private func cancelScanFallback() {
+        scanFallbackWorkItem?.cancel()
+        scanFallbackWorkItem = nil
+    }
+
     private func enableLiveNotifications(reason: String) {
         guard let p = peripheral, p.state == .connected else { return }
         let chars = [
@@ -1194,6 +1227,8 @@ extension BLEManager: CBCentralManagerDelegate {
                                advertisementData: [String: Any],
                                rssi RSSI: NSNumber) {
         let name = (advertisementData[CBAdvertisementDataLocalNameKey] as? String) ?? peripheral.name ?? "unknown"
+        cancelScanFallback()
+        UserDefaults.standard.set(selectedModel.rawValue, forKey: "selectedWhoopModel")
         log("Discovered \(name) (rssi \(RSSI)) — connecting")
         central.stopScan()
         preparePeripheral(peripheral)
@@ -1201,6 +1236,7 @@ extension BLEManager: CBCentralManagerDelegate {
     }
 
     public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        cancelScanFallback()
         restoredPeripheral = nil
         preparePeripheral(peripheral)
         state.connected = true
