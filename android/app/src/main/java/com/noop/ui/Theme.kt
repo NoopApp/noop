@@ -46,7 +46,7 @@ object Palette {
     val glowAmbient = Color(0xFF1B2A3A)
 
     // Accent — chrome, not data (§9.1). USER-CONFIGURABLE: `accent` is Compose state, so the ~190
-    // read sites recompose when the user picks a preset (see AccentPreset / AccentStore). hover/muted/
+    // read sites recompose when the user picks a preset (see AccentPreset / NoopPrefs). hover/muted/
     // focusRing derive from it so the chrome stays coherent for any hue. The data/semantic colors below
     // (recovery, strain, sleep, zones, status) are deliberately NOT driven by this — they keep meaning.
     var accent by mutableStateOf(AccentPreset.default.color)   // health green by default

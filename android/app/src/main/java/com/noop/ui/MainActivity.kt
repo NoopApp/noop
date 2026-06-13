@@ -65,7 +65,7 @@ class MainActivity : ComponentActivity() {
 
         // Apply the saved accent color before the first composition so there's no green flash for
         // users who picked a different accent (Palette.accent is Compose state; this is a plain write).
-        AccentStore.apply(this)
+        Palette.accent = NoopPrefs.accent(this).color
 
         setContent {
             NoopTheme {
@@ -182,6 +182,16 @@ object NoopPrefs {
         of(context).edit().apply {
             if (unit == null) remove(KEY_TEMPERATURE_UNIT) else putString(KEY_TEMPERATURE_UNIT, unit.raw)
         }.apply()
+    }
+
+    /** User accent color — chrome only (see [AccentPreset]). Display-only, like the unit prefs above. */
+    const val KEY_ACCENT = "ui.accent"
+
+    /** The saved accent preset, or [AccentPreset.default] if unset/unknown. */
+    fun accent(context: Context): AccentPreset = AccentPreset.fromId(of(context).getString(KEY_ACCENT, null))
+
+    fun setAccent(context: Context, preset: AccentPreset) {
+        of(context).edit().putString(KEY_ACCENT, preset.id).apply()
     }
 
     /** Health Connect periodic auto-sync (Samsung Health → Health Connect → NOOP). Default OFF.

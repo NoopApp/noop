@@ -4,7 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * Pins [AccentPreset] id resolution — the contract [AccentStore] relies on to persist/restore the
+ * Pins [AccentPreset] id resolution — the contract NoopPrefs relies on to persist/restore the
  * user's accent. A stored id must round-trip, and an unknown/missing id (older install, corrupted
  * pref) must fall back to the default rather than crash or blank the accent.
  */

@@ -10,7 +10,7 @@ import androidx.compose.ui.graphics.Color
  *
  * A curated, fixed set rather than a free picker so every choice stays legible on the near-black
  * [Palette.surfaceBase] (#060A08); a free RGB picker would let a user pick a low-contrast accent and
- * make the UI unreadable. `id` is the stable persistence key (see [AccentStore]); never renumber it.
+ * make the UI unreadable. `id` is the stable persistence key (see NoopPrefs.KEY_ACCENT); never renumber it.
  */
 enum class AccentPreset(val id: String, val displayName: String, val color: Color) {
     GREEN("green", "Health green", Color(0xFF18C98B)),   // default — the original brand accent

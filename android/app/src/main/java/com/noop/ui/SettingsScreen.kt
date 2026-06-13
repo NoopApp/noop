@@ -479,7 +479,7 @@ fun SettingsScreen(vm: AppViewModel) {
                             )
                             .clickable {
                                 Palette.accent = preset.color
-                                AccentStore.save(context, preset)
+                                NoopPrefs.setAccent(context, preset)
                             },
                     )
                 }
