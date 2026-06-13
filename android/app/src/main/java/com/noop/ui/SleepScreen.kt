@@ -250,19 +250,7 @@ fun SleepScreen(
                         if (it.deviceId == s.deviceId && it.startTs == s.startTs) it.copy(startTs = start, endTs = end)
                         else it
                     }
-                    scope.launch {
-                        // Await the DB write, then reload to get the canonical state and eliminate
-                        // any stale computed sessions that might overlap the edited night.
-                        vm.updateSleepSessionTimes(s, start, end)
-                        sleeps = runCatching {
-                            val now = System.currentTimeMillis() / 1000L
-                            val imported = vm.repo.sleepSessions("my-whoop", 0L, now)
-                            val computed = vm.repo.sleepSessions(vm.repo.computedDeviceId("my-whoop"), 0L, now)
-                            val importedDays = imported.map { AnalyticsEngine.dayString(it.endTs) }.toHashSet()
-                            val computedOnly = computed.filter { AnalyticsEngine.dayString(it.endTs) !in importedDays }
-                            (imported + computedOnly).sortedBy { it.startTs }
-                        }.getOrDefault(sleeps)
-                    }
+                    scope.launch { vm.updateSleepSessionTimes(s, start, end) }
                 },
                 onPickNightDate = onPickNightDate,
             )
