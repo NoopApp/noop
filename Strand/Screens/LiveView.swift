@@ -13,6 +13,13 @@ struct LiveView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var live: LiveState
 
+    #if os(iOS)
+    /// Drives the body console's layout choice on iOS without ViewThatFits' per-tick double-measure
+    /// (see `bodyConsole`). Changes only on rotation / size-class transitions, so it adds no per-tick
+    /// re-render. (live perf)
+    @Environment(\.horizontalSizeClass) private var hSizeClass
+    #endif
+
     /// Which strap the user is pairing — persists across launches. Drives which
     /// BLE service we scan for so a WHOOP 4.0 scan never hangs on a WHOOP 5 wrist.
     @AppStorage("selectedWhoopModel") private var selectedModelRaw = WhoopModel.whoop4.rawValue
@@ -22,14 +29,28 @@ struct LiveView: View {
     private var displayHR: Int? { model.bpm }
     private var activeConnection: Bool { live.connected && live.bonded }
 
-    /// Drives the focal HR ring's gentle pulse — toggled on every new HR value so the ring "beats".
-    @State private var heartPulse = false
-
     var body: some View {
         ScreenScaffold(title: "Live Body Console",
                        subtitle: "Current physiology, strap trust, and session controls in one working view.") {
+            // Regular VStack — NOT Lazy. This is a short (~9), heterogeneous card stack, so LazyVStack
+            // is the wrong tool: it estimates the height of off-screen rows and corrects the estimate as
+            // they realize, which makes the scroll indicator jump and stutters when a tall card (HR
+            // console, 200pt log) is realized mid-scroll. The per-tick cost is instead held down by the
+            // upstream publish guards (FrameRouter/BLEManager/AppModel — body re-evals only on a real
+            // change) and the Equatable chrome subviews below (which skip layout when unchanged). (live perf)
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
-                consoleHeader
+                // POD subview: takes only the primitives it renders, so SwiftUI skips its body (and the
+                // ViewThatFits double-layout inside) on the ~1Hz ticks where the connection chrome is
+                // unchanged — which is every streaming tick. Only HR/R-R/log are moving. (live perf)
+                ConsoleHeaderView(active: activeConnection,
+                                  connected: live.connected,
+                                  encryptedBond: live.encryptedBond,
+                                  backfilling: live.backfilling,
+                                  syncChunks: live.syncChunksThisSession,
+                                  batteryPct: live.batteryPct,
+                                  worn: live.worn,
+                                  lastSyncLabel: lastSyncLabel)
+                    .equatable()
                 // Can't-connect-at-all guidance: the strap wiped its bond (firmware update / WHOOP app
                 // re-bond), so connects loop on "Peer removed pairing information". Show the re-pair steps
                 // right here instead of silently retrying. (5/MG firmware reset, 2026-06)
@@ -52,7 +73,14 @@ struct LiveView: View {
                 // WHOOP 4 and a 5/MG can switch between them. (It used to hide once `bonded`, which is
                 // sticky across disconnects — so after the first pairing the picker vanished for good.)
                 if !activeConnection { modelPicker }
-                controls
+                // POD subview: the three transport buttons only change when connection/strap state flips,
+                // not per tick. `model` is held as a plain (unobserved) reference and excluded from ==, so
+                // the row skips re-layout every second while still firing the live commands. (live perf)
+                ControlsView(connected: live.connected,
+                             active: activeConnection,
+                             selectedModel: selectedModel,
+                             model: model)
+                    .equatable()
                 logCard
             }
         }
@@ -60,154 +88,63 @@ struct LiveView: View {
         .onDisappear { model.stopRealtimeHR() }
         .onChange(of: live.bonded) { _ in refreshLiveSession() }
         .onChange(of: live.connected) { _ in refreshLiveSession() }
-        .onChange(of: displayHR) { _ in
-            withAnimation(StrandMotion.pulse) { heartPulse.toggle() }
-        }
     }
 
     // MARK: - Console header
 
-    /// The console's top band: the connection pill + a connection-mode badge (+ a live SYNCING badge
-    /// while a history offload runs), with battery / worn / last-sync stats pushed to the trailing edge.
-    private var consoleHeader: some View {
-        NoopCard(padding: 14) {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .center, spacing: 12) {
-                    connectionPill
-                    SourceBadge(connectionModeBadge, tint: connectionModeColor)
-                    if live.backfilling {
-                        SourceBadge("SYNCING \(live.syncChunksThisSession)", tint: StrandPalette.metricCyan)
-                    }
-                    Spacer(minLength: 8)
-                    headerStats
-                }
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 12) {
-                        connectionPill
-                        SourceBadge(connectionModeBadge, tint: connectionModeColor)
-                        if live.backfilling {
-                            SourceBadge("SYNCING \(live.syncChunksThisSession)", tint: StrandPalette.metricCyan)
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    headerStats
-                }
-            }
-        }
-    }
-
-    private var headerStats: some View {
-        HStack(spacing: 16) {
-            headerStat("Battery", live.batteryPct.map { "\(Int($0))%" } ?? "—")
-            headerStat("Worn", activeConnection ? (live.worn ? "Yes" : "No") : "—")
-            headerStat("Last sync", lastSyncLabel)
-        }
-    }
-
-    private func headerStat(_ title: String, _ value: String) -> some View {
-        VStack(alignment: .trailing, spacing: 1) {
-            Text(title.uppercased())
-                .font(StrandFont.footnote)
-                .foregroundStyle(StrandPalette.textTertiary)
-            Text(value)
-                .font(StrandFont.captionNumber)
-                .foregroundStyle(StrandPalette.textSecondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-        }
-    }
-
-    private var connectionModeBadge: LocalizedStringKey {
-        if activeConnection && live.encryptedBond { return "FULL BOND" }
-        if activeConnection { return "LIVE HR ONLY" }
-        if live.connected { return "CONNECTING" }
-        if live.encryptedBond { return "PAIRED" }
-        return "OFFLINE"
-    }
-
+    /// Connection-mode tint, still needed by the Signal-Trust "Connection" tile. Shares the same
+    /// derivation the POD `ConsoleHeaderView` uses (see `noopConnectionModeColor`) so the header and the
+    /// tile can never drift apart even though they no longer share a view. (live perf)
     private var connectionModeColor: Color {
-        if activeConnection && live.encryptedBond { return StrandPalette.accent }
-        if activeConnection || live.connected { return StrandPalette.statusWarning }
-        return StrandPalette.metricRose
-    }
-
-    private var connectionPill: some View {
-        // Distinguish a GENUINE encrypted bond from the 5/MG live-HR shortcut that flips `bonded` true
-        // over the unbonded standard profile (#69): green "Bonded · streaming" only when encryptedBond,
-        // amber "Live HR (not fully paired)" otherwise. The pairingHintBanner below gives the how-to.
-        let (label, color): (String, Color) =
-            (activeConnection && live.encryptedBond) ? ("Bonded · streaming", StrandPalette.accent)
-            : activeConnection ? ("Live HR (not fully paired)", StrandPalette.statusWarning)
-            : live.connected ? ("Connected", StrandPalette.statusWarning)
-            : live.encryptedBond ? ("Paired · idle", StrandPalette.statusWarning)
-            : ("Disconnected", StrandPalette.metricRose)
-        return HStack(spacing: 8) {
-            Circle().fill(color).frame(width: 9, height: 9)
-            Text(label).font(StrandFont.subhead).foregroundStyle(StrandPalette.textPrimary)
-        }
-        .padding(.horizontal, 14).padding(.vertical, 8)
-        .background(StrandPalette.surfaceRaised, in: Capsule())
+        noopConnectionModeColor(active: activeConnection, connected: live.connected, encryptedBond: live.encryptedBond)
     }
 
     // MARK: - Body console (focal HR + live physiology)
 
     /// The console's centrepiece: a pulsing focal HR ring beside a live-physiology stack (R-R strip,
-    /// rolling RMSSD, last frame/event). Side-by-side on a wide window (Mac), stacked on a narrow one
-    /// (iPhone) via ViewThatFits.
+    /// rolling RMSSD, last frame/event). Side-by-side on a wide window, stacked on a narrow one.
     private var bodyConsole: some View {
         NoopCard(padding: 20) {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .center, spacing: 24) {
-                    heartReadout
-                        .frame(minWidth: 260, maxWidth: 340)
-                    Divider().overlay(StrandPalette.hairline)
-                    physiologyStack
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                VStack(alignment: .leading, spacing: 18) {
-                    heartReadout
-                    Divider().overlay(StrandPalette.hairline)
-                    physiologyStack
-                }
+            #if os(iOS)
+            // iOS: resolve the layout from the size class rather than ViewThatFits. ViewThatFits
+            // re-measures BOTH candidates whenever its content invalidates — i.e. on every R-R tick —
+            // so on a phone (always .compact → the stacked layout) the side-by-side ring is measured and
+            // thrown away each frame, which shows up as scroll stutter under the live stream. The size
+            // class only changes on rotation, so this picks one layout and stops re-measuring. (live perf)
+            if hSizeClass == .compact {
+                bodyConsoleStacked
+            } else {
+                bodyConsoleSideBySide
             }
+            #else
+            // macOS: keep ViewThatFits — the window resizes freely and there's no live-stream perf
+            // pressure, so responsive side-by-side↔stacked is worth the measurement.
+            ViewThatFits(in: .horizontal) {
+                bodyConsoleSideBySide
+                bodyConsoleStacked
+            }
+            #endif
         }
     }
 
-    private var heartReadout: some View {
-        VStack(alignment: .center, spacing: 8) {
-            Text("HEART RATE")
-                .font(StrandFont.overline)
-                .tracking(StrandFont.overlineTracking)
-                .foregroundStyle(StrandPalette.textSecondary)
-            ZStack {
-                Circle()
-                    .stroke((displayHR == nil ? StrandPalette.hairline : StrandPalette.accent)
-                        .opacity(heartPulse ? 0.28 : 0.10), lineWidth: 2)
-                    .scaleEffect(heartPulse ? 1.07 : 0.96)
-                Circle()
-                    .stroke(StrandPalette.hairline, lineWidth: 1)
-                    .padding(10)
-                VStack(spacing: 0) {
-                    Text(displayHR.map(String.init) ?? "—")
-                        .font(.system(size: 96, weight: .semibold).monospacedDigit())
-                        .foregroundStyle(displayHR == nil ? StrandPalette.textTertiary : StrandPalette.accent)
-                        .contentTransition(.numericText())
-                        .animation(.snappy, value: displayHR)
-                    Text("bpm")
-                        .font(StrandFont.caption)
-                        .foregroundStyle(StrandPalette.textSecondary)
-                }
-            }
-            .frame(width: 210, height: 210)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(displayHR.map { "Heart rate \($0) beats per minute" } ?? "Heart rate not available")
-            Text(signalTrustSummary)
-                .font(StrandFont.footnote)
-                .foregroundStyle(StrandPalette.textTertiary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
+    /// Wide layout: focal HR ring beside the physiology stack.
+    private var bodyConsoleSideBySide: some View {
+        HStack(alignment: .center, spacing: 24) {
+            HeartReadoutView(displayHR: displayHR, trustSummary: signalTrustSummary)
+                .frame(minWidth: 260, maxWidth: 340)
+            Divider().overlay(StrandPalette.hairline)
+            physiologyStack
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity)
+    }
+
+    /// Narrow layout: ring stacked above the physiology stack (the iPhone-portrait path).
+    private var bodyConsoleStacked: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HeartReadoutView(displayHR: displayHR, trustSummary: signalTrustSummary)
+            Divider().overlay(StrandPalette.hairline)
+            physiologyStack
+        }
     }
 
     private var physiologyStack: some View {
@@ -263,6 +200,10 @@ struct LiveView: View {
                     }
                 }
             }
+            // live perf: pin the strip to the max bar height (rrBarHeight tops out at 58) so the bars
+            // changing every tick can't change the card's height and reflow the whole scroll column
+            // mid-scroll. Bottom-aligned, so bars still grow up from a fixed baseline.
+            .frame(height: 58, alignment: .bottom)
             .accessibilityHidden(true)
             Text(values.isEmpty
                  ? "Waiting for R-R intervals."
@@ -392,10 +333,11 @@ struct LiveView: View {
 
     private var lastSyncLabel: String {
         guard let ts = live.lastSyncedAt else { return "Never" }
-        let date = Date(timeIntervalSince1970: ts)
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        return formatter.localizedString(for: date, relativeTo: Date())
+        // live perf: use the pure integer-bucket `relativeAgo` (the same wording the rest of the app
+        // and the Android client use) instead of RelativeDateTimeFormatter.localizedString — the
+        // formatter does locale/calendar work and `lastSyncLabel` is evaluated on every body pass
+        // (header arg + History tile) at the live cadence.
+        return relativeAgo(ts)
     }
 
     private var syncDetail: String {
@@ -412,59 +354,15 @@ struct LiveView: View {
             if let w = model.activeWorkout {
                 activeWorkoutCard(w)
             } else {
-                NoopCard {
-                    ViewThatFits(in: .horizontal) {
-                        HStack(alignment: .center, spacing: 14) {
-                            sessionPrompt
-                            Spacer(minLength: 12)
-                            sessionActions
-                        }
-                        VStack(alignment: .leading, spacing: 14) {
-                            sessionPrompt
-                            sessionActions
-                        }
-                    }
-                }
+                // POD subview: the idle "ready for an effort" card only depends on `activeConnection`, so
+                // it skips its body (and the ViewThatFits double-layout) on every streaming tick. `model`
+                // rides along as a plain reference for the button actions and is excluded from ==. (live perf)
+                SessionIdleCard(active: activeConnection, model: model)
+                    .equatable()
                 if let last = model.lastWorkout {
                     workoutSavedRow(last)
                 }
             }
-        }
-    }
-
-    private var sessionPrompt: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Ready for a marked effort.")
-                .font(StrandFont.headline)
-                .foregroundStyle(StrandPalette.textPrimary)
-            Text(activeConnection
-                 ? "Start a workout when the stream matters. NOOP records the interval, HR, peak, average and effort from the same live feed."
-                 : "Connect the strap first, then mark a workout from the live stream.")
-                .font(StrandFont.subhead)
-                .foregroundStyle(StrandPalette.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private var sessionActions: some View {
-        HStack(spacing: 10) {
-            Button { model.startWorkout() } label: {
-                Label("Start workout", systemImage: "figure.run")
-                    .lineLimit(1).minimumScaleFactor(0.7)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(StrandPalette.accent)
-            .disabled(!activeConnection)
-            .help("Track a workout manually — records heart rate and effort until you end it.")
-
-            Button { model.getBattery() } label: {
-                Label("Refresh", systemImage: "arrow.clockwise")
-                    .lineLimit(1).minimumScaleFactor(0.7)
-            }
-            .buttonStyle(.bordered)
-            .tint(StrandPalette.accent)
-            .disabled(!activeConnection)
-            .help("Refresh strap battery and connection state.")
         }
     }
 
@@ -647,39 +545,7 @@ struct LiveView: View {
         }
     }
 
-    // MARK: - Controls
-
-    private var controls: some View {
-        // Three buttons share the row's width equally, so on a narrow iPhone each label must shrink to
-        // fit rather than wrap mid-word ("Dis-/con-/nect"). lineLimit(1)+minimumScaleFactor keeps them
-        // on one line; the icon stays. (#175)
-        HStack(spacing: 12) {
-            Button { model.scan(model: selectedModel) } label: {
-                Label(live.connected ? "Re-scan" : "Scan & Connect",
-                      systemImage: "antenna.radiowaves.left.and.right")
-                    .lineLimit(1).minimumScaleFactor(0.7)
-                    .frame(maxWidth: .infinity).padding(.vertical, 8)
-            }
-            .buttonStyle(.borderedProminent).tint(StrandPalette.accent)
-
-            Button { model.buzz() } label: {
-                Label("Buzz strap", systemImage: "waveform.path")
-                    .lineLimit(1).minimumScaleFactor(0.7)
-                    .frame(maxWidth: .infinity).padding(.vertical, 8)
-            }
-            .buttonStyle(.bordered).tint(StrandPalette.accent)
-            .disabled(!activeConnection)
-            .help("Fire a test haptic buzz on the strap (requires an active strap connection)")
-
-            Button(role: .destructive) { model.disconnect() } label: {
-                Label("Disconnect", systemImage: "xmark.circle")
-                    .lineLimit(1).minimumScaleFactor(0.7)
-                    .frame(maxWidth: .infinity).padding(.vertical, 8)
-            }
-            .buttonStyle(.bordered)
-            .disabled(!live.connected)
-        }
-    }
+    // MARK: - Controls — see `ControlsView` (POD leaf) below.
 
     private func refreshLiveSession() {
         guard activeConnection else { return }
@@ -705,7 +571,11 @@ struct LiveView: View {
                 }
                 ScrollViewReader { proxy in
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 2) {
+                        // LazyVStack, not VStack: live.log holds up to 200 lines and a new line lands
+                        // ~1Hz while streaming. A plain VStack lays out all 200 Text views on every
+                        // tick even though only ~12 are visible in the 200pt window; lazy renders just
+                        // the visible rows, so per-tick cost stays flat as the log fills. (live perf)
+                        LazyVStack(alignment: .leading, spacing: 2) {
                             ForEach(Array(live.log.enumerated()), id: \.offset) { idx, line in
                                 Text(line).font(StrandFont.mono)
                                     .foregroundStyle(StrandPalette.textSecondary)
@@ -756,13 +626,71 @@ struct LiveView: View {
     }
 }
 
+// MARK: - Heart readout (focal HR ring)
+
+/// The focal HR number + pulsing ring, pulled into its own leaf so the per-beat pulse lives here
+/// instead of in LiveView. Two payoffs: (1) the `heartPulse` toggle no longer wraps the WHOLE
+/// LiveView body in a pulse-animation transaction every second; (2) taking `displayHR`/`trustSummary`
+/// as plain values means SwiftUI skips this view's body on ticks where neither changed (e.g. an R-R
+/// or log update with the BPM unchanged) — only a real BPM change re-runs the 96pt numeric text. (live perf)
+private struct HeartReadoutView: View {
+    let displayHR: Int?
+    let trustSummary: String
+
+    /// Drives the focal HR ring's gentle pulse — toggled on every new HR value so the ring "beats".
+    @State private var heartPulse = false
+
+    var body: some View {
+        VStack(alignment: .center, spacing: 8) {
+            Text("HEART RATE")
+                .font(StrandFont.overline)
+                .tracking(StrandFont.overlineTracking)
+                .foregroundStyle(StrandPalette.textSecondary)
+            ZStack {
+                Circle()
+                    .stroke((displayHR == nil ? StrandPalette.hairline : StrandPalette.accent)
+                        .opacity(heartPulse ? 0.28 : 0.10), lineWidth: 2)
+                    .scaleEffect(heartPulse ? 1.07 : 0.96)
+                Circle()
+                    .stroke(StrandPalette.hairline, lineWidth: 1)
+                    .padding(10)
+                VStack(spacing: 0) {
+                    Text(displayHR.map(String.init) ?? "—")
+                        .font(.system(size: 96, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(displayHR == nil ? StrandPalette.textTertiary : StrandPalette.accent)
+                        .contentTransition(.numericText())
+                        .animation(.snappy, value: displayHR)
+                    Text("bpm")
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                }
+            }
+            .frame(width: 210, height: 210)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(displayHR.map { "Heart rate \($0) beats per minute" } ?? "Heart rate not available")
+            Text(trustSummary)
+                .font(StrandFont.footnote)
+                .foregroundStyle(StrandPalette.textTertiary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity)
+        .onChange(of: displayHR) { _ in
+            withAnimation(StrandMotion.pulse) { heartPulse.toggle() }
+        }
+    }
+}
+
 // MARK: - Signal Trust tile
 
 /// One card in the Signal Trust rail: an icon + ALL-CAPS title, a coloured value, and a one-line
 /// detail. The whole card is combined into a single accessibility element so VoiceOver reads
 /// "Heart rate: 62 bpm. Streaming now." rather than three disjoint fragments.
 private struct SignalTrustTile: View {
-    struct Model: Identifiable {
+    // Equatable so SwiftUI skips a tile's body on ticks where its Model is unchanged: the rail is
+    // rebuilt every ~1Hz, but only the Heart-rate and R-R tiles actually change second-to-second —
+    // Connection / History / Battery / Wear stay put and now no longer re-render. (live perf)
+    struct Model: Identifiable, Equatable {
         let title: String
         let value: String
         let detail: String
@@ -803,5 +731,225 @@ private struct SignalTrustTile: View {
         .frame(minHeight: 112)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(tile.title): \(tile.value). \(tile.detail)")
+    }
+}
+
+// MARK: - Console header (POD leaf)
+
+/// Connection-mode tint. A free function so both the POD `ConsoleHeaderView` and `LiveView`'s
+/// Signal-Trust "Connection" tile derive the colour identically without either observing the other —
+/// they no longer share a view, so this is the single point of truth. (live perf)
+private func noopConnectionModeColor(active: Bool, connected: Bool, encryptedBond: Bool) -> Color {
+    if active && encryptedBond { return StrandPalette.accent }
+    if active || connected { return StrandPalette.statusWarning }
+    return StrandPalette.metricRose
+}
+
+/// The console's top band (connection pill + mode badge + optional SYNCING badge, with battery / worn /
+/// last-sync stats trailing). Pulled out of `LiveView` as a plain-old-data `Equatable` leaf: it receives
+/// only the primitives it renders, so SwiftUI skips its `body` — and the `ViewThatFits` double-layout
+/// inside it — on every tick where none of these changed. During a live stream that's *every* tick (only
+/// HR / R-R / log move), so the connection chrome stops re-laying-out at ~1Hz. (live perf)
+private struct ConsoleHeaderView: View, Equatable {
+    let active: Bool
+    let connected: Bool
+    let encryptedBond: Bool
+    let backfilling: Bool
+    let syncChunks: Int
+    let batteryPct: Double?
+    let worn: Bool
+    let lastSyncLabel: String
+
+    var body: some View {
+        NoopCard(padding: 14) {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: 12) {
+                    pill
+                    SourceBadge(modeBadge, tint: modeColor)
+                    if backfilling {
+                        SourceBadge("SYNCING \(syncChunks)", tint: StrandPalette.metricCyan)
+                    }
+                    Spacer(minLength: 8)
+                    stats
+                }
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 12) {
+                        pill
+                        SourceBadge(modeBadge, tint: modeColor)
+                        if backfilling {
+                            SourceBadge("SYNCING \(syncChunks)", tint: StrandPalette.metricCyan)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    stats
+                }
+            }
+        }
+    }
+
+    private var modeBadge: LocalizedStringKey {
+        if active && encryptedBond { return "FULL BOND" }
+        if active { return "LIVE HR ONLY" }
+        if connected { return "CONNECTING" }
+        if encryptedBond { return "PAIRED" }
+        return "OFFLINE"
+    }
+
+    private var modeColor: Color {
+        noopConnectionModeColor(active: active, connected: connected, encryptedBond: encryptedBond)
+    }
+
+    private var pill: some View {
+        // Distinguish a GENUINE encrypted bond from the 5/MG live-HR shortcut that flips `bonded` true
+        // over the unbonded standard profile (#69): green "Bonded · streaming" only when encryptedBond,
+        // amber "Live HR (not fully paired)" otherwise. The pairingHintBanner below gives the how-to.
+        let (label, color): (String, Color) =
+            (active && encryptedBond) ? ("Bonded · streaming", StrandPalette.accent)
+            : active ? ("Live HR (not fully paired)", StrandPalette.statusWarning)
+            : connected ? ("Connected", StrandPalette.statusWarning)
+            : encryptedBond ? ("Paired · idle", StrandPalette.statusWarning)
+            : ("Disconnected", StrandPalette.metricRose)
+        return HStack(spacing: 8) {
+            Circle().fill(color).frame(width: 9, height: 9)
+            Text(label).font(StrandFont.subhead).foregroundStyle(StrandPalette.textPrimary)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 8)
+        .background(StrandPalette.surfaceRaised, in: Capsule())
+    }
+
+    private var stats: some View {
+        HStack(spacing: 16) {
+            stat("Battery", batteryPct.map { "\(Int($0))%" } ?? "—")
+            stat("Worn", active ? (worn ? "Yes" : "No") : "—")
+            stat("Last sync", lastSyncLabel)
+        }
+    }
+
+    private func stat(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .trailing, spacing: 1) {
+            Text(title.uppercased())
+                .font(StrandFont.footnote)
+                .foregroundStyle(StrandPalette.textTertiary)
+            Text(value)
+                .font(StrandFont.captionNumber)
+                .foregroundStyle(StrandPalette.textSecondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+    }
+}
+
+// MARK: - Session idle card (POD leaf)
+
+/// The idle "ready for a marked effort" card (prompt + start/refresh actions). Pulled out as an
+/// `Equatable` leaf keyed on `active` only — `model` rides along as a plain, *unobserved* reference for
+/// the button actions and is excluded from `==`, so the card (and its `ViewThatFits` double-layout) skips
+/// re-layout on the ~1Hz ticks instead of rebuilding every second under `LiveView`'s observation. The
+/// captured `model` is a stable singleton, so deferred taps stay correct. (live perf)
+private struct SessionIdleCard: View, Equatable {
+    let active: Bool
+    let model: AppModel
+
+    static func == (lhs: SessionIdleCard, rhs: SessionIdleCard) -> Bool { lhs.active == rhs.active }
+
+    var body: some View {
+        NoopCard {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: 14) {
+                    prompt
+                    Spacer(minLength: 12)
+                    actions
+                }
+                VStack(alignment: .leading, spacing: 14) {
+                    prompt
+                    actions
+                }
+            }
+        }
+    }
+
+    private var prompt: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Ready for a marked effort.")
+                .font(StrandFont.headline)
+                .foregroundStyle(StrandPalette.textPrimary)
+            Text(active
+                 ? "Start a workout when the stream matters. NOOP records the interval, HR, peak, average and effort from the same live feed."
+                 : "Connect the strap first, then mark a workout from the live stream.")
+                .font(StrandFont.subhead)
+                .foregroundStyle(StrandPalette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var actions: some View {
+        HStack(spacing: 10) {
+            Button { model.startWorkout() } label: {
+                Label("Start workout", systemImage: "figure.run")
+                    .lineLimit(1).minimumScaleFactor(0.7)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(StrandPalette.accent)
+            .disabled(!active)
+            .help("Track a workout manually — records heart rate and effort until you end it.")
+
+            Button { model.getBattery() } label: {
+                Label("Refresh", systemImage: "arrow.clockwise")
+                    .lineLimit(1).minimumScaleFactor(0.7)
+            }
+            .buttonStyle(.bordered)
+            .tint(StrandPalette.accent)
+            .disabled(!active)
+            .help("Refresh strap battery and connection state.")
+        }
+    }
+}
+
+// MARK: - Transport controls (POD leaf)
+
+/// Scan / Buzz / Disconnect. An `Equatable` leaf keyed on the three flags that actually gate the buttons
+/// (`connected`, `active`, `selectedModel`); `model` is a plain unobserved reference excluded from `==`.
+/// So the three-button row — each with a `minimumScaleFactor` label that's non-trivial to lay out — stops
+/// re-laying-out every second and only rebuilds when connection or strap selection changes. (live perf)
+private struct ControlsView: View, Equatable {
+    let connected: Bool
+    let active: Bool
+    let selectedModel: WhoopModel
+    let model: AppModel
+
+    static func == (lhs: ControlsView, rhs: ControlsView) -> Bool {
+        lhs.connected == rhs.connected && lhs.active == rhs.active && lhs.selectedModel == rhs.selectedModel
+    }
+
+    var body: some View {
+        // Three buttons share the row's width equally, so on a narrow iPhone each label must shrink to
+        // fit rather than wrap mid-word ("Dis-/con-/nect"). lineLimit(1)+minimumScaleFactor keeps them
+        // on one line; the icon stays. (#175)
+        HStack(spacing: 12) {
+            Button { model.scan(model: selectedModel) } label: {
+                Label(connected ? "Re-scan" : "Scan & Connect",
+                      systemImage: "antenna.radiowaves.left.and.right")
+                    .lineLimit(1).minimumScaleFactor(0.7)
+                    .frame(maxWidth: .infinity).padding(.vertical, 8)
+            }
+            .buttonStyle(.borderedProminent).tint(StrandPalette.accent)
+
+            Button { model.buzz() } label: {
+                Label("Buzz strap", systemImage: "waveform.path")
+                    .lineLimit(1).minimumScaleFactor(0.7)
+                    .frame(maxWidth: .infinity).padding(.vertical, 8)
+            }
+            .buttonStyle(.bordered).tint(StrandPalette.accent)
+            .disabled(!active)
+            .help("Fire a test haptic buzz on the strap (requires an active strap connection)")
+
+            Button(role: .destructive) { model.disconnect() } label: {
+                Label("Disconnect", systemImage: "xmark.circle")
+                    .lineLimit(1).minimumScaleFactor(0.7)
+                    .frame(maxWidth: .infinity).padding(.vertical, 8)
+            }
+            .buttonStyle(.bordered)
+            .disabled(!connected)
+        }
     }
 }

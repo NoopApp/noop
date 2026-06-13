@@ -21,7 +21,9 @@ public enum NoopMetrics {
 public struct NoopCard<Content: View>: View {
     private let padding: CGFloat
     @ViewBuilder private let content: () -> Content
+    #if os(macOS)
     @State private var hover = false
+    #endif
     public init(padding: CGFloat = NoopMetrics.cardPadding, @ViewBuilder content: @escaping () -> Content) {
         self.padding = padding; self.content = content
     }
@@ -32,15 +34,29 @@ public struct NoopCard<Content: View>: View {
             // Hover chrome (fill + border + shadow) lives in the background so its animation is
             // scoped to the card surface ONLY. It must never animate the content() subtree, or a
             // chart inside re-animates its line every time the cursor crosses the card. (#104)
-            .background {
-                RoundedRectangle(cornerRadius: NoopMetrics.cardRadius, style: .continuous)
-                    .fill(StrandPalette.surfaceRaised)
-                    .overlay(RoundedRectangle(cornerRadius: NoopMetrics.cardRadius, style: .continuous)
-                        .strokeBorder(hover ? StrandPalette.hairlineStrong : StrandPalette.hairline, lineWidth: 1))
-                    .shadow(color: .black.opacity(hover ? 0.25 : 0), radius: 10, y: 4)
-                    .animation(.easeOut(duration: 0.16), value: hover)
-            }
+            .background { cardSurface }
+        #if os(macOS)
             .onHover { hover = $0 }
+        #endif
+    }
+
+    // Touch can't hover, so iOS renders only the static resting surface — no shadow layer,
+    // no hover @State, no .onHover tracking, no .animation node. That trims the modifier
+    // count on every card, which multiplies across long scrolling lists. macOS keeps the
+    // full hover chrome (and the #104 animation scoping) unchanged.
+    @ViewBuilder private var cardSurface: some View {
+        let shape = RoundedRectangle(cornerRadius: NoopMetrics.cardRadius, style: .continuous)
+        #if os(macOS)
+        shape
+            .fill(StrandPalette.surfaceRaised)
+            .overlay(shape.strokeBorder(hover ? StrandPalette.hairlineStrong : StrandPalette.hairline, lineWidth: 1))
+            .shadow(color: .black.opacity(hover ? 0.25 : 0), radius: 10, y: 4)
+            .animation(.easeOut(duration: 0.16), value: hover)
+        #else
+        shape
+            .fill(StrandPalette.surfaceRaised)
+            .overlay(shape.strokeBorder(StrandPalette.hairline, lineWidth: 1))
+        #endif
     }
 }
 

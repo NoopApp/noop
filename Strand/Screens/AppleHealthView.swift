@@ -97,6 +97,15 @@ struct AppleHealthView: View {
         return f
     }()
 
+    /// Thousands-grouped integer formatter (steps / calories). Static so it isn't reallocated
+    /// per tile on every render. (perf plan Q3)
+    private static let groupedIntFmt: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.maximumFractionDigits = 0
+        return f
+    }()
+
     private func date(_ day: String) -> Date? { Self.dayParser.date(from: day) }
 
     // MARK: - Range control (W / M / 3M / 6M / 1Y / ALL) — the ONE pill control.
@@ -609,10 +618,7 @@ struct AppleHealthView: View {
     private func intString(_ v: Double) -> String {
         let n = Int(v.rounded())
         if abs(n) >= 1000 {
-            let f = NumberFormatter()
-            f.numberStyle = .decimal
-            f.maximumFractionDigits = 0
-            return f.string(from: NSNumber(value: n)) ?? "\(n)"
+            return Self.groupedIntFmt.string(from: NSNumber(value: n)) ?? "\(n)"
         }
         return "\(n)"
     }

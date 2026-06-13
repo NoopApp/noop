@@ -732,9 +732,10 @@ struct InsightsView: View {
             if ranked.isEmpty {
                 noEffects
             } else {
-                ForEach(ranked.indices, id: \.self) { i in
-                    effectCard(ranked[i])
-                }
+                // Key by the behaviour (the natural unique id), not the array index — otherwise
+                // re-ranking on an outcome switch re-diffs every card by position and rebuilds the
+                // whole list instead of moving stable rows. (perf plan Q11)
+                ForEach(ranked, id: \.behavior) { effectCard($0) }
             }
         }
     }

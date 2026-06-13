@@ -24,8 +24,11 @@ import Foundation
 
 struct TodayView: View {
     @EnvironmentObject var repo: Repository
-    @EnvironmentObject var live: LiveState
     @EnvironmentObject var profile: ProfileStore
+    // NOTE: TodayView deliberately does NOT observe LiveState. LiveState publishes the live HR
+    // stream at ~1Hz; observing it here would re-evaluate this whole dashboard body every second.
+    // The few strap-status fragments that need it own it themselves (SyncingHistoryGate,
+    // StrapBatteryRow, StrapSyncRow below) so the 1Hz churn is scoped to those leaves. (perf plan Q1)
 
     // Imperial/Metric display preference (D#103). Only the Weight tile carries a convertible unit here.
     @AppStorage(UnitPrefs.systemKey) private var unitSystemRaw = UnitSystem.metric.rawValue
@@ -68,23 +71,13 @@ struct TodayView: View {
                                          hasRecovery: repo.today?.recovery != nil)
     }
 
-    /// Synthesis-card copy while the recovery baseline calibrates; nil otherwise. Built as
-    /// LocalizedStringKey literals so the String Catalog picks up the %lld patterns.
-    private var calibrationStatus: LocalizedStringKey? {
-        recoveryCalibration == nil ? nil : "Calibrating"
-    }
-    private var calibrationDetail: LocalizedStringKey? {
-        guard let n = recoveryCalibration else { return nil }
-        return "Learning your baseline — \(n) of \(Baselines.minNightsSeed) nights."
-    }
-
     var body: some View {
         ScreenScaffold(title: "Control Center", subtitle: "\(dateLine)") {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                 HealthAlertBanner()
                 if repo.today?.recovery == nil {
                     // While the strap is mid-offload, say so — empty tiles read as final otherwise (#77).
-                    if live.backfilling { SyncingHistoryNote(chunks: live.syncChunksThisSession) }
+                    SyncingHistoryGate()
                     DataPendingNote(
                         title: "Live now. Your scores are building.",
                         message: "Your live heart rate is working from the strap, and charge, effort and rest build from it over your next few nights of wear, sharpening as it learns your baseline. Want your full history instantly? Import your WHOOP export in Data Sources and it backfills in about a minute."
@@ -266,6 +259,9 @@ struct TodayView: View {
     private var heroSection: some View {
         let d = repo.today
         let score = d?.recovery
+        // Computed once for the whole hero (ring overlay + synthesis card) — recoveryCalibration
+        // maps over repo.days, so calling it per use would repeat that O(n) pass. (perf plan Q2)
+        let cal = recoveryCalibration
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
             SectionHeader("Today’s Synthesis", overline: "At a glance",
                           trailing: greetingWord)
@@ -285,7 +281,7 @@ struct TodayView: View {
                         )
                         if score == nil {
                             VStack(spacing: 4) {
-                                if let n = recoveryCalibration {
+                                if let n = cal {
                                     Text("Calibrating")
                                         .font(StrandFont.title2)
                                         .foregroundStyle(StrandPalette.textTertiary)
@@ -317,8 +313,11 @@ struct TodayView: View {
                 // Right: the plain-English read-out, equal width and height.
                 InsightCard(
                     category: "Charge",
-                    status: calibrationStatus ?? "\(synthesisWord(score))",
-                    detail: calibrationDetail ?? "\(synthesisDetail(d))",
+                    // Calibration copy stays LocalizedStringKey literals so the String Catalog still
+                    // picks up the %lld patterns; `cal` reuses the single computation from above.
+                    status: cal == nil ? "\(synthesisWord(score))" : "Calibrating",
+                    detail: cal.map { "Learning your baseline — \($0) of \(Baselines.minNightsSeed) nights." }
+                        ?? "\(synthesisDetail(d))",
                     statusColor: score.map { StrandPalette.recoveryColor($0) } ?? StrandPalette.textTertiary
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -377,15 +376,17 @@ struct TodayView: View {
     private var metricsSection: some View {
         let d = repo.today
         let aLatest = appleDays.last
+        // Computed once for the Charge tile's value + caption rather than twice. (perf plan Q2)
+        let cal = recoveryCalibration
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
             SectionHeader("Key Metrics", overline: "Today", trailing: "14-day trend")
             LazyVGrid(columns: grid, alignment: .leading, spacing: NoopMetrics.gap) {
                 StatTile(
                     label: "Charge",
                     value: d?.recovery.map { "\(Int($0.rounded()))%" }
-                        ?? recoveryCalibration.map { "\($0)/\(Baselines.minNightsSeed)" } ?? "—",
+                        ?? cal.map { "\($0)/\(Baselines.minNightsSeed)" } ?? "—",
                     caption: d?.recovery.map { StrandPalette.recoveryState($0).capitalized }
-                        ?? recoveryCalibration.map { _ in "Calibrating" },
+                        ?? cal.map { _ in "Calibrating" },
                     accent: d?.recovery.map { StrandPalette.recoveryColor($0) } ?? StrandPalette.textPrimary,
                     sparkline: sparks["recovery"],
                     sparkColor: StrandPalette.accent
@@ -513,9 +514,9 @@ struct TodayView: View {
                         present: !appleDays.isEmpty,
                         detail: "\(appleDays.count) days · \(workouts.filter { $0.source == "apple-health" }.count) workouts"
                     )
-                    strapBatteryRow
+                    StrapBatteryRow()
                     Divider().overlay(StrandPalette.hairline)
-                    strapSyncRow
+                    StrapSyncRow()
                 }
             }
         }
@@ -529,86 +530,6 @@ struct TodayView: View {
             Text(present ? detail : "Not connected")
                 .font(StrandFont.captionNumber)
                 .foregroundStyle(present ? StrandPalette.textSecondary : StrandPalette.textTertiary)
-        }
-    }
-
-    /// Honest strap-sync outcome for a cloud-free app (ports the Android Live line, ed6a31d): the
-    /// stalled-offload error when the last one died, else "History synced N ago". Hidden while an
-    /// offload runs — SyncingHistoryNote already says so. TimelineView re-renders the relative label
-    /// each minute so "5 min ago" can't go stale while the window sits open with no strap connected
-    /// (LiveState publishes nothing then).
-    @ViewBuilder
-    private var strapSyncRow: some View {
-        if !live.backfilling {
-            TimelineView(.periodic(from: .now, by: 60)) { context in
-                HStack(alignment: .top, spacing: 10) {
-                    SourceBadge("Strap sync",
-                                tint: live.lastSyncError != nil ? StrandPalette.statusWarning
-                                    : live.lastSyncedAt != nil ? StrandPalette.accent
-                                    : StrandPalette.textTertiary)
-                    Spacer()
-                    if let error = live.lastSyncError {
-                        Text(error)
-                            .font(StrandFont.captionNumber)
-                            .foregroundStyle(StrandPalette.statusWarning)
-                            .multilineTextAlignment(.trailing)
-                            .fixedSize(horizontal: false, vertical: true)
-                    } else if let at = live.lastSyncedAt {
-                        Text("History synced \(relativeAgo(at, now: context.date.timeIntervalSince1970))")
-                            .font(StrandFont.captionNumber)
-                            .foregroundStyle(StrandPalette.textSecondary)
-                    } else {
-                        Text("Not synced yet")
-                            .font(StrandFont.captionNumber)
-                            .foregroundStyle(StrandPalette.textTertiary)
-                    }
-                }
-            }
-        }
-    }
-
-    /// Strap battery on the dashboard (#159) — the live reading the keep-alive refreshes, so a glance
-    /// covers charge without opening Live. Rendered ONLY while a strap is connected AND a reading
-    /// exists; otherwise the row (and its divider) isn't there at all — no empty state.
-    @ViewBuilder
-    private var strapBatteryRow: some View {
-        if live.connected, let pct = live.batteryPct {
-            Divider().overlay(StrandPalette.hairline)
-            HStack(spacing: 10) {
-                SourceBadge("Strap battery", tint: batteryTint(pct))
-                Spacer()
-                HStack(spacing: 5) {
-                    Image(systemName: batterySymbol(pct))
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(batteryTint(pct))
-                    Text("\(Int(pct.rounded()))%")
-                        .font(StrandFont.captionNumber)
-                        .foregroundStyle(StrandPalette.textSecondary)
-                }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Strap battery \(Int(pct.rounded())) percent\(live.charging == true ? ", charging" : "")")
-            }
-        }
-    }
-
-    /// Battery tint — same thresholds as the menu-bar stat (MenuBarContent.batteryTone).
-    private func batteryTint(_ pct: Double) -> Color {
-        switch pct {
-        case ..<15: return StrandPalette.statusCritical
-        case ..<35: return StrandPalette.statusWarning
-        default:    return StrandPalette.statusPositive
-        }
-    }
-
-    /// Level-banded battery glyph; the bolt variant when the strap reports charging.
-    private func batterySymbol(_ pct: Double) -> String {
-        if live.charging == true { return "battery.100.bolt" }
-        switch pct {
-        case ..<13: return "battery.0"
-        case ..<38: return "battery.25"
-        case ..<63: return "battery.50"
-        case ..<88: return "battery.75"
-        default:    return "battery.100"
         }
     }
 
@@ -786,11 +707,8 @@ struct TodayView: View {
     /// segment was dropped: the StatTile caption is lineLimit(1) and date + range + bpm clips —
     /// avg HR remains on the Workouts screen.
     private func workoutCaption(_ w: WorkoutRow) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "d MMM"
         let start = Date(timeIntervalSince1970: TimeInterval(w.startTs))
-        let date = f.string(from: start)
+        let date = Self.workoutDateFmt.string(from: start)
         guard w.endTs > w.startTs else { return "\(date) · \(Self.hrTimeFmt.string(from: start))" }
         let end = Date(timeIntervalSince1970: TimeInterval(w.endTs))
         return "\(date) · \(Self.hrTimeFmt.string(from: start))–\(Self.hrTimeFmt.string(from: end))"
@@ -798,10 +716,7 @@ struct TodayView: View {
 
     /// Thousands-grouped integer string (steps / calories).
     private func intString(_ v: Double) -> String {
-        let f = NumberFormatter()
-        f.numberStyle = .decimal
-        f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: v)) ?? "\(Int(v.rounded()))"
+        return Self.groupedIntFmt.string(from: NSNumber(value: v)) ?? "\(Int(v.rounded()))"
     }
 
     // MARK: - Date parsing (yyyy-MM-dd, en_US_POSIX, UTC)
@@ -823,6 +738,126 @@ struct TodayView: View {
         f.dateFormat = "HH:mm"
         return f
     }()
+
+    /// "d MMM" for the workout-tile caption. Static so the per-tile caption build doesn't
+    /// reallocate a DateFormatter on every render. (perf plan Q3)
+    static let workoutDateFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "d MMM"
+        return f
+    }()
+
+    /// Thousands-grouped integer formatter (steps / calories tiles). Static — see Q3.
+    static let groupedIntFmt: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.maximumFractionDigits = 0
+        return f
+    }()
+}
+
+// MARK: - Strap-status fragments
+//
+// These own the LiveState observation so TodayView itself doesn't subscribe to LiveState's
+// ~1Hz HR stream just to read a handful of static strap-status fields. Each renders only the
+// small fragment that needs `live`, so a heart-rate tick re-evaluates these leaves — not the
+// whole dashboard body. (perf plan Q1)
+
+/// Gates the "syncing history" note on the live offload flag.
+private struct SyncingHistoryGate: View {
+    @EnvironmentObject var live: LiveState
+    var body: some View {
+        if live.backfilling { SyncingHistoryNote(chunks: live.syncChunksThisSession) }
+    }
+}
+
+/// Strap battery on the dashboard (#159) — the live reading the keep-alive refreshes, so a glance
+/// covers charge without opening Live. Rendered ONLY while a strap is connected AND a reading
+/// exists; otherwise the row (and its divider) isn't there at all — no empty state. The (divider +
+/// row) are wrapped in a VStack so they lay out within this view's single slot in the card, at the
+/// same 12pt rhythm the surrounding Data Sources card uses.
+private struct StrapBatteryRow: View {
+    @EnvironmentObject var live: LiveState
+    var body: some View {
+        if live.connected, let pct = live.batteryPct {
+            VStack(alignment: .leading, spacing: 12) {
+                Divider().overlay(StrandPalette.hairline)
+                HStack(spacing: 10) {
+                    SourceBadge("Strap battery", tint: batteryTint(pct))
+                    Spacer()
+                    HStack(spacing: 5) {
+                        Image(systemName: batterySymbol(pct))
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(batteryTint(pct))
+                        Text("\(Int(pct.rounded()))%")
+                            .font(StrandFont.captionNumber)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                    }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Strap battery \(Int(pct.rounded())) percent\(live.charging == true ? ", charging" : "")")
+                }
+            }
+        }
+    }
+
+    /// Battery tint — same thresholds as the menu-bar stat (MenuBarContent.batteryTone).
+    private func batteryTint(_ pct: Double) -> Color {
+        switch pct {
+        case ..<15: return StrandPalette.statusCritical
+        case ..<35: return StrandPalette.statusWarning
+        default:    return StrandPalette.statusPositive
+        }
+    }
+
+    /// Level-banded battery glyph; the bolt variant when the strap reports charging.
+    private func batterySymbol(_ pct: Double) -> String {
+        if live.charging == true { return "battery.100.bolt" }
+        switch pct {
+        case ..<13: return "battery.0"
+        case ..<38: return "battery.25"
+        case ..<63: return "battery.50"
+        case ..<88: return "battery.75"
+        default:    return "battery.100"
+        }
+    }
+}
+
+/// Honest strap-sync outcome for a cloud-free app (ports the Android Live line, ed6a31d): the
+/// stalled-offload error when the last one died, else "History synced N ago". Hidden while an
+/// offload runs — SyncingHistoryNote already says so. TimelineView re-renders the relative label
+/// each minute so "5 min ago" can't go stale while the window sits open with no strap connected
+/// (LiveState publishes nothing then).
+private struct StrapSyncRow: View {
+    @EnvironmentObject var live: LiveState
+    var body: some View {
+        if !live.backfilling {
+            TimelineView(.periodic(from: .now, by: 60)) { context in
+                HStack(alignment: .top, spacing: 10) {
+                    SourceBadge("Strap sync",
+                                tint: live.lastSyncError != nil ? StrandPalette.statusWarning
+                                    : live.lastSyncedAt != nil ? StrandPalette.accent
+                                    : StrandPalette.textTertiary)
+                    Spacer()
+                    if let error = live.lastSyncError {
+                        Text(error)
+                            .font(StrandFont.captionNumber)
+                            .foregroundStyle(StrandPalette.statusWarning)
+                            .multilineTextAlignment(.trailing)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else if let at = live.lastSyncedAt {
+                        Text("History synced \(relativeAgo(at, now: context.date.timeIntervalSince1970))")
+                            .font(StrandFont.captionNumber)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                    } else {
+                        Text("Not synced yet")
+                            .font(StrandFont.captionNumber)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
+                }
+            }
+        }
+    }
 }
 
 // MARK: - Preview

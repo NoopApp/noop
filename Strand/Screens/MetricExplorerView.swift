@@ -30,14 +30,18 @@ private let strandDayParser: DateFormatter = {
 
 private func parseDay(_ day: String) -> Date? { strandDayParser.date(from: day) }
 
-/// "9 Jun 2026" — long, locale-stable date for the hero "as of" line.
-private func longDate(_ d: Date) -> String {
+// "d MMM yyyy" — long, locale-stable date for the hero "as of" line. File-scoped so it isn't
+// reallocated on every render/use. (perf plan Q3)
+private let strandLongDateFmt: DateFormatter = {
     let f = DateFormatter()
     f.locale = Locale(identifier: "en_US_POSIX")
     f.timeZone = TimeZone(identifier: "UTC")
     f.dateFormat = "d MMM yyyy"
-    return f.string(from: d)
-}
+    return f
+}()
+
+/// "9 Jun 2026" — long, locale-stable date for the hero "as of" line.
+private func longDate(_ d: Date) -> String { strandLongDateFmt.string(from: d) }
 
 /// The category accent (colour communicates category only — never decoration).
 private func metricAccent(_ m: MetricDescriptor) -> Color {

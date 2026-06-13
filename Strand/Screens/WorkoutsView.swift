@@ -375,17 +375,30 @@ struct WorkoutsView: View {
         }
     }
 
+    /// Stable per-row identity for the sessions list. Keying on the array offset means re-sorting
+    /// or prepending a new workout on refresh re-diffs every row by position and rebuilds the whole
+    /// LazyVStack; a content-derived id lets SwiftUI move stable rows instead. startTs+source+sport
+    /// +endTs disambiguates the same workout logged by two sources at the same second. (perf plan Q11)
+    private struct SessionItem: Identifiable {
+        let id: String
+        let index: Int
+        let row: WorkoutRow
+    }
+
     @ViewBuilder
     private func sessionsTable(rows: [WorkoutRow]) -> some View {
+        let items = rows.enumerated().map { idx, row in
+            SessionItem(id: "\(row.startTs)-\(row.source)-\(row.sport)-\(row.endTs)", index: idx, row: row)
+        }
         LazyVStack(spacing: 0) {
             sessionHeaderRow
             Divider().overlay(StrandPalette.hairline)
-            ForEach(Array(rows.enumerated()), id: \.offset) { idx, row in
-                sessionRow(row)
-                    .background(idx % 2 == 1
+            ForEach(items) { item in
+                sessionRow(item.row)
+                    .background(item.index % 2 == 1
                                 ? StrandPalette.surfaceInset.opacity(0.4)
                                 : Color.clear)
-                if idx != rows.count - 1 {
+                if item.index != items.count - 1 {
                     Divider().overlay(StrandPalette.hairline.opacity(0.5))
                 }
             }

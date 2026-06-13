@@ -10,9 +10,13 @@ import Charts
 
 /// One point on a trend line.
 public struct TrendPoint: Identifiable, Sendable {
-    public let id = UUID()
     public var date: Date
     public var value: Double
+
+    /// Stable, content-derived identity (one point per date in a series). A random
+    /// `UUID()` defeats Swift Charts' diffing — every render re-identifies all marks
+    /// and replays the draw animation; keying on the date lets Charts diff by data.
+    public var id: Date { date }
 
     public init(date: Date, value: Double) {
         self.date = date
@@ -37,6 +41,10 @@ public struct TrendChart: View {
     /// Formats a point's date for the tooltip's secondary line.
     public var dateFormat: (Date) -> String
 
+    /// Mean of all point values, computed once in `init` so the area fill's gradient
+    /// stop doesn't run an O(n) reduce for every mark on every render.
+    private let averageValue: Double
+
     public init(
         points: [TrendPoint],
         gradient: Gradient = StrandPalette.recoveryGradient,
@@ -47,7 +55,8 @@ public struct TrendChart: View {
         valueFormat: @escaping (Double) -> String = { String(Int($0.rounded())) },
         dateFormat: @escaping (Date) -> String = { TrendChart.defaultDateString($0) }
     ) {
-        self.points = points.sorted { $0.date < $1.date }
+        let sorted = points.sorted { $0.date < $1.date }
+        self.points = sorted
         self.gradient = gradient
         self.valueRange = valueRange
         self.showsArea = showsArea
@@ -55,6 +64,9 @@ public struct TrendChart: View {
         self.showsHover = showsHover
         self.valueFormat = valueFormat
         self.dateFormat = dateFormat
+        self.averageValue = sorted.isEmpty
+            ? valueRange.lowerBound
+            : sorted.map(\.value).reduce(0, +) / Double(sorted.count)
     }
 
     /// The x-position the cursor is hovering, in chart-local coordinates.
@@ -123,13 +135,17 @@ public struct TrendChart: View {
                 .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
                 .foregroundStyle(valueGradient)
             }
-            ForEach(points) { p in
-                PointMark(
-                    x: .value("Date", p.date),
-                    y: .value("Value", p.value)
-                )
-                .symbolSize(18)
-                .foregroundStyle(StrandPalette.sample(stops: gradient.toStops(), at: unit(p.value)))
+            // 18pt dots are invisible on dense series (e.g. a 365-day year) but still cost the
+            // GPU a mark each — hide them past a threshold; the line carries the data there.
+            if points.count <= 60 {
+                ForEach(points) { p in
+                    PointMark(
+                        x: .value("Date", p.date),
+                        y: .value("Value", p.value)
+                    )
+                    .symbolSize(18)
+                    .foregroundStyle(StrandPalette.sample(stops: gradient.toStops(), at: unit(p.value)))
+                }
             }
         }
         .chartYScale(domain: valueRange)
@@ -208,11 +224,6 @@ public struct TrendChart: View {
         // Belt-and-suspenders: also bound the whole chart (axes + overlay) to its frame so nothing
         // a Charts internal might draw outside the plot can reach the surrounding layout.
         .clipped()
-    }
-
-    private var averageValue: Double {
-        guard !points.isEmpty else { return valueRange.lowerBound }
-        return points.map(\.value).reduce(0, +) / Double(points.count)
     }
 }
 

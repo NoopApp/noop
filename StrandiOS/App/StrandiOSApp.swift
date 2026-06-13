@@ -43,14 +43,16 @@ struct StrandiOSApp: App {
                 .environmentObject(model.coach)
                 .environmentObject(health)
                 .preferredColorScheme(.dark)
-                .onReceive(model.live.$heartRate) { _ in
-                    liveActivity.update(
-                        bpm: model.bpm ?? model.live.heartRate,
-                        recovery: model.repo.days.last(where: { $0.recovery != nil })?
-                            .recovery.map { Int($0.rounded()) },
-                        bonded: model.live.bonded
-                    )
-                }
+                // Drive the Live Activity from BOTH the smoothed value it DISPLAYS (model.$bpm) and the
+                // raw stream (live.$heartRate). The activity shows `model.bpm` (a ~10s median), so $bpm
+                // is what must trigger a push when the shown number changes — otherwise the activity goes
+                // stale whenever the raw HR byte holds steady while the median keeps drifting. (Before
+                // the FrameRouter/BLEManager publish guards, $heartRate fired every frame and masked
+                // this; now it only fires on a real raw change.) Keep $heartRate too: on disconnect
+                // clearBiometrics sets heartRate→nil, which is the signal that ends the activity (bpm
+                // does NOT reset on disconnect). Both routes are throttled to ~2s inside the controller.
+                .onReceive(model.$bpm) { _ in refreshLiveActivity() }
+                .onReceive(model.live.$heartRate) { _ in refreshLiveActivity() }
         }
         // HealthKit authorization is intentionally NOT requested on launch. The system permission
         // dialog without prior in-app rationale violates Apple HIG / App Review guidance — the user
@@ -72,6 +74,18 @@ struct StrandiOSApp: App {
                 Task { await ShortcutHealthExport.writeIfEnabled(repo: model.repo) }
             }
         }
+    }
+
+    /// Push the current live values into the Live Activity. Driven by both `model.$bpm` (the displayed
+    /// smoothed value) and `live.$heartRate` (raw stream + the disconnect→end signal); the controller
+    /// throttles to ~2s and starts/ends the activity based on `bonded` + a non-nil bpm.
+    @MainActor private func refreshLiveActivity() {
+        liveActivity.update(
+            bpm: model.bpm ?? model.live.heartRate,
+            recovery: model.repo.days.last(where: { $0.recovery != nil })?
+                .recovery.map { Int($0.rounded()) },
+            bonded: model.live.bonded
+        )
     }
 }
 

@@ -26,6 +26,15 @@ private let compareDayParser: DateFormatter = {
 
 private func parseCompareDay(_ day: String) -> Date? { compareDayParser.date(from: day) }
 
+// "EEE d MMM yyyy" for the hover tooltip's date line. File-scoped so crosshair scrubbing
+// doesn't reallocate a DateFormatter on every pointer move. (perf plan Q3)
+private let compareTooltipDateFmt: DateFormatter = {
+    let f = DateFormatter()
+    f.locale = Locale(identifier: "en_US_POSIX")
+    f.dateFormat = "EEE d MMM yyyy"
+    return f
+}()
+
 // MARK: - Range control (shared spec — W / M / 3M / 6M / 1Y / ALL)
 
 /// The canonical Strand range window. `days == nil` means ALL of history.
@@ -744,10 +753,7 @@ private struct MultiTooltip: View {
 
     private var dateLabel: String {
         guard let d = parseCompareDay(day) else { return day }
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "EEE d MMM yyyy"
-        return f.string(from: d)
+        return compareTooltipDateFmt.string(from: d)
     }
 
     var body: some View {

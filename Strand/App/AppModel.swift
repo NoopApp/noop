@@ -187,7 +187,11 @@ final class AppModel: ObservableObject {
         hrWindow.removeAll { now.timeIntervalSince($0.t) > 10 }   // ~10s window
         if hrWindow.count > 40 { hrWindow.removeFirst(hrWindow.count - 40) }
         let vals = hrWindow.map(\.v).sorted()
-        bpm = vals.isEmpty ? nil : Int(vals[vals.count / 2].rounded())
+        // live perf: only republish when the SMOOTHED value actually changes. ingestHR fires on every
+        // heartRate AND rr update (~1–3 Hz), but the median is stable across most of them — an
+        // unconditional assign re-renders every bpm observer (Live, menu bar, widgets) for nothing.
+        let smoothed = vals.isEmpty ? nil : Int(vals[vals.count / 2].rounded())
+        if bpm != smoothed { bpm = smoothed }
         captureWorkoutSample()
         evaluateStress()
     }
