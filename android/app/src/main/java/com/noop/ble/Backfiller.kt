@@ -8,6 +8,7 @@ import com.noop.protocol.DeviceFamily
 import com.noop.protocol.Framing
 import com.noop.protocol.HistoricalMeta
 import com.noop.protocol.classifyHistoricalMeta
+import com.noop.protocol.decodeHistorical
 import com.noop.protocol.extractHistoricalStreams
 import com.noop.protocol.rejectedHistoricalRecords
 import kotlinx.coroutines.sync.Mutex
@@ -141,6 +142,14 @@ class Backfiller(
     private var loggedNoCursor = false
 
     /**
+     * Distinct historical record-layout versions logged this session. Before this, only the unmapped/
+     * reject path surfaced a version, so a HEALTHY log never revealed which layout the strap emits
+     * (v24/v25 on 4.0, v18/v26 on 5/MG) — exactly the firmware→layout signal triage needs. Reset in
+     * [begin]; each distinct layout is logged once per session.
+     */
+    private val loggedLayoutVersions = HashSet<Int>()
+
+    /**
      * Called by [WhoopBleClient] when the strap signals a historical offload is beginning.
      * chunkOpen starts TRUE: the biometric replay streams records immediately and sends one
      * HISTORY_START then repeated HISTORY_ENDs, so we must accumulate from the outset.
@@ -153,6 +162,7 @@ class Backfiller(
         sessionMotionRows = 0
         sessionNightKeys.clear()
         loggedNoCursor = false
+        loggedLayoutVersions.clear()
         synchronized(chunkLock) {
             chunk.clear()
             chunkOpen = true
@@ -219,6 +229,11 @@ class Backfiller(
         if (frames.isNotEmpty()) {
             val ref = clockRef
             val decoded = extractHistoricalStreams(frames, ref.device, ref.wall, family)
+            // Observability: which historical layout does this strap emit? Only the unmapped/reject path
+            // logged a version before, so a healthy sync never revealed v24/v25 (4.0) or v18/v26 (5/MG).
+            // Sample the chunk's first genuine record (null ⇒ console/CRC-fail); log each layout once/session.
+            frames.firstNotNullOfOrNull { decodeHistorical(it, family)?.get("hist_version") as? Int }
+                ?.let { if (loggedLayoutVersions.add(it)) log("Backfill: historical records use layout v$it") }
             // #77 / #91: HISTORICAL_DATA record frames that fail decode (CRC failure, or an unmapped
             // layout the v24 fallback's plausibility gate also rejects) used to be acked anyway — the
             // strap trims acked history, so the user's ONLY copy of those records was permanently

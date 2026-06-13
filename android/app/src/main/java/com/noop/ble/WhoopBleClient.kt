@@ -1178,6 +1178,10 @@ class WhoopBleClient(
                     handler.removeCallbacks(scanTimeoutRunnable)
                     _state.value = _state.value.copy(connected = true, scanning = false, statusNote = null, encryptedBond = false, reconnectGuide = null)
                     serviceDiscoveryKicked.set(false)
+                    // Capture link signal strength on connect (logged via onReadRemoteRssi). The scan
+                    // "Discovered … (rssi …)" line never fires on a direct/auto-reconnect, so without this a
+                    // weak-link sync (drops, busy storms) isn't diagnosable from the strap log.
+                    g.readRemoteRssi()
                     // Request the larger MTU BEFORE discovery/subscribe so the offload isn't capped at
                     // 20-byte notifications (the official app does this in its GATT init). Discovery is
                     // gated on the result with a fallback timeout, so a stack that ignores requestMtu
@@ -1201,6 +1205,12 @@ class WhoopBleClient(
             // idempotent, so a late callback after the fallback timeout already fired is a no-op. (PR #85)
             log("MTU negotiated: $mtu (status=$status)")
             kickServiceDiscovery(g, "mtu=$mtu")
+        }
+
+        override fun onReadRemoteRssi(g: BluetoothGatt, rssi: Int, status: Int) {
+            // Signal strength at connect — diagnoses weak-link syncs (drops/busy storms/timeouts) that
+            // otherwise look mysterious in the log. Only on a clean read; a failure just stays silent.
+            if (status == BluetoothGatt.GATT_SUCCESS) log("Signal: RSSI $rssi dBm")
         }
 
         @SuppressLint("MissingPermission")
