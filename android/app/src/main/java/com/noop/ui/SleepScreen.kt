@@ -37,6 +37,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -111,6 +112,10 @@ fun SleepScreen(
     // mergeSleep but WITHOUT the per-night collapse). Keyed on `days` so a sync/import (which always
     // rewrites dailyMetric too) reloads; these reads have no Flow. (#160, #170)
     var sleeps by remember { mutableStateOf<List<SleepSession>>(emptyList()) }
+    // 0 = latest night, N = N sleep-sessions back. Snaps back to the newest night only on a
+    // real data reload (new sync / re-import via days changing). Optimistic time edits do NOT
+    // reset this so the user stays on the night they just edited. (#160)
+    var nightOffset by remember { mutableIntStateOf(0) }
     LaunchedEffect(days) {
         sleeps = runCatching {
             val now = System.currentTimeMillis() / 1000L
@@ -120,13 +125,8 @@ fun SleepScreen(
             val computedOnly = computed.filter { AnalyticsEngine.dayString(it.endTs) !in importedDays }
             (imported + computedOnly).sortedBy { it.startTs }
         }.getOrDefault(emptyList())
+        nightOffset = 0
     }
-
-    // 0 = latest night, N = N sleep-sessions back. Snaps back to the newest night when the
-    // list itself changes (new night synced / re-import); structural equality keeps no-op
-    // reloads from resetting a browse in progress. (#160)
-    var nightOffset by remember { mutableIntStateOf(0) }
-    LaunchedEffect(sleeps) { nightOffset = 0 }
 
     // Export-verbatim sleep figures (sleep_performance / consistency / need / debt) — the
     // headline tiles prefer them over the on-device approximations. Keyed on `days` so a
@@ -151,7 +151,7 @@ fun SleepScreen(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val metricSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var detailMetricKey by remember { mutableStateOf<String?>(null) }
-    @Suppress("UNUSED_VARIABLE") val scope = rememberCoroutineScope()
+    val scope = rememberCoroutineScope()
     LaunchedEffect(sleeps) {
         val latestEnd = sleeps.lastOrNull()?.endTs ?: return@LaunchedEffect
         val nowS = System.currentTimeMillis() / 1000L
@@ -245,11 +245,23 @@ fun SleepScreen(
                 onNavigate = { nightOffset = it },
                 session = night?.session,
                 onUpdateTimes = { s, start, end ->
-                    vm.updateSleepSessionTimes(s, start, end)
-                    // Optimistic update: immediately reflect new timestamps so the header re-renders.
+                    // Optimistic update so the header re-renders immediately.
                     sleeps = sleeps.map {
                         if (it.deviceId == s.deviceId && it.startTs == s.startTs) it.copy(startTs = start, endTs = end)
                         else it
+                    }
+                    scope.launch {
+                        // Await the DB write, then reload to get the canonical state and eliminate
+                        // any stale computed sessions that might overlap the edited night.
+                        vm.updateSleepSessionTimes(s, start, end)
+                        sleeps = runCatching {
+                            val now = System.currentTimeMillis() / 1000L
+                            val imported = vm.repo.sleepSessions("my-whoop", 0L, now)
+                            val computed = vm.repo.sleepSessions(vm.repo.computedDeviceId("my-whoop"), 0L, now)
+                            val importedDays = imported.map { AnalyticsEngine.dayString(it.endTs) }.toHashSet()
+                            val computedOnly = computed.filter { AnalyticsEngine.dayString(it.endTs) !in importedDays }
+                            (imported + computedOnly).sortedBy { it.startTs }
+                        }.getOrDefault(sleeps)
                     }
                 },
                 onPickNightDate = onPickNightDate,
@@ -298,9 +310,10 @@ private fun Hero(
             }
         } else {
             val s = display.stages
+            val inBedMin = session?.let { (it.endTs - it.startTs) / 60.0 } ?: s.total
             ChartCard(
                 title = "Stage breakdown",
-                subtitle = "${durationText(s.total)} in bed · ${display.efficiencyText} efficiency" +
+                subtitle = "${durationText(inBedMin)} in bed · ${display.efficiencyText} efficiency" +
                     (if (display.realSegments != null) " · approx. stages (on-device)" else ""),
                 trailing = durationText(s.asleep),
                 footer = {
@@ -382,35 +395,38 @@ private fun NightNavHeader(
             textContentColor = Palette.textSecondary,
             title = { Text("Adjust sleep times", style = NoopType.headline) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(Metrics.space2)) {
+                Column(verticalArrangement = Arrangement.spacedBy(Metrics.space6)) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(blockShape2)
+                            .background(Palette.surfaceOverlay)
                             .clickable { showTimeChoice = false; editingBed = true }
-                            .padding(Metrics.selectorPadding),
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Overline("Bedtime", color = Palette.textTertiary)
-                            Text(bedText, style = NoopType.captionNumber, color = Palette.textPrimary)
+                            Spacer(Modifier.height(4.dp))
+                            Text(bedText, style = NoopType.headline, color = Palette.textPrimary)
                         }
-                        Icon(Icons.Filled.Edit, contentDescription = null, tint = Palette.accent, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Filled.Edit, contentDescription = null, tint = Palette.accent, modifier = Modifier.size(20.dp))
                     }
-                    Box(modifier = Modifier.fillMaxWidth().height(Metrics.divider).background(Palette.hairline))
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(blockShape2)
+                            .background(Palette.surfaceOverlay)
                             .clickable { showTimeChoice = false; editingWake = true }
-                            .padding(Metrics.selectorPadding),
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Overline("Wake-up", color = Palette.textTertiary)
-                            Text(wakeText, style = NoopType.captionNumber, color = Palette.textPrimary)
+                            Spacer(Modifier.height(4.dp))
+                            Text(wakeText, style = NoopType.headline, color = Palette.textPrimary)
                         }
-                        Icon(Icons.Filled.Edit, contentDescription = null, tint = Palette.accent, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Filled.Edit, contentDescription = null, tint = Palette.accent, modifier = Modifier.size(20.dp))
                     }
                 }
             },

@@ -381,11 +381,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** All workouts for the Workouts screen (newest first), dismissed detected bouts removed. */
     val workouts: StateFlow<List<WorkoutRow>> = _workouts.asStateFlow()
 
-    /** Re-read every source + the dismissed markers and republish [workouts]. */
-    fun updateSleepSessionTimes(session: com.noop.data.SleepSession, newStartTs: Long, newEndTs: Long) {
-        viewModelScope.launch {
-            runCatching { repository.updateSleepSessionTimes(session, newStartTs, newEndTs) }
-        }
+    suspend fun updateSleepSessionTimes(session: com.noop.data.SleepSession, newStartTs: Long, newEndTs: Long) {
+        runCatching { repository.updateSleepSessionTimes(session, newStartTs, newEndTs) }
     }
 
     fun loadWorkouts() {
