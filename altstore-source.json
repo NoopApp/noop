@@ -18,6 +18,15 @@
       "screenshotURLs": [],
       "versions": [
         {
+          "version": "2.8.3",
+          "buildVersion": "46",
+          "date": "2026-06-13",
+          "localizedDescription": "iOS fix: imported data + strap sync no longer stuck on locked-device data protection (#222).",
+          "downloadURL": "https://github.com/NoopApp/noop/releases/download/v2.8.3/NOOP-v2.8.3-ios.ipa",
+          "size": 5779986,
+          "minOSVersion": "17.0"
+        },
+        {
           "version": "2.8.2",
           "buildVersion": "45",
           "date": "2026-06-13",
@@ -136,12 +145,12 @@
           "NSHealthUpdateUsageDescription": "NOOP writes the metrics it computes from your strap back into Apple Health, on-device and only when you allow it."
         }
       },
-      "version": "2.8.2",
-      "buildVersion": "45",
+      "version": "2.8.3",
+      "buildVersion": "46",
       "versionDate": "2026-06-13",
-      "versionDescription": "Cross-platform parity: Android scoring now matches macOS & iOS (#219).",
-      "downloadURL": "https://github.com/NoopApp/noop/releases/download/v2.8.2/NOOP-v2.8.2-ios.ipa",
-      "size": 5776857,
+      "versionDescription": "iOS fix: imported data + strap sync no longer stuck on locked-device data protection (#222).",
+      "downloadURL": "https://github.com/NoopApp/noop/releases/download/v2.8.3/NOOP-v2.8.3-ios.ipa",
+      "size": 5779986,
       "minOSVersion": "17.0"
     }
   ],
