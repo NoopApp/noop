@@ -37,6 +37,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
@@ -167,6 +168,10 @@ fun SleepScreen(vm: AppViewModel) {
                 StagesVsTypical(model)
                 Spacer(Modifier.height(Metrics.selectorTopUp))
                 DurationTrend(model)
+                Spacer(Modifier.height(Metrics.selectorTopUp))
+                HoursVsNeededCard(model)
+                Spacer(Modifier.height(Metrics.selectorTopUp))
+                SleepConsistencyCard(sleeps)
             }
         }
     }
@@ -1155,4 +1160,316 @@ internal fun parsePersistedSegments(json: String?): List<PersistedSegment>? {
         }
         out.takeIf { it.size >= 2 }
     }.getOrNull()
+}
+// MARK: - Hours vs Needed card
+
+@Composable
+internal fun HoursVsNeededCard(m: SleepModel) {
+    val sleptH = (m.stages.asleep / 60.0)
+    val neededH = (m.trendNeedHours.lastOrNull() ?: 8.0)
+    val debtH = m.trendDebtHours.lastOrNull() ?: 0.0
+    val score = (sleptH / neededH * 100.0).coerceIn(0.0, 100.0)
+    val trendArrow = if (m.trendHours.size >= 2) {
+        val delta = m.trendHours.last() - m.trendHours[m.trendHours.lastIndex - 1]
+        when {
+            delta > 0.25 -> "↑"
+            delta < -0.25 -> "↓"
+            else -> "→"
+        }
+    } else "→"
+    val arrowColor = when (trendArrow) {
+        "↑" -> Palette.statusPositive
+        "↓" -> Palette.statusCritical
+        else -> Palette.textTertiary
+    }
+
+    NoopCard(padding = Metrics.cardPadding) {
+        Column(verticalArrangement = Arrangement.spacedBy(Metrics.space14)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Overline("Sleep")
+                    Text("Hours vs Needed", style = NoopType.headline, color = Palette.textPrimary)
+                }
+                Text(trendArrow, style = NoopType.title2, color = arrowColor)
+                Spacer(Modifier.width(6.dp))
+                Text("${score.roundToInt()}%", style = NoopType.chartValue, color = Palette.accent)
+            }
+
+            // Gradient progress bar: slept / needed.
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(Metrics.progressHeight)
+                    .clip(RoundedCornerShape(Metrics.cornerPill))
+                    .background(Palette.surfaceInset),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth((sleptH / neededH).coerceIn(0.0, 1.0).toFloat())
+                        .height(Metrics.progressHeight)
+                        .clip(RoundedCornerShape(Metrics.cornerPill))
+                        .background(Brush.horizontalGradient(listOf(Palette.accent.copy(alpha = 0.6f), Palette.accent))),
+                )
+            }
+
+            // Stacked component bar: Healthy Min / Strain buffer / Debt repayment.
+            val healthyMin = 7.0
+            val strainBuffer = (neededH - healthyMin).coerceAtLeast(0.0)
+            val debtRepay = debtH.coerceAtLeast(0.0)
+            val totalBar = (healthyMin + strainBuffer + debtRepay).coerceAtLeast(1.0)
+            Row(modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(Metrics.cornerPill))) {
+                Box(modifier = Modifier.weight((healthyMin / totalBar).toFloat()).background(Palette.metricPurple))
+                if (strainBuffer > 0) Box(modifier = Modifier.weight((strainBuffer / totalBar).toFloat()).background(Palette.strain066))
+                if (debtRepay > 0) Box(modifier = Modifier.weight((debtRepay / totalBar).toFloat()).background(Palette.statusCritical))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(Metrics.space14)) {
+                LegendDot("Healthy Min", Palette.metricPurple)
+                LegendDot("Strain", Palette.strain066)
+                LegendDot("Debt", Palette.statusCritical)
+            }
+
+            Box(modifier = Modifier.fillMaxWidth().height(Metrics.divider).background(Palette.hairline))
+            Row(modifier = Modifier.fillMaxWidth()) {
+                listOf(
+                    "Slept" to String.format(Locale.US, "%.1f h", sleptH),
+                    "Needed" to String.format(Locale.US, "%.1f h", neededH),
+                    "Debt" to if (debtH > 0.05) String.format(Locale.US, "%.1f h", debtH) else "None",
+                ).forEach { (lbl, v) ->
+                    Column(modifier = Modifier.weight(1f)) {
+                        Overline(lbl, color = Palette.textTertiary)
+                        Text(v, style = NoopType.captionNumber, color = Palette.textPrimary)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LegendDot(label: String, color: Color) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Box(modifier = Modifier.size(6.dp).clip(RoundedCornerShape(50)).background(color))
+        Text(label, style = NoopType.footnote, color = Palette.textTertiary)
+    }
+}
+
+// MARK: - Sleep Consistency card
+
+@Composable
+internal fun SleepConsistencyCard(sleeps: List<SleepSession>) {
+    val recent = sleeps.takeLast(14)
+    if (recent.size < 3) return
+
+    data class NightTiming(val label: String, val bedHour: Float, val wakeHour: Float)
+    val sdf = java.text.SimpleDateFormat("EEE", java.util.Locale.US)
+    val timings = recent.map { s ->
+        val bedCal = Calendar.getInstance().apply { timeInMillis = s.startTs * 1000L }
+        val wakeCal = Calendar.getInstance().apply { timeInMillis = s.endTs * 1000L }
+        val bedH = bedCal.get(Calendar.HOUR_OF_DAY) + bedCal.get(Calendar.MINUTE) / 60f
+        val bedNorm = if (bedH > 12f) bedH - 24f else bedH
+        val wakeH = wakeCal.get(Calendar.HOUR_OF_DAY) + wakeCal.get(Calendar.MINUTE) / 60f
+        NightTiming(sdf.format(Date(s.endTs * 1000L)), bedNorm, wakeH)
+    }
+
+    fun sd(vals: List<Float>): Float {
+        val m = vals.average().toFloat()
+        return kotlin.math.sqrt(vals.sumOf { ((it - m) * (it - m)).toDouble() }.toFloat() / vals.size)
+    }
+    val bedSdH = sd(timings.map { it.bedHour })
+    val wakeSdH = sd(timings.map { it.wakeHour })
+    val typicalBed = timings.map { it.bedHour }.average().toFloat()
+    val typicalWake = timings.map { it.wakeHour }.average().toFloat()
+    // Count nights where bed AND wake are within 45 min of the typical.
+    val threshold = 0.75f
+    val consistentNights = timings.count { t ->
+        abs(t.bedHour - typicalBed) <= threshold && abs(t.wakeHour - typicalWake) <= threshold
+    }
+    val consistencyPct = (consistentNights.toFloat() / timings.size * 100f).coerceIn(0f, 100f)
+    val typicalBedLabel = run {
+        val h = ((typicalBed + 24f) % 24f).toInt()
+        String.format(Locale.US, "%02d:00", h)
+    }
+    val typicalWakeLabel = String.format(Locale.US, "%02d:00", typicalWake.toInt().coerceIn(0, 23))
+
+    // Y from −4h (20:00) to 14h (14:00 next day) — covers late risers.
+    val yMin = -4f; val yMax = 14f; val yRange = yMax - yMin
+
+    fun hourToLabel(h: Float): String {
+        val norm = ((h % 24f) + 24f) % 24f
+        return String.format(Locale.US, "%02d:00", norm.toInt())
+    }
+
+    NoopCard(padding = Metrics.cardPadding) {
+        Column(verticalArrangement = Arrangement.spacedBy(Metrics.space14)) {
+            // Header: title + trend-score
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Overline("Schedule")
+                    Text("Bedtime & wake time", style = NoopType.headline, color = Palette.textPrimary)
+                    Text("Sleep window over recent nights", style = NoopType.footnote, color = Palette.textSecondary)
+                }
+                Text("${consistencyPct.roundToInt()}%", style = NoopType.chartValue, color = Palette.accent)
+            }
+
+            // Canvas chart — clipped so bars never bleed outside the 160dp box.
+            val accentColor = Palette.accent
+            val purpleColor = Palette.metricPurple
+            val hairlineColor = Palette.hairline
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(160.dp)
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(Metrics.cornerSm))
+                    .drawBehind {
+                        val yAxisW = 52f
+                        val chartW = size.width - yAxisW
+                        val chartH = size.height
+
+                        val gridHours = listOf(-4f, 0f, 4f, 8f, 12f)
+                        val paint = android.graphics.Paint().apply {
+                            color = Palette.textTertiary.toArgb()
+                            textSize = 26f
+                            isAntiAlias = true
+                        }
+                        gridHours.forEach { h ->
+                            val y = (chartH * ((h - yMin) / yRange)).coerceIn(0f, chartH)
+                            drawLine(color = hairlineColor, start = Offset(yAxisW, y), end = Offset(size.width, y), strokeWidth = 1f)
+                            // Draw label below the gridline (top of chart = earliest time).
+                            val textY = (y + 16f).coerceIn(20f, chartH - 4f)
+                            drawContext.canvas.nativeCanvas.drawText(hourToLabel(h), 0f, textY, paint)
+                        }
+
+                        // Per-night bars (bed → wake), coordinates clamped to [0, chartH].
+                        val barW = (chartW / timings.size * 0.6f).coerceAtLeast(4f)
+                        val step = chartW / timings.size
+                        timings.forEachIndexed { i, t ->
+                            val cx = yAxisW + step * i + step / 2f
+                            val rawBedY = chartH * ((t.bedHour - yMin) / yRange)
+                            val rawWakeY = chartH * ((t.wakeHour - yMin) / yRange)
+                            val topY = minOf(rawBedY, rawWakeY).coerceIn(0f, chartH)
+                            val botY = maxOf(rawBedY, rawWakeY).coerceIn(0f, chartH)
+                            val barH = (botY - topY).coerceAtLeast(4f)
+                            drawRoundRect(
+                                color = accentColor.copy(alpha = 0.65f),
+                                topLeft = Offset(cx - barW / 2f, topY),
+                                size = androidx.compose.ui.geometry.Size(barW, barH),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(barW / 4f),
+                            )
+                        }
+
+                        // Dashed typical bed (purple) / wake (accent) overlay lines.
+                        val dashLen = 12f; val gapLen = 8f
+                        listOf(typicalBed to purpleColor, typicalWake to accentColor).forEach { (h, col) ->
+                            val y = (chartH * ((h - yMin) / yRange)).coerceIn(0f, chartH)
+                            var x = yAxisW
+                            while (x < size.width) {
+                                drawLine(col.copy(alpha = 0.7f), Offset(x, y), Offset(minOf(x + dashLen, size.width), y), strokeWidth = 2f)
+                                x += dashLen + gapLen
+                            }
+                        }
+                    },
+            ) {}
+
+            // X-axis day labels (first, mid, last).
+            Row(modifier = Modifier.fillMaxWidth().padding(start = 52.dp)) {
+                val xLabels = listOf(
+                    timings.firstOrNull()?.label.orEmpty(),
+                    timings.getOrNull(timings.size / 2)?.label.orEmpty(),
+                    timings.lastOrNull()?.label.orEmpty(),
+                )
+                xLabels.forEach { lbl ->
+                    Text(lbl, style = NoopType.footnote, color = Palette.textTertiary, modifier = Modifier.weight(1f))
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(Metrics.space14)) {
+                LegendDot("Typical bedtime  $typicalBedLabel", Palette.metricPurple)
+                LegendDot("Wake  $typicalWakeLabel", Palette.accent)
+            }
+
+            Box(modifier = Modifier.fillMaxWidth().height(Metrics.divider).background(Palette.hairline))
+            Row(modifier = Modifier.fillMaxWidth()) {
+                listOf(
+                    "Score" to "${consistencyPct.roundToInt()}%",
+                    "Typical" to "${((bedSdH + wakeSdH) / 2f * 60f).roundToInt()} min SD",
+                    "Nights" to "${recent.size}",
+                ).forEach { (lbl, v) ->
+                    Column(modifier = Modifier.weight(1f)) {
+                        Overline(lbl, color = Palette.textTertiary)
+                        Text(v, style = NoopType.captionNumber, color = Palette.textPrimary)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Sleep Metric Detail screen
+
+private enum class SleepMetricRange(val label: String, val days: Long?) {
+    WEEK("W", 7), MONTH("M", 30), THREE_MONTH("3M", 90),
+    SIX_MONTH("6M", 180), YEAR("1Y", 365), ALL("ALL", null),
+}
+
+private data class SleepMetricSpec(
+    val title: String,
+    val unit: String,
+    val color: Color,
+    val format: (Double) -> String,
+)
+
+private fun sleepMetricSpec(key: String): SleepMetricSpec = when (key) {
+    "performance"    -> SleepMetricSpec("Rest", "%", Palette.accent) { "${it.roundToInt()}" }
+    "efficiency"     -> SleepMetricSpec("Sleep Efficiency", "%", Palette.statusPositive) { "${it.roundToInt()}" }
+    "consistency"    -> SleepMetricSpec("Consistency", "%", Palette.metricCyan) { "${it.roundToInt()}" }
+    "hours_vs_needed"-> SleepMetricSpec("Hours vs Needed", "%", Palette.accent) { "${it.roundToInt()}" }
+    "restorative"    -> SleepMetricSpec("Restorative", "%", Palette.sleepREM) { "${it.roundToInt()}" }
+    "respiratory"    -> SleepMetricSpec("Respiratory Rate", "rpm", Palette.metricPurple) { String.format(Locale.US, "%.1f", it) }
+    "sleep_debt"     -> SleepMetricSpec("Sleep Debt", "h", Palette.metricRose) { String.format(Locale.US, "%.1f", it) }
+    else             -> SleepMetricSpec(key, "", Palette.accent) { "${it.roundToInt()}" }
+}
+
+private fun buildSleepMetricPoints(days: List<DailyMetric>, key: String): List<Pair<String, Double>> {
+    val needMin = max(450.0, days.mapNotNull { it.totalSleepMin?.takeIf { m -> m > 0.0 } }.average().let { if (it.isNaN()) 480.0 else it })
+    return days.mapNotNull { d ->
+        val v: Double? = when (key) {
+            "performance" -> d.totalSleepMin?.takeIf { it > 0.0 && needMin > 0.0 }?.let { minOf(100.0, it / needMin * 100.0) }
+            "efficiency"  -> d.efficiency?.let { if (it <= 1.0) it * 100.0 else it }
+            "consistency" -> {
+                val idx = days.indexOf(d)
+                val lo = max(0, idx - 13)
+                val window = days.subList(lo, idx + 1).mapNotNull { it.totalSleepMin?.takeIf { m -> m > 0.0 } }
+                if (window.size < 3) null else {
+                    val m = window.average()
+                    val sd = kotlin.math.sqrt(window.sumOf { (it - m) * (it - m) } / window.size)
+                    (100.0 * (1.0 - sd / 90.0)).coerceIn(0.0, 100.0)
+                }
+            }
+            "hours_vs_needed" -> d.totalSleepMin?.takeIf { it > 0.0 }?.let { minOf(100.0, it / needMin * 100.0) }
+            "restorative" -> {
+                val dp = d.deepMin ?: return@mapNotNull null
+                val rm = d.remMin ?: return@mapNotNull null
+                val sl = d.totalSleepMin ?: return@mapNotNull null
+                if (sl > 0.0) (dp + rm) / sl * 100.0 else null
+            }
+            "respiratory" -> d.respRateBpm
+            "sleep_debt"  -> d.totalSleepMin?.let { max(0.0, needMin - it) / 60.0 }
+            else          -> null
+        }
+        v?.takeIf { it.isFinite() }?.let { d.day to it }
+    }
+}
+
+private fun filterSleepMetricPoints(
+    points: List<Pair<String, Double>>,
+    range: SleepMetricRange,
+): List<Pair<String, Double>> {
+    val windowDays = range.days ?: return points
+    val latestDate = points.lastOrNull()?.first?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+        ?: return points.takeLast(windowDays.toInt())
+    val cutoff = latestDate.minusDays(windowDays - 1)
+    val filtered = points.filter { (day, _) ->
+        runCatching { LocalDate.parse(day) }.getOrNull()?.let { !it.isBefore(cutoff) } ?: false
+    }
+    return filtered.ifEmpty { points.takeLast(windowDays.toInt()) }
 }
