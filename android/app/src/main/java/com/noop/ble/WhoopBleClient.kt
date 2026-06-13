@@ -336,6 +336,9 @@ class WhoopBleClient(
          *  write on the same looper tick — before Android's GATT has accepted the previous one, which it
          *  then rejects. A small gap lets the stack settle and largely eliminates the rejections (#77). */
         private const val WITHOUT_RESPONSE_PACE_MS = 8L
+        /** Delay before reading link RSSI after connect — past the bond/MTU/discovery handshake so the
+         *  read can't occupy the single GATT op slot the critical setup commands need. Diagnostic only. */
+        private const val RSSI_READ_DELAY_MS = 3000L
 
         /**
          * True when a frame is part of the historical offload (HISTORICAL_DATA=47, EVENT=48,
@@ -1178,10 +1181,13 @@ class WhoopBleClient(
                     handler.removeCallbacks(scanTimeoutRunnable)
                     _state.value = _state.value.copy(connected = true, scanning = false, statusNote = null, encryptedBond = false, reconnectGuide = null)
                     serviceDiscoveryKicked.set(false)
-                    // Capture link signal strength on connect (logged via onReadRemoteRssi). The scan
-                    // "Discovered … (rssi …)" line never fires on a direct/auto-reconnect, so without this a
-                    // weak-link sync (drops, busy storms) isn't diagnosable from the strap log.
-                    g.readRemoteRssi()
+                    // Capture link signal strength (logged via onReadRemoteRssi) — the scan
+                    // "Discovered … (rssi …)" line never fires on a direct/auto-reconnect, so a weak-link
+                    // sync (drops, busy storms) is otherwise undiagnosable. DEFERRED past the connect
+                    // handshake: Android runs ONE GATT op at a time, so reading RSSI here (before
+                    // requestMtu) could make requestMtu return false → MTU negotiation skipped → offload
+                    // notifications capped. A stray read after setup is harmless (just no RSSI line).
+                    handler.postDelayed({ gatt?.readRemoteRssi() }, RSSI_READ_DELAY_MS)
                     // Request the larger MTU BEFORE discovery/subscribe so the offload isn't capped at
                     // 20-byte notifications (the official app does this in its GATT init). Discovery is
                     // gated on the result with a fallback timeout, so a stack that ignores requestMtu
