@@ -14,29 +14,38 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import android.app.TimePickerDialog
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -81,8 +90,9 @@ import kotlin.math.roundToInt
  * shows an honest empty state, and a navigated night with no usable stage data says so
  * instead of silently showing another night (#160).
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SleepScreen(vm: AppViewModel) {
+fun SleepScreen(vm: AppViewModel, onOpenJournal: () -> Unit = {}) {
     val days by vm.recentDays.collectAsStateWithLifecycle()
     val live by vm.live.collectAsStateWithLifecycle()
 
@@ -126,6 +136,61 @@ fun SleepScreen(vm: AppViewModel) {
         )
     }
 
+    // Journal wake-prompt: shown once per day when the latest sleep session ended within
+    // the last 12 hours (the user just woke up) and hasn't been prompted today yet.
+    val context = LocalContext.current
+    var showJournalPrompt by remember { mutableStateOf(false) }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    @Suppress("UNUSED_VARIABLE") val scope = rememberCoroutineScope()
+    LaunchedEffect(sleeps) {
+        val latestEnd = sleeps.lastOrNull()?.endTs ?: return@LaunchedEffect
+        val nowS = System.currentTimeMillis() / 1000L
+        val hoursAgo = (nowS - latestEnd) / 3600.0
+        if (hoursAgo in 0.0..12.0) {
+            val today = java.time.LocalDate.now().toString()
+            val prefs = NoopPrefs.of(context)
+            val lastPrompted = prefs.getString(NoopPrefs.KEY_LAST_JOURNAL_PROMPT, "")
+            if (lastPrompted != today) {
+                prefs.edit().putString(NoopPrefs.KEY_LAST_JOURNAL_PROMPT, today).apply()
+                showJournalPrompt = true
+            }
+        }
+    }
+
+    if (showJournalPrompt) {
+        ModalBottomSheet(
+            onDismissRequest = { showJournalPrompt = false },
+            sheetState = sheetState,
+            containerColor = Palette.surfaceRaised,
+            contentColor = Palette.textPrimary,
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Text("Good morning!", style = NoopType.title2, color = Palette.textPrimary)
+                Text(
+                    "Your night data is in. Logging how you felt helps NOOP learn what drives your best recovery.",
+                    style = NoopType.subhead,
+                    color = Palette.textSecondary,
+                )
+                androidx.compose.material3.Button(
+                    onClick = { showJournalPrompt = false; onOpenJournal() },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Palette.accent),
+                ) {
+                    Text("Open Journal", style = NoopType.headline, color = Palette.surfaceBase)
+                }
+                androidx.compose.material3.TextButton(
+                    onClick = { showJournalPrompt = false },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Maybe later", style = NoopType.subhead, color = Palette.textTertiary)
+                }
+            }
+        }
+    }
+
     // The navigated night, decoded once per (offset, data) change — chevron taps re-pick
     // instantly without re-parsing stagesJSON on every recomposition. (#160)
     val night = remember(nightOffset, sleeps, days) { selectNight(sleeps, days, nightOffset) }
@@ -149,6 +214,8 @@ fun SleepScreen(vm: AppViewModel) {
                 nightOffset = nightOffset,
                 lastIndex = max(sleeps.lastIndex, 0),
                 onNavigate = { nightOffset = it },
+                session = night?.session,
+                onUpdateTimes = { s, start, end -> vm.updateSleepSessionTimes(s, start, end) },
             )
             if (model != null) {
                 Spacer(Modifier.height(Metrics.selectorTopUp))
@@ -157,6 +224,10 @@ fun SleepScreen(vm: AppViewModel) {
                 StagesVsTypical(model)
                 Spacer(Modifier.height(Metrics.selectorTopUp))
                 DurationTrend(model)
+                Spacer(Modifier.height(Metrics.selectorTopUp))
+                HoursVsNeededCard(model)
+                Spacer(Modifier.height(Metrics.selectorTopUp))
+                SleepConsistencyCard(sleeps)
             }
         }
     }
@@ -164,6 +235,7 @@ fun SleepScreen(vm: AppViewModel) {
 
 // MARK: - 1. HERO — stage breakdown for the navigated night
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun Hero(
     display: HeroDisplay?,
@@ -171,9 +243,11 @@ private fun Hero(
     nightOffset: Int,
     lastIndex: Int,
     onNavigate: (Int) -> Unit,
+    session: SleepSession? = null,
+    onUpdateTimes: (SleepSession, Long, Long) -> Unit = { _, _, _ -> },
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        NightNavHeader(nightOffset, lastIndex, clock, onNavigate)
+        NightNavHeader(nightOffset, lastIndex, clock, onNavigate, session, onUpdateTimes)
         if (display == null) {
             // Honest fallback: this night recorded no usable stage data — never silently
             // substitute another night's hypnogram. (#160)
@@ -237,15 +311,63 @@ private fun Hero(
  * disabled at its bound — tinted tertiary when disabled, accent when active. Mirrors the
  * macOS nightNavHeader (SleepView.swift). (#160)
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun NightNavHeader(
     offset: Int,
     lastIndex: Int,
     clock: String?,
     onNavigate: (Int) -> Unit,
+    session: SleepSession? = null,
+    onUpdateTimes: (SleepSession, Long, Long) -> Unit = { _, _, _ -> },
 ) {
     val canGoOlder = offset < lastIndex
     val canGoNewer = offset > 0
+    val context = LocalContext.current
+    var editingTimes by remember { mutableStateOf(false) }
+
+    if (editingTimes && session != null) {
+        val startCal = java.util.Calendar.getInstance().apply { timeInMillis = session.startTs * 1000L }
+        val endCal = java.util.Calendar.getInstance().apply { timeInMillis = session.endTs * 1000L }
+        var pendingStart by remember { mutableStateOf(session.startTs) }
+        var pendingEnd by remember { mutableStateOf(session.endTs) }
+
+        androidx.compose.runtime.DisposableEffect(Unit) {
+            val wakeDialog = TimePickerDialog(
+                context,
+                { _, h, m ->
+                    val cal = java.util.Calendar.getInstance().apply {
+                        timeInMillis = session.endTs * 1000L; set(java.util.Calendar.HOUR_OF_DAY, h); set(java.util.Calendar.MINUTE, m)
+                    }
+                    pendingEnd = cal.timeInMillis / 1000L
+                    onUpdateTimes(session, pendingStart, pendingEnd)
+                    editingTimes = false
+                },
+                endCal.get(java.util.Calendar.HOUR_OF_DAY),
+                endCal.get(java.util.Calendar.MINUTE),
+                true,
+            )
+            val bedDialog = TimePickerDialog(
+                context,
+                { _, h, m ->
+                    val cal = java.util.Calendar.getInstance().apply {
+                        timeInMillis = session.startTs * 1000L; set(java.util.Calendar.HOUR_OF_DAY, h); set(java.util.Calendar.MINUTE, m)
+                    }
+                    pendingStart = cal.timeInMillis / 1000L
+                    wakeDialog.setTitle("Wake-up time")
+                    wakeDialog.show()
+                },
+                startCal.get(java.util.Calendar.HOUR_OF_DAY),
+                startCal.get(java.util.Calendar.MINUTE),
+                true,
+            ).apply { setTitle("Bedtime") }
+            bedDialog.setOnDismissListener { if (!wakeDialog.isShowing) editingTimes = false }
+            wakeDialog.setOnDismissListener { editingTimes = false }
+            bedDialog.show()
+            onDispose { runCatching { bedDialog.dismiss(); wakeDialog.dismiss() } }
+        }
+    }
+
     Row(
         horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
         verticalAlignment = Alignment.CenterVertically,
@@ -266,13 +388,24 @@ private fun NightNavHeader(
                 if (offset == 0) "Last night" else "$offset night${if (offset == 1) "" else "s"} ago",
                 color = Palette.textTertiary,
             )
-            Text(
-                clock ?: "—",
-                style = NoopType.headline,
-                color = Palette.textPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    clock ?: "—",
+                    style = NoopType.headline,
+                    color = Palette.textPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                if (session != null) {
+                    IconButton(
+                        onClick = { editingTimes = true },
+                        modifier = Modifier.size(20.dp),
+                    ) {
+                        Icon(Icons.Filled.Edit, contentDescription = "Adjust sleep times", tint = Palette.textTertiary, modifier = Modifier.size(14.dp))
+                    }
+                }
+            }
         }
         IconButton(
             onClick = { if (canGoNewer) onNavigate(offset - 1) },
@@ -657,8 +790,10 @@ private fun SparkTile(
     accent: Color,
     spark: List<Double>,
     sparkColor: Color,
+    onClick: (() -> Unit)? = null,
 ) {
-    NoopCard(modifier = modifier.height(Metrics.tileHeight), padding = Metrics.space14) {
+    val clickMod = if (onClick != null) modifier.height(Metrics.tileHeight).clickable(onClick = onClick) else modifier.height(Metrics.tileHeight)
+    NoopCard(modifier = clickMod, padding = Metrics.space14) {
         Column(modifier = Modifier.fillMaxWidth()) {
             Overline(label)
             Spacer(Modifier.weight(1f))
@@ -1091,6 +1226,228 @@ internal data class PersistedSegment(val start: Long, val end: Long, val stage: 
  * malformed input, so callers keep the synthesized fallback. Pure + unit-tested
  * (see SleepStageSegmentsTest).
  */
+// MARK: - Hours vs Needed card
+
+@Composable
+internal fun HoursVsNeededCard(m: SleepModel) {
+    val sleptH = (m.stages.asleep / 60.0)
+    val neededH = (m.trendNeedHours.lastOrNull() ?: 8.0)
+    val debtH = m.trendDebtHours.lastOrNull() ?: 0.0
+    val score = (sleptH / neededH * 100.0).coerceIn(0.0, 100.0)
+    val trendArrow = if (m.trendHours.size >= 2) {
+        val delta = m.trendHours.last() - m.trendHours[m.trendHours.lastIndex - 1]
+        when {
+            delta > 0.25 -> "↑"
+            delta < -0.25 -> "↓"
+            else -> "→"
+        }
+    } else "→"
+    val arrowColor = when (trendArrow) {
+        "↑" -> Palette.statusPositive
+        "↓" -> Palette.statusCritical
+        else -> Palette.textTertiary
+    }
+
+    NoopCard(padding = Metrics.cardPadding) {
+        Column(verticalArrangement = Arrangement.spacedBy(Metrics.space14)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Overline("Sleep")
+                    Text("Hours vs Needed", style = NoopType.headline, color = Palette.textPrimary)
+                }
+                Text(trendArrow, style = NoopType.title2, color = arrowColor)
+                Spacer(Modifier.width(6.dp))
+                Text("${score.roundToInt()}%", style = NoopType.chartValue, color = Palette.accent)
+            }
+
+            // Gradient progress bar: slept / needed.
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(Metrics.progressHeight)
+                    .clip(RoundedCornerShape(Metrics.cornerPill))
+                    .background(Palette.surfaceInset),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth((sleptH / neededH).coerceIn(0.0, 1.0).toFloat())
+                        .height(Metrics.progressHeight)
+                        .clip(RoundedCornerShape(Metrics.cornerPill))
+                        .background(Brush.horizontalGradient(listOf(Palette.accent.copy(alpha = 0.6f), Palette.accent))),
+                )
+            }
+
+            // Stacked component bar: Healthy Min / Strain buffer / Debt repayment.
+            val healthyMin = 7.0
+            val strainBuffer = (neededH - healthyMin).coerceAtLeast(0.0)
+            val debtRepay = debtH.coerceAtLeast(0.0)
+            val totalBar = (healthyMin + strainBuffer + debtRepay).coerceAtLeast(1.0)
+            Row(modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(Metrics.cornerPill))) {
+                Box(modifier = Modifier.weight((healthyMin / totalBar).toFloat()).background(Palette.metricPurple))
+                if (strainBuffer > 0) Box(modifier = Modifier.weight((strainBuffer / totalBar).toFloat()).background(Palette.strain066))
+                if (debtRepay > 0) Box(modifier = Modifier.weight((debtRepay / totalBar).toFloat()).background(Palette.statusCritical))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(Metrics.space14)) {
+                LegendDot("Healthy Min", Palette.metricPurple)
+                LegendDot("Strain", Palette.strain066)
+                LegendDot("Debt", Palette.statusCritical)
+            }
+
+            Box(modifier = Modifier.fillMaxWidth().height(Metrics.divider).background(Palette.hairline))
+            Row(modifier = Modifier.fillMaxWidth()) {
+                listOf(
+                    "Slept" to String.format(Locale.US, "%.1f h", sleptH),
+                    "Needed" to String.format(Locale.US, "%.1f h", neededH),
+                    "Debt" to if (debtH > 0.05) String.format(Locale.US, "%.1f h", debtH) else "None",
+                ).forEach { (lbl, v) ->
+                    Column(modifier = Modifier.weight(1f)) {
+                        Overline(lbl, color = Palette.textTertiary)
+                        Text(v, style = NoopType.captionNumber, color = Palette.textPrimary)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LegendDot(label: String, color: Color) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Box(modifier = Modifier.size(6.dp).clip(RoundedCornerShape(50)).background(color))
+        Text(label, style = NoopType.footnote, color = Palette.textTertiary)
+    }
+}
+
+// MARK: - Sleep Consistency card
+
+@Composable
+internal fun SleepConsistencyCard(sleeps: List<SleepSession>) {
+    // Use the last 14 sessions for the chart and consistency score.
+    val recent = sleeps.takeLast(14)
+    if (recent.size < 3) return
+
+    // Per-night bedtime and wake as fractional hours (0 = midnight, negative = pre-midnight).
+    data class NightTiming(val label: String, val bedHour: Float, val wakeHour: Float)
+    val sdf = java.text.SimpleDateFormat("d", java.util.Locale.US)
+    val timings = recent.map { s ->
+        val bedCal = java.util.Calendar.getInstance().apply { timeInMillis = s.startTs * 1000L }
+        val wakeCal = java.util.Calendar.getInstance().apply { timeInMillis = s.endTs * 1000L }
+        val bedH = bedCal.get(java.util.Calendar.HOUR_OF_DAY) + bedCal.get(java.util.Calendar.MINUTE) / 60f
+        // Normalise bedtime: hours before midnight → negative (e.g., 22:00 → -2.0)
+        val bedNorm = if (bedH > 12f) bedH - 24f else bedH
+        val wakeH = wakeCal.get(java.util.Calendar.HOUR_OF_DAY) + wakeCal.get(java.util.Calendar.MINUTE) / 60f
+        NightTiming(sdf.format(java.util.Date(s.endTs * 1000L)), bedNorm, wakeH)
+    }
+
+    // Consistency % = 100 − (SD of bedtimes + SD of waketimes) / 2 scaled to 90min = perfect→0.
+    fun sd(vals: List<Float>): Float {
+        val m = vals.average().toFloat(); return kotlin.math.sqrt(vals.sumOf { ((it - m) * (it - m)).toDouble() }.toFloat() / vals.size)
+    }
+    val bedSdH = sd(timings.map { it.bedHour })
+    val wakeSdH = sd(timings.map { it.wakeHour })
+    val consistencyPct = ((1f - (bedSdH + wakeSdH) / 2f / 1.5f) * 100f).coerceIn(0f, 100f)
+    val typicalBed = timings.map { it.bedHour }.average().toFloat()
+    val typicalWake = timings.map { it.wakeHour }.average().toFloat()
+
+    // Chart bounds: Y from -4 (20:00) to 12 (12:00 next day), 16h window.
+    val yMin = -4f; val yMax = 12f; val yRange = yMax - yMin
+
+    fun hourToLabel(h: Float): String {
+        val norm = ((h % 24f) + 24f) % 24f
+        return String.format(Locale.US, "%02d:00", norm.toInt())
+    }
+
+    NoopCard(padding = Metrics.cardPadding) {
+        Column(verticalArrangement = Arrangement.spacedBy(Metrics.space14)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Overline("Sleep")
+                    Text("Consistency", style = NoopType.headline, color = Palette.textPrimary)
+                }
+                Text("${consistencyPct.roundToInt()}%", style = NoopType.chartValue, color = Palette.accent)
+            }
+
+            // Canvas chart
+            val accentColor = Palette.accent
+            val purpleColor = Palette.metricPurple
+            val hairlineColor = Palette.hairline
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(160.dp)
+                    .drawBehind {
+                        val yAxisW = 48f
+                        val chartW = size.width - yAxisW
+                        val chartH = size.height
+
+                        // Y-axis grid lines and labels for 20:00, 00:00, 04:00, 08:00, 12:00.
+                        val gridHours = listOf(-4f, 0f, 4f, 8f, 12f)
+                        val paint = android.graphics.Paint().apply {
+                            color = android.graphics.Color.argb(150, 255, 255, 255)
+                            textSize = 28f
+                            isAntiAlias = true
+                        }
+                        gridHours.forEach { h ->
+                            val y = chartH * (1f - (h - yMin) / yRange)
+                            drawLine(
+                                color = hairlineColor,
+                                start = Offset(yAxisW, y),
+                                end = Offset(size.width, y),
+                                strokeWidth = 1f,
+                            )
+                            drawContext.canvas.nativeCanvas.drawText(
+                                hourToLabel(h),
+                                0f, y + 10f, paint,
+                            )
+                        }
+
+                        // Per-night bars (bed → wake).
+                        val barW = (chartW / timings.size * 0.6f).coerceAtLeast(4f)
+                        val step = chartW / timings.size
+                        timings.forEachIndexed { i, t ->
+                            val cx = yAxisW + step * i + step / 2f
+                            val bedY = chartH * (1f - (t.bedHour - yMin) / yRange)
+                            val wakeY = chartH * (1f - (t.wakeHour - yMin) / yRange)
+                            drawRect(
+                                color = accentColor.copy(alpha = 0.55f),
+                                topLeft = Offset(cx - barW / 2f, minOf(bedY, wakeY)),
+                                size = androidx.compose.ui.geometry.Size(barW, kotlin.math.abs(wakeY - bedY).coerceAtLeast(4f)),
+                            )
+                        }
+
+                        // Dashed typical bed / wake overlay lines.
+                        val dashLen = 12f; val gapLen = 8f
+                        listOf(typicalBed to purpleColor, typicalWake to accentColor).forEach { (h, col) ->
+                            val y = chartH * (1f - (h - yMin) / yRange)
+                            var x = yAxisW
+                            while (x < size.width) {
+                                drawLine(col.copy(alpha = 0.6f), Offset(x, y), Offset(minOf(x + dashLen, size.width), y), strokeWidth = 2f)
+                                x += dashLen + gapLen
+                            }
+                        }
+                    },
+            ) {}
+
+            // X-axis day labels (first, mid, last).
+            Row(modifier = Modifier.fillMaxWidth().padding(start = 48.dp)) {
+                val xLabels = listOf(
+                    timings.firstOrNull()?.label.orEmpty(),
+                    timings.getOrNull(timings.size / 2)?.label.orEmpty(),
+                    timings.lastOrNull()?.label.orEmpty(),
+                )
+                xLabels.forEach { lbl ->
+                    Text(lbl, style = NoopType.footnote, color = Palette.textTertiary, modifier = Modifier.weight(1f))
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(Metrics.space14)) {
+                LegendDot("Typical bedtime", Palette.metricPurple)
+                LegendDot("Typical wake", Palette.accent)
+            }
+        }
+    }
+}
+
 internal fun parsePersistedSegments(json: String?): List<PersistedSegment>? {
     if (json.isNullOrBlank()) return null
     val trimmed = json.trim()

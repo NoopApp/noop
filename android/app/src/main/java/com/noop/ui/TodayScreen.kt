@@ -15,8 +15,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Battery5Bar
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -178,7 +181,32 @@ fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
         )
     }
 
+    val streak = remember(days) { nightStreak(days) }
+    val streakTotal = remember(days) { days.count { (it.totalSleepMin ?: 0.0) > 0.0 } }
+
     ScreenScaffold(title = "Control Center", subtitle = "Your day, read in full") {
+        // Status strip — strap battery (live only) + recorded-nights streak, top-right of content.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (live.connected && live.batteryPct != null) {
+                Icon(Icons.Filled.Battery5Bar, contentDescription = null, tint = Palette.textTertiary, modifier = Modifier.size(14.dp))
+                Text(
+                    "${live.batteryPct!!.roundToInt()}%",
+                    style = NoopType.footnote,
+                    color = Palette.textTertiary,
+                    modifier = Modifier.padding(start = 2.dp, end = 12.dp),
+                )
+            }
+            val streakColor = when {
+                streak >= 2 -> Palette.statusCritical  // fire = red when on a streak
+                else -> Palette.textTertiary
+            }
+            Icon(Icons.Filled.LocalFireDepartment, contentDescription = null, tint = streakColor, modifier = Modifier.size(14.dp))
+            Text("$streakTotal", style = NoopType.footnote, color = streakColor, modifier = Modifier.padding(start = 2.dp))
+        }
         DaySelectorBar(selectedOffset = selectedDayOffset, onSelect = { selectedDayOffset = it })
 
         // When there is no daily score yet (today's recovery is null / no history),
@@ -254,7 +282,7 @@ fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
 
 @Composable
 private fun DaySelectorBar(selectedOffset: Int, onSelect: (Int) -> Unit) {
-    ThreeDaySelectorBar(selectedOffset = selectedOffset, onSelect = onSelect)
+    DayNavBar(selectedOffset = selectedOffset, onSelect = onSelect)
 }
 
 @Composable
@@ -527,13 +555,33 @@ private fun HeartRateTrendCard(
                 }
                 Text("$latest bpm", style = NoopType.chartValueLarge, color = Palette.metricRose)
             }
-            LineChart(
-                values = buckets,
-                modifier = Modifier.height(Metrics.chartHeight),
-                color = Palette.metricRose,
-                fill = true,
-                selectionEnabled = true,
-            )
+            // Chart with Y-axis labels on the left and X-axis (time labels) below.
+            Row(modifier = Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(
+                    modifier = Modifier.height(Metrics.chartHeight),
+                    verticalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text("$max", style = NoopType.footnote, color = Palette.textTertiary)
+                    Text("$min", style = NoopType.footnote, color = Palette.textTertiary)
+                }
+                LineChart(
+                    values = buckets,
+                    modifier = Modifier.weight(1f).height(Metrics.chartHeight),
+                    color = Palette.metricRose,
+                    fill = true,
+                    selectionEnabled = true,
+                )
+            }
+            // X-axis: start / midpoint / end of the day window.
+            Row(modifier = Modifier.fillMaxWidth()) {
+                val xLabels = when {
+                    buckets.size >= 3 -> listOf("00:00", "${(buckets.size / 2) / 12}:${((buckets.size / 2) % 12) * 5}".padStart(5, '0'), "")
+                    else -> listOf("Start", "", "Now")
+                }
+                xLabels.forEach { lbl ->
+                    Text(lbl, style = NoopType.footnote, color = Palette.textTertiary, modifier = Modifier.weight(1f))
+                }
+            }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -544,7 +592,7 @@ private fun HeartRateTrendCard(
                 listOf("Min" to min, "Avg" to avg, "Max" to max).forEach { (label, value) ->
                     Column(modifier = Modifier.weight(1f)) {
                         Overline(label, color = Palette.textTertiary)
-                        Text("$value", style = NoopType.bodyNumber, color = Palette.textPrimary)
+                        Text("$value bpm", style = NoopType.bodyNumber, color = Palette.textPrimary)
                     }
                 }
             }
@@ -1018,3 +1066,30 @@ private fun workoutCaption(row: WorkoutRow): String {
 
 private fun grouped(value: Int): String =
     String.format(Locale.US, "%,d", value)
+
+/**
+ * Count of CONSECUTIVE nights ending today (or yesterday for early-morning sessions)
+ * where [totalSleepMin] > 0. Returns 0 when the most recent day has no sleep, 1 for
+ * a single night, 2+ for a running streak. Uses sorted day keys (ISO yyyy-MM-dd).
+ */
+internal fun nightStreak(days: List<com.noop.data.DailyMetric>): Int {
+    val sleepDays = days.filter { (it.totalSleepMin ?: 0.0) > 0.0 }
+        .map { it.day }.toSortedSet()
+    if (sleepDays.isEmpty()) return 0
+    var streak = 0
+    var cursor = java.time.LocalDate.now()
+    while (true) {
+        val key = cursor.toString()
+        if (key in sleepDays) {
+            streak++
+            cursor = cursor.minusDays(1)
+        } else {
+            // Allow one gap (the current live day may not have data yet)
+            if (streak == 0) {
+                cursor = cursor.minusDays(1)
+                if (cursor.toString() in sleepDays) { streak = 1; cursor = cursor.minusDays(1) } else break
+            } else break
+        }
+    }
+    return streak
+}

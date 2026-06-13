@@ -382,6 +382,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val workouts: StateFlow<List<WorkoutRow>> = _workouts.asStateFlow()
 
     /** Re-read every source + the dismissed markers and republish [workouts]. */
+    fun updateSleepSessionTimes(session: com.noop.data.SleepSession, newStartTs: Long, newEndTs: Long) {
+        viewModelScope.launch {
+            runCatching { repository.updateSleepSessionTimes(session, newStartTs, newEndTs) }
+        }
+    }
+
     fun loadWorkouts() {
         viewModelScope.launch {
             val now = System.currentTimeMillis() / 1000

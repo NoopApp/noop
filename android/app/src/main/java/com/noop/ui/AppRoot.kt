@@ -322,7 +322,12 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                     )
                 }
                 composable(Destination.Live.route) { LiveScreen(viewModel) }
-                composable(Destination.Sleep.route) { SleepScreen(viewModel) }
+                composable(Destination.Sleep.route) {
+                    SleepScreen(
+                        vm = viewModel,
+                        onOpenJournal = { nav.navigateTopLevel(Destination.Insights.route) },
+                    )
+                }
                 composable(Destination.Intervals.route) { IntervalsScreen(viewModel) }
                 composable(Destination.Breathe.route) { BreatheScreen(viewModel) }
                 composable(Destination.Coach.route) { CoachScreen() }

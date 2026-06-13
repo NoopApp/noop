@@ -139,6 +139,9 @@ object NoopPrefs {
     /** "Keep connected in the background" — drives [com.noop.ble.WhoopConnectionService]. Default on. */
     const val KEY_BACKGROUND_CONNECTION = "noop.backgroundConnection"
 
+    /** The calendar day (yyyy-MM-dd) on which the morning-journal prompt was last shown. */
+    const val KEY_LAST_JOURNAL_PROMPT = "noop.lastJournalPromptDay"
+
     /** "Debug logging" — when on, the strap log is also written to logcat (`adb`). Default OFF so a
      *  normal user never emits the connection log to the system log; the in-app ring buffer (and the
      *  "Share strap log" export) work regardless. See [com.noop.ble.WhoopBleClient.debugLogcat]. */
