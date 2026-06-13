@@ -1139,7 +1139,20 @@ internal fun buildSleepModel(
     val deep = latest.deepMin ?: 0.0
     val rem = latest.remMin ?: 0.0
     val light = latest.lightMin ?: 0.0
-    val asleep = latest.totalSleepMin ?: (deep + rem + light)
+
+    // When the session matches this night, derive totalSleepMin from its window so editing
+    // bed/wake times immediately reflects in every metric (performance, hours vs needed, etc.).
+    val sessionDurationMin = session
+        ?.takeIf { AnalyticsEngine.dayString(it.endTs) == latest.day || localDayString(it.endTs) == latest.day }
+        ?.let { ((it.endTs - it.startTs) / 60.0).takeIf { d -> d > 0.0 } }
+    // metricsWindow replaces the selected night's totalSleepMin for per-tile calculations.
+    // typicalTotalMin intentionally keeps the unmodified windowDays so the personal mean
+    // isn't skewed by one edited night.
+    val metricsWindow = if (sessionDurationMin != null)
+        windowDays.dropLast(1) + latest.copy(totalSleepMin = sessionDurationMin)
+    else windowDays
+
+    val asleep = sessionDurationMin ?: latest.totalSleepMin ?: (deep + rem + light)
     // Awake estimate: prefer (time-in-bed − asleep) implied by efficiency; else from
     // disturbances; matches the macOS "awake minutes" carried in the stagesJSON.
     val effFrac = latest.efficiency?.let { if (it > 1.0) it / 100.0 else it }
@@ -1160,37 +1173,36 @@ internal fun buildSleepModel(
     // Personal sleep need (minutes): mean asleep, floored at 7.5h (450 min).
     val needMin = max(450.0, typicalTotalMin ?: 450.0)
 
-    // Per-tile metrics — each a full pass over `days`, exactly as the macOS screen.
-    // Where the WHOOP export carried the figure verbatim (metricSeries), it wins per day;
-    // the on-device recomputation is the APPROXIMATE fallback for strap-only days.
-    val performance = metric(windowDays) { d ->
+    // Per-tile metrics — each a full pass over metricsWindow so the selected night reflects
+    // the edited session duration. Where the WHOOP export carried a figure verbatim it wins.
+    val performance = metric(metricsWindow) { d ->
         imported.performance[d.day]   // WHOOP's own 0–100 figure wins per day
             ?: d.totalSleepMin?.takeIf { it > 0.0 && needMin > 0.0 }
                 ?.let { minOf(100.0, it / needMin * 100.0) }   // APPROXIMATE fallback
     }
-    val efficiency = metric(windowDays) { d ->
+    val efficiency = metric(metricsWindow) { d ->
         d.efficiency?.let { if (it <= 1.0) it * 100.0 else it }
     }
     val consistency = run {
         // Prefer the imported sleep_consistency series, but only when it covers the latest
         // night — otherwise "latest" would silently be a months-old import-era value.
-        val lastDay = windowDays.lastOrNull()?.day
+        val lastDay = metricsWindow.lastOrNull()?.day
         if (lastDay != null && imported.consistency[lastDay] != null) {
-            val series = windowDays.mapNotNull { imported.consistency[it.day] }
+            val series = metricsWindow.mapNotNull { imported.consistency[it.day] }
             Metric(series.lastOrNull(), mean(series), series)
-        } else consistencySeries(windowDays)   // APPROXIMATE duration-spread proxy
+        } else consistencySeries(metricsWindow)   // APPROXIMATE duration-spread proxy
     }
-    val hoursVsNeeded = metric(windowDays) { d ->
+    val hoursVsNeeded = metric(metricsWindow) { d ->
         val need = imported.needMin[d.day] ?: needMin   // imported need wins per day
         d.totalSleepMin?.takeIf { it > 0.0 && need > 0.0 }?.let { it / need * 100.0 }
     }
-    val restorative = metric(windowDays) { d ->
+    val restorative = metric(metricsWindow) { d ->
         val dp = d.deepMin; val rm = d.remMin; val sl = d.totalSleepMin
         if (dp != null && rm != null && sl != null && sl > 0.0) (dp + rm) / sl * 100.0 else null
     }
-    val respiratory = metric(windowDays) { it.respRateBpm }
+    val respiratory = metric(metricsWindow) { it.respRateBpm }
     val sleepDebt = run {
-        val series = windowDays.mapNotNull { d ->
+        val series = metricsWindow.mapNotNull { d ->
             imported.debtMin[d.day]   // minutes, export-verbatim
                 ?: d.totalSleepMin?.takeIf { it > 0.0 && needMin > 0.0 }
                     ?.let { max(0.0, needMin - it) }   // APPROXIMATE fallback
@@ -1198,8 +1210,9 @@ internal fun buildSleepModel(
         Metric(series.lastOrNull(), mean(series), series)
     }
 
-    // 14-day trend set ending on the selected day.
-    val trendRows = windowDays.filter { (it.totalSleepMin ?: 0.0) > 0.0 }.takeLast(14)
+    // 14-day trend set ending on the selected day (uses metricsWindow so the last bar
+    // reflects the edited session window).
+    val trendRows = metricsWindow.filter { (it.totalSleepMin ?: 0.0) > 0.0 }.takeLast(14)
     val trendHours = trendRows.mapNotNull { it.totalSleepMin?.let { minutes -> minutes / 60.0 } }
     val trendNeedHours = trendRows.map { row -> ((imported.needMin[row.day] ?: needMin) / 60.0) }
     val trendDebtHours = trendRows.map { row ->
