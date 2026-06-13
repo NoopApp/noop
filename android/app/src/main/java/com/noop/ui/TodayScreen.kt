@@ -532,6 +532,7 @@ private fun HeartRateTrendCard(
                 modifier = Modifier.height(Metrics.chartHeight),
                 color = Palette.metricRose,
                 fill = true,
+                selectionEnabled = true,
             )
             Box(
                 modifier = Modifier

@@ -414,6 +414,7 @@ private fun HeroChartCard(
                     modifier = Modifier.height(Metrics.chartHeight),
                     color = metric.accent,
                     fill = true,
+                    selectionEnabled = true,
                 )
             } else {
                 Box(

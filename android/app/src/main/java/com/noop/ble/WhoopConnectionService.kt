@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.Bitmap
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
@@ -64,6 +65,10 @@ class WhoopConnectionService : Service() {
      *  process restarts and the AppViewModel call site. */
     private var lastIllnessAlert: String? = null
 
+    /** Rolling HR history for the notification sparkline (max 60 samples). */
+    private val hrHistory = ArrayDeque<Int>()
+    private val HR_HISTORY_MAX = 60
+
     private val ble get() = (application as NoopApplication).ble
     private val repo get() = (application as NoopApplication).repository
 
@@ -117,6 +122,10 @@ class WhoopConnectionService : Service() {
                 // streaming. Conflation still processes only the latest value — just without the axe.
                 .conflate()
                 .collect { (state, recovery, illness) ->
+                state.heartRate?.let { hr ->
+                    hrHistory.addLast(hr)
+                    while (hrHistory.size > HR_HISTORY_MAX) hrHistory.removeFirst()
+                }
                 postNotification(state, recovery)
                 // Banner transition (clear → raised) → real system notification; the notifier's
                 // persisted day gate dedupes against the app-open (AppViewModel) call site.
@@ -195,6 +204,7 @@ class WhoopConnectionService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
 
+        val chartBitmap = renderHrChart(hrHistory.toList())
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_heart)
             .setContentTitle(title)
@@ -207,7 +217,61 @@ class WhoopConnectionService : Service() {
             .setCategory(Notification.CATEGORY_SERVICE)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .apply {
+                if (chartBitmap != null) {
+                    setStyle(
+                        NotificationCompat.BigPictureStyle()
+                            .bigPicture(chartBitmap)
+                            .setBigContentTitle(title)
+                            .setSummaryText(detail),
+                    )
+                }
+            }
             .build()
+    }
+
+    private fun renderHrChart(history: List<Int>): Bitmap? {
+        if (history.size < 4) return null
+        val w = 800; val h = 200
+        val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bitmap)
+        canvas.drawColor(android.graphics.Color.argb(255, 6, 10, 8))
+        val min = history.min().toFloat(); val max = history.max().toFloat()
+        val range = (max - min).coerceAtLeast(1f)
+        val padX = 24f; val padY = 24f
+        val usableW = w - 2 * padX; val usableH = h - 2 * padY
+        val step = usableW / (history.size - 1).toFloat()
+        val path = android.graphics.Path()
+        history.forEachIndexed { i, hr ->
+            val x = padX + step * i
+            val y = padY + (1f - (hr.toFloat() - min) / range) * usableH
+            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        val fillPath = android.graphics.Path(path).apply {
+            lineTo(padX + step * (history.size - 1), h.toFloat())
+            lineTo(padX, h.toFloat())
+            close()
+        }
+        val fillPaint = android.graphics.Paint().apply {
+            shader = android.graphics.LinearGradient(
+                0f, padY, 0f, h.toFloat(),
+                intArrayOf(
+                    android.graphics.Color.argb(96, 24, 201, 139),
+                    android.graphics.Color.argb(0, 24, 201, 139),
+                ),
+                null, android.graphics.Shader.TileMode.CLAMP,
+            )
+            style = android.graphics.Paint.Style.FILL; isAntiAlias = true
+        }
+        canvas.drawPath(fillPath, fillPaint)
+        val linePaint = android.graphics.Paint().apply {
+            color = android.graphics.Color.argb(255, 24, 201, 139)
+            strokeWidth = 4f; style = android.graphics.Paint.Style.STROKE
+            strokeCap = android.graphics.Paint.Cap.ROUND
+            strokeJoin = android.graphics.Paint.Join.ROUND; isAntiAlias = true
+        }
+        canvas.drawPath(path, linePaint)
+        return bitmap
     }
 
     private fun ensureChannel() {
