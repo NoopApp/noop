@@ -22,7 +22,12 @@ public final class LiveState: ObservableObject {
     /// alarm, double-tap, history offload) only works when this is true.
     @Published public var encryptedBond: Bool = false
     @Published public var heartRate: Int? = nil
+    /// Latest R-R packet exactly as it arrived from the strap. Keep this as the "fresh packet"
+    /// surface for stress/breathing logic that reacts to arrivals.
     @Published public var rr: [Int] = []
+    /// Rolling UI buffer of recent R-R intervals. Standard BLE HR notifications often carry only
+    /// one or two intervals per packet, so the Live console needs a separate history to feel live.
+    @Published public private(set) var rrRecent: [Int] = []
     /// Monotonic tick for any fresh biometric notification, even when the displayed value repeats.
     /// Views that render live traces should observe this instead of `heartRate` equality.
     @Published public private(set) var biometricSampleSeq: UInt64 = 0
@@ -122,6 +127,22 @@ public final class LiveState: ObservableObject {
 
     public func markBiometricSample() {
         biometricSampleSeq &+= 1
+    }
+
+    public func setRRIntervals(_ intervals: [Int], recentLimit: Int = 60) {
+        rr = intervals
+        let valid = intervals.filter { $0 > 0 }
+        guard !valid.isEmpty else { return }
+        rrRecent.append(contentsOf: valid)
+        if rrRecent.count > recentLimit {
+            rrRecent.removeFirst(rrRecent.count - recentLimit)
+        }
+    }
+
+    public func clearBiometrics() {
+        heartRate = nil
+        rr.removeAll()
+        rrRecent.removeAll()
     }
 
     /// Single funnel for battery readings — updates the published value AND notifies the hook,

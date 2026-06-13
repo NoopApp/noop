@@ -28,7 +28,11 @@ struct TodayView: View {
 
     // Imperial/Metric display preference (D#103). Only the Weight tile carries a convertible unit here.
     @AppStorage(UnitPrefs.systemKey) private var unitSystemRaw = UnitSystem.metric.rawValue
+    @AppStorage(UnitPrefs.temperatureKey) private var temperatureRaw = ""
     private var unitSystem: UnitSystem { UnitSystem(rawValue: unitSystemRaw) ?? .metric }
+    private var temperatureUnit: TemperatureUnit {
+        UnitPrefs.resolveTemperature(system: unitSystem, override: temperatureRaw)
+    }
 
     // 14-day sparkline series, keyed by metric key. Loaded once in .task.
     @State private var sparks: [String: [Double]] = [:]
@@ -43,6 +47,14 @@ struct TodayView: View {
 
     // THE single grid definition — every tile group reuses it so margins line up.
     private let grid = [GridItem(.adaptive(minimum: 168), spacing: NoopMetrics.gap)]
+
+    private var displayHR: Int? {
+        if let hr = live.heartRate, hr > 0 { return hr }
+        if let last = live.rrRecent.last ?? live.rr.last, last > 0 {
+            return Int((60_000.0 / Double(last)).rounded())
+        }
+        return nil
+    }
 
     /// Recovery cold-start: recovery is nil until the HRV baseline crosses the seed gate
     /// (Baselines.minNightsSeed valid nights). While calibrating, this is the count of nights
@@ -79,6 +91,7 @@ struct TodayView: View {
                 }
                 heroSection
                 heartRateTrendSection
+                vitalSignsSection
                 readinessSection
                 metricsSection
                 workoutsSection
@@ -281,6 +294,52 @@ struct TodayView: View {
         return (lo - span * 0.12)...(hi + span * 0.12)
     }
 
+    // MARK: VITAL SIGNS — live HR plus latest overnight body signals.
+
+    @ViewBuilder
+    private var vitalSignsSection: some View {
+        let vitals = BodyVitalSigns.readings(
+            days: repo.days,
+            today: repo.today,
+            temperatureUnit: temperatureUnit
+        )
+        VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+            SectionHeader("Vital Signs", overline: "Live + latest", trailing: BodyVitalSigns.latestDayLabel(vitals))
+            LazyVGrid(columns: grid, alignment: .leading, spacing: NoopMetrics.gap) {
+                StatTile(
+                    label: "Live HR",
+                    value: displayHR.map { "\($0)" } ?? "—",
+                    caption: displayHR != nil ? "Streaming bpm" : "Awaiting strap",
+                    accent: displayHR != nil ? StrandPalette.metricRose : StrandPalette.textTertiary,
+                    sparkline: liveHeartSeries,
+                    sparkColor: StrandPalette.metricRose
+                )
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(displayHR.map { "Live heart rate \($0) beats per minute" } ?? "Live heart rate awaiting strap")
+
+                ForEach(vitals) { vital in
+                    StatTile(
+                        label: LocalizedStringKey(vital.label),
+                        value: vital.formattedValue ?? "—",
+                        caption: vital.stateCaption,
+                        accent: vital.accent
+                    )
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(vital.accessibilityText)
+                }
+            }
+        }
+    }
+
+    private var liveHeartSeries: [Double]? {
+        let rrHeartRates = live.rrRecent.suffix(40).compactMap { rr -> Double? in
+            rr > 0 ? 60_000.0 / Double(rr) : nil
+        }
+        if rrHeartRates.count > 1 { return rrHeartRates }
+        if let displayHR { return [Double(displayHR), Double(displayHR)] }
+        return nil
+    }
+
     // MARK: (b) METRICS — one uniform grid of 104pt StatTiles, every cell filled.
 
     @ViewBuilder
@@ -311,7 +370,7 @@ struct TodayView: View {
                 StatTile(
                     label: "Rest",
                     value: sleepValue(d),
-                    caption: d?.efficiency.map { String(format: "%.0f%% eff", $0) },
+                    caption: d?.efficiency.map { String(format: "%.0f%% eff", Repository.normalizedPercent($0)) },
                     accent: StrandPalette.textPrimary,
                     sparkline: sparks["sleep_total_min"],
                     sparkColor: StrandPalette.metricPurple
@@ -350,7 +409,9 @@ struct TodayView: View {
                 )
                 StatTile(
                     label: "Steps",
-                    value: aLatest?.steps.map { intString(Double($0)) } ?? latestString("steps", decimals: 0),
+                    value: d?.steps.map { intString(Double($0)) }
+                        ?? aLatest?.steps.map { intString(Double($0)) }
+                        ?? latestString("steps", decimals: 0),
                     caption: "today",
                     accent: StrandPalette.metricCyan,
                     sparkline: sparks["steps"],
@@ -366,7 +427,7 @@ struct TodayView: View {
                 )
                 StatTile(
                     label: "Calories",
-                    value: caloriesValue(aLatest),
+                    value: caloriesValue(d, aLatest),
                     caption: "active",
                     accent: StrandPalette.metricAmber,
                     sparkline: sparks["active_kcal"],
@@ -532,10 +593,10 @@ struct TodayView: View {
         sparks["spo2"]            = await sparkValues("spo2", source: "my-whoop", window: 14)
 
         // 14-day sparklines — Apple Health.
-        sparks["resp_rate"]   = await sparkValues("resp_rate", source: "apple-health", window: 14)
+        sparks["resp_rate"]   = await sparkValues("resp_rate", source: "my-whoop", window: 14)
         sparks["steps"]       = await sparkValues("steps", source: "apple-health", window: 14)
         sparks["weight"]      = await sparkValues("weight", source: "apple-health", window: 90)
-        sparks["active_kcal"] = await sparkValues("active_kcal", source: "apple-health", window: 14)
+        sparks["active_kcal"] = await sparkValues("active_kcal", source: "my-whoop", window: 14)
 
         workouts = await repo.workoutRows()
         appleDays = await repo.appleDailyRows()
@@ -654,8 +715,9 @@ struct TodayView: View {
         return "\(h)h \(mm)m"
     }
 
-    /// Active calories (Apple) for the latest day, falling back to the sparkline tail.
-    private func caloriesValue(_ a: AppleDaily?) -> String {
+    /// Active calories from the strap/computed day first, then Apple Health, then the resolved sparkline tail.
+    private func caloriesValue(_ d: DailyMetric?, _ a: AppleDaily?) -> String {
+        if let kcal = d?.activeKcalEst { return intString(kcal) }
         if let kcal = a?.activeKcal { return intString(kcal) }
         return latestString("active_kcal", decimals: 0)
     }

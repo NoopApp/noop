@@ -91,7 +91,12 @@ public struct StatTile: View {
                 Spacer(minLength: 4)
                 Text(value).font(StrandFont.number(26)).foregroundStyle(accent).lineLimit(1).minimumScaleFactor(0.6)
                 if let sparkline, sparkline.count > 1 {
-                    Sparkline(values: sparkline).frame(height: 22).padding(.top, 4)
+                    Sparkline(
+                        values: sparkline,
+                        gradient: Gradient(colors: [sparkColor.opacity(0.45), sparkColor])
+                    )
+                    .frame(height: 22)
+                    .padding(.top, 4)
                 }
                 HStack(spacing: 6) {
                     if let caption { Text(caption).font(StrandFont.footnote).foregroundStyle(StrandPalette.textTertiary).lineLimit(1) }

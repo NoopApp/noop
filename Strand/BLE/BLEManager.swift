@@ -1162,7 +1162,7 @@ public final class BLEManager: NSObject, ObservableObject {
         // usually reports rr_count=0), so always surface intervals when present.
         var didUpdateBiometrics = false
         if !m.rr.isEmpty {
-            state.rr = m.rr
+            state.setRRIntervals(m.rr)
             didUpdateBiometrics = true
         }
         // HR: the standard 0x2A37 profile is the RELIABLE source (BLE-standard, ~1Hz). Let it
@@ -1238,6 +1238,7 @@ extension BLEManager: CBCentralManagerDelegate {
         state.connected = false
         state.encryptedBond = false   // cleared with didBond; next session must re-prove the bond (#69)
         state.charging = nil          // a stale charging flag must not outlive the link
+        state.clearBiometrics()
         didBond = false
         whoop5RealtimeArmed = false
         whoop5SessionStarted = false

@@ -5,6 +5,7 @@ import WhoopStore
 /// Pins the native-journal merge logic, mirroring the Android JournalLogTest value-for-value so the
 /// two platforms merge catalogs and entries identically — question strings are opaque exact-match
 /// keys to the effects engines on both sides.
+@MainActor
 final class JournalLogicTests: XCTestCase {
 
     private func e(_ day: String, _ q: String, _ yes: Bool) -> JournalEntry {
@@ -60,6 +61,7 @@ final class JournalLogicTests: XCTestCase {
     }
 }
 
+@MainActor
 final class MetricResolutionTests: XCTestCase {
     func testWhoopSourceFallsBackToComputedThenCompatibleAppleHealth() {
         let candidates = MetricCatalog.sourceCandidates(

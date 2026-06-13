@@ -62,7 +62,7 @@ final class Repository: ObservableObject {
     static func localDayKey(_ date: Date) -> String { dayKeyFormatter.string(from: date) }
 
     /// The hour the LOGICAL day rolls (04:00 local). Between midnight and this hour, "Today" stays put.
-    static let logicalDayRolloverHour = 4
+    nonisolated static let logicalDayRolloverHour = 4
 
     /// The LOGICAL local day for `now` — the calendar date of `now - rolloverHour hours`. Rolls at
     /// 04:00 local rather than midnight, so the small hours after midnight still resolve to the prior
@@ -242,15 +242,10 @@ final class Repository: ObservableObject {
         var sourceSeries: [MetricSourceSeries] = []
         sourceSeries.reserveCapacity(candidates.count)
         for candidate in candidates {
-            let pts = (try? await store.metricSeries(
-                deviceId: candidate.source,
-                key: candidate.key,
-                from: from,
-                to: to
-            )) ?? []
+            let pts = await resolvedRows(store: store, candidate: candidate, from: from, to: to)
             sourceSeries.append(MetricSourceSeries(
                 candidate: candidate,
-                rows: pts.map { ($0.day, $0.value) }
+                rows: pts
             ))
         }
         return MetricSeriesResolution(
@@ -258,6 +253,70 @@ final class Repository: ObservableObject {
             candidates: candidates,
             points: Self.mergeMetricSeries(sourceSeries)
         )
+    }
+
+    private func resolvedRows(
+        store: WhoopStore,
+        candidate: MetricSourceCandidate,
+        from: String,
+        to: String
+    ) async -> [(day: String, value: Double)] {
+        let metricRows = (try? await store.metricSeries(
+            deviceId: candidate.source,
+            key: candidate.key,
+            from: from,
+            to: to
+        )) ?? []
+        var byDay = Dictionary(uniqueKeysWithValues: metricRows.map { ($0.day, $0.value) })
+        if let dailyRows = try? await store.dailyMetrics(deviceId: candidate.source, from: from, to: to) {
+            for row in dailyRows where byDay[row.day] == nil {
+                if let value = Self.dailyMetricValue(row, key: candidate.key) {
+                    byDay[row.day] = value
+                }
+            }
+        }
+        return byDay.keys.sorted().compactMap { day in
+            byDay[day].map { (day, $0) }
+        }
+    }
+
+    static func dailyMetricValue(_ row: DailyMetric, key: String) -> Double? {
+        switch key {
+        case "recovery":
+            return row.recovery
+        case "strain":
+            return row.strain
+        case "sleep_total_min":
+            return row.totalSleepMin
+        case "sleep_efficiency":
+            return row.efficiency.map(normalizedPercent)
+        case "sleep_deep_min":
+            return row.deepMin
+        case "sleep_rem_min":
+            return row.remMin
+        case "sleep_light_min":
+            return row.lightMin
+        case "rhr", "resting_hr":
+            return row.restingHr.map(Double.init)
+        case "hrv":
+            return row.avgHrv
+        case "spo2":
+            return row.spo2Pct
+        case "skin_temp":
+            return row.skinTempDevC
+        case "resp_rate":
+            return row.respRateBpm
+        case "steps":
+            return row.steps.map(Double.init)
+        case "active_kcal", "energy_kcal":
+            return row.activeKcalEst
+        default:
+            return nil
+        }
+    }
+
+    static func normalizedPercent(_ value: Double) -> Double {
+        value <= 1.5 ? value * 100.0 : value
     }
 
     static func mergeMetricSeries(_ sourceSeries: [MetricSourceSeries]) -> [ResolvedMetricPoint] {
