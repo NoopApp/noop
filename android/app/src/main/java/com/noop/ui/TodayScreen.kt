@@ -665,9 +665,6 @@ private fun HeartRateTrendCard(
                 }
                 Text("$latest bpm", style = NoopType.chartValueLarge, color = Palette.metricRose)
             }
-            // Chart with a max/avg/min Y-axis label column on the left and an HH:mm X-axis row
-            // below — the strap-history buckets are uniform 5-minute means from the selected day's
-            // midnight, so an index→time mapping reads as a real wall-clock day axis.
             Row(
                 modifier = Modifier.height(IntrinsicSize.Min),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -685,20 +682,21 @@ private fun HeartRateTrendCard(
                     modifier = Modifier.weight(1f).height(Metrics.chartHeight),
                     color = Palette.metricRose,
                     fill = true,
+                    selectionEnabled = true,
                 )
             }
-            // X-axis: start (midnight) / midpoint / end of the selected day's window. Each bucket
-            // is 5 minutes from the selected day's midnight, so the index maps straight to HH:mm.
             Row(modifier = Modifier.fillMaxWidth()) {
                 val bucketToTime = { idx: Int ->
                     val m = idx * 5
                     String.format(Locale.US, "%02d:%02d", m / 60, m % 60)
                 }
-                val xLabels = listOf(
-                    "00:00",
-                    bucketToTime(buckets.size / 2),
-                    if (selectedDay == today) "Now" else bucketToTime(buckets.size - 1),
-                )
+                val xLabels = if (buckets.size >= 3) {
+                    listOf(
+                        "00:00",
+                        bucketToTime(buckets.size / 2),
+                        if (selectedDay == today) "Now" else bucketToTime(buckets.size - 1),
+                    )
+                } else listOf("Start", "", "Now")
                 xLabels.forEach { lbl ->
                     Text(lbl, style = NoopType.footnote, color = Palette.textTertiary, modifier = Modifier.weight(1f))
                 }
