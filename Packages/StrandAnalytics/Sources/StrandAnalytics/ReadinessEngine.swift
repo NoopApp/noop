@@ -39,10 +39,12 @@ public enum ReadinessEngine {
     public struct Signal: Sendable, Equatable {
         public let key: String      // "hrv" | "rhr" | "respRate" | "acwr" | "monotony"
         public let label: String    // short human label
+        public let evidence: String?
         public let detail: String   // one-line plain-English read
         public let flag: Flag
-        public init(key: String, label: String, detail: String, flag: Flag) {
-            self.key = key; self.label = label; self.detail = detail; self.flag = flag
+        public init(key: String, label: String, evidence: String? = nil, detail: String, flag: Flag) {
+            self.key = key; self.label = label; self.evidence = evidence
+            self.detail = detail; self.flag = flag
         }
     }
 
@@ -98,6 +100,8 @@ public enum ReadinessEngine {
             value: latest.avgHrv,
             baseline: history.suffix(baselineWindow).compactMap { $0.avgHrv },
             key: "hrv", label: "HRV",
+            unit: "ms",
+            decimals: 0,
             higherIsBetter: true,
             goodText: "above your baseline — well recovered",
             neutralText: "in your normal range",
@@ -110,6 +114,8 @@ public enum ReadinessEngine {
             value: latest.restingHr.map(Double.init),
             baseline: history.suffix(baselineWindow).compactMap { $0.restingHr.map(Double.init) },
             key: "rhr", label: "Resting HR",
+            unit: "bpm",
+            decimals: 0,
             higherIsBetter: false,
             goodText: "at or below baseline",
             neutralText: "in your normal range",
@@ -129,9 +135,11 @@ public enum ReadinessEngine {
                 let z = (rr - m) / sd
                 if z >= 2.0 {
                     signals.append(Signal(key: "respRate", label: "Respiratory rate",
+                        evidence: evidence(value: rr, baseline: m, unit: "rpm", decimals: 1),
                         detail: "up vs baseline — sometimes an early sign of getting sick", flag: .bad))
                 } else if z >= 1.5 {
                     signals.append(Signal(key: "respRate", label: "Respiratory rate",
+                        evidence: evidence(value: rr, baseline: m, unit: "rpm", decimals: 1),
                         detail: "slightly raised vs baseline", flag: .watch))
                 }
             }
@@ -147,7 +155,7 @@ public enum ReadinessEngine {
             if chronic > 0 {
                 let ratio = acute / chronic
                 acwr = ratio
-                signals.append(acwrSignal(ratio))
+                signals.append(acwrSignal(ratio, acute: acute, chronic: chronic))
             }
             // Foster monotony over the last week of strain.
             let week = Array(strainSeries.suffix(acuteWindow))
@@ -156,6 +164,7 @@ public enum ReadinessEngine {
                 monotony = mono
                 if mono >= 2.0 {
                     signals.append(Signal(key: "monotony", label: "Training variety",
+                        evidence: "monotony \(String(format: "%.1f", mono))",
                         detail: "low — similar strain every day raises strain/illness risk", flag: .watch))
                 }
             }
@@ -171,7 +180,8 @@ public enum ReadinessEngine {
 
     /// Build a z-score signal for a metric where the baseline is the trailing window.
     private static func zSignal(value: Double?, baseline: [Double],
-                                key: String, label: String, higherIsBetter: Bool,
+                                key: String, label: String, unit: String, decimals: Int,
+                                higherIsBetter: Bool,
                                 goodText: String, neutralText: String,
                                 watchText: String, badText: String) -> Signal? {
         guard let v = value, baseline.count >= minBaseline,
@@ -186,25 +196,42 @@ public enum ReadinessEngine {
         case -1.0 ..< -0.5: flag = .watch;   text = watchText
         default:            flag = .bad;     text = badText
         }
-        return Signal(key: key, label: label, detail: text, flag: flag)
+        return Signal(key: key, label: label,
+                      evidence: evidence(value: v, baseline: m, unit: unit, decimals: decimals),
+                      detail: text, flag: flag)
     }
 
-    private static func acwrSignal(_ ratio: Double) -> Signal {
+    private static func acwrSignal(_ ratio: Double, acute: Double, chronic: Double) -> Signal {
         let pct = String(format: "%.2f", ratio)
+        let evidence = "7d \(String(format: "%.1f", acute)) / 28d \(String(format: "%.1f", chronic))"
         switch ratio {
         case ..<0.8:
             return Signal(key: "acwr", label: "Training load",
+                evidence: evidence,
                 detail: "ramping down (acute:chronic \(pct)) — room to build", flag: .watch)
         case 0.8..<1.3:
             return Signal(key: "acwr", label: "Training load",
+                evidence: evidence,
                 detail: "in the sweet spot (acute:chronic \(pct))", flag: .good)
         case 1.3..<1.5:
             return Signal(key: "acwr", label: "Training load",
+                evidence: evidence,
                 detail: "building fast (acute:chronic \(pct)) — watch fatigue", flag: .watch)
         default:
             return Signal(key: "acwr", label: "Training load",
+                evidence: evidence,
                 detail: "spiking (acute:chronic \(pct)) — higher injury risk", flag: .bad)
         }
+    }
+
+    private static func evidence(value: Double, baseline: Double, unit: String, decimals: Int) -> String {
+        "\(format(value, decimals: decimals)) vs \(format(baseline, decimals: decimals)) \(unit)"
+    }
+
+    private static func format(_ value: Double, decimals: Int) -> String {
+        decimals == 0
+            ? String(Int(value.rounded()))
+            : String(format: "%.\(decimals)f", value)
     }
 
     // MARK: Synthesis

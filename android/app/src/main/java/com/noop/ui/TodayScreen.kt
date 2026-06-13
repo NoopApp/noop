@@ -895,12 +895,21 @@ private fun ReadinessSection(days: List<DailyMetric>) {
                                 .background(flagColor(signal.flag)),
                         )
                         Spacer(Modifier.width(8.dp))
-                        Text(
-                            signal.label,
-                            style = NoopType.caption,
-                            color = Palette.textSecondary,
-                            modifier = Modifier.width(104.dp),
-                        )
+                        Column(modifier = Modifier.width(104.dp)) {
+                            Text(
+                                signal.label,
+                                style = NoopType.caption,
+                                color = Palette.textSecondary,
+                            )
+                            signal.evidence?.let { evidence ->
+                                Text(
+                                    evidence,
+                                    style = NoopType.captionNumber,
+                                    color = Palette.textTertiary,
+                                    maxLines = 1,
+                                )
+                            }
+                        }
                         Text(
                             signal.detail,
                             style = NoopType.caption,

@@ -216,8 +216,16 @@ struct TodayView: View {
                                 HStack(alignment: .top, spacing: 8) {
                                     Circle().fill(flagColor(s.flag)).frame(width: 7, height: 7)
                                         .padding(.top, 5)
-                                    Text(s.label).font(StrandFont.caption)
-                                        .foregroundStyle(StrandPalette.textSecondary)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(s.label).font(StrandFont.caption)
+                                            .foregroundStyle(StrandPalette.textSecondary)
+                                        if let evidence = s.evidence {
+                                            Text(evidence).font(StrandFont.captionNumber)
+                                                .foregroundStyle(StrandPalette.textTertiary)
+                                                .lineLimit(1)
+                                                .minimumScaleFactor(0.8)
+                                        }
+                                    }
                                         .frame(width: 104, alignment: .leading)
                                     Text(s.detail).font(StrandFont.caption)
                                         .foregroundStyle(StrandPalette.textTertiary)

@@ -1,6 +1,8 @@
 package com.noop.analytics
 
 import com.noop.data.DailyMetric
+import java.util.Locale
+import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 /**
@@ -45,6 +47,7 @@ object ReadinessEngine {
     data class Signal(
         val key: String,    // "hrv" | "rhr" | "respRate" | "acwr" | "monotony"
         val label: String,  // short human label
+        val evidence: String? = null,
         val detail: String, // one-line plain-English read
         val flag: Flag,
     )
@@ -108,6 +111,8 @@ object ReadinessEngine {
             value = latest.avgHrv,
             baseline = history.takeLast(baselineWindow).mapNotNull { it.avgHrv },
             key = "hrv", label = "HRV",
+            unit = "ms",
+            decimals = 0,
             higherIsBetter = true,
             goodText = "above your baseline — well recovered",
             neutralText = "in your normal range",
@@ -121,6 +126,8 @@ object ReadinessEngine {
             value = latest.restingHr?.toDouble(),
             baseline = history.takeLast(baselineWindow).mapNotNull { it.restingHr?.toDouble() },
             key = "rhr", label = "Resting HR",
+            unit = "bpm",
+            decimals = 0,
             higherIsBetter = false,
             goodText = "at or below baseline",
             neutralText = "in your normal range",
@@ -146,6 +153,7 @@ object ReadinessEngine {
                     signals.add(
                         Signal(
                             key = "respRate", label = "Respiratory rate",
+                            evidence = evidence(value = rr, baseline = m, unit = "rpm", decimals = 1),
                             detail = "up vs baseline — sometimes an early sign of getting sick", flag = Flag.BAD,
                         )
                     )
@@ -153,6 +161,7 @@ object ReadinessEngine {
                     signals.add(
                         Signal(
                             key = "respRate", label = "Respiratory rate",
+                            evidence = evidence(value = rr, baseline = m, unit = "rpm", decimals = 1),
                             detail = "slightly raised vs baseline", flag = Flag.WATCH,
                         )
                     )
@@ -170,7 +179,7 @@ object ReadinessEngine {
             if (chronic > 0) {
                 val ratio = acute / chronic
                 acwr = ratio
-                signals.add(acwrSignal(ratio))
+                signals.add(acwrSignal(ratio, acute = acute, chronic = chronic))
             }
             // Foster monotony over the last week of strain.
             val week = strainSeries.takeLast(acuteWindow)
@@ -183,6 +192,7 @@ object ReadinessEngine {
                     signals.add(
                         Signal(
                             key = "monotony", label = "Training variety",
+                            evidence = "monotony ${String.format(Locale.US, "%.1f", mono)}",
                             detail = "low — similar strain every day raises strain/illness risk", flag = Flag.WATCH,
                         )
                     )
@@ -205,7 +215,7 @@ object ReadinessEngine {
     /** Build a z-score signal for a metric where the baseline is the trailing window. */
     private fun zSignal(
         value: Double?, baseline: List<Double>,
-        key: String, label: String, higherIsBetter: Boolean,
+        key: String, label: String, unit: String, decimals: Int, higherIsBetter: Boolean,
         goodText: String, neutralText: String,
         watchText: String, badText: String,
     ): Signal? {
@@ -223,30 +233,47 @@ object ReadinessEngine {
             z >= -1.0 -> { flag = Flag.WATCH; text = watchText }
             else -> { flag = Flag.BAD; text = badText }
         }
-        return Signal(key = key, label = label, detail = text, flag = flag)
+        return Signal(
+            key = key,
+            label = label,
+            evidence = evidence(value = value, baseline = m, unit = unit, decimals = decimals),
+            detail = text,
+            flag = flag,
+        )
     }
 
-    private fun acwrSignal(ratio: Double): Signal {
-        val pct = String.format("%.2f", ratio)
+    private fun acwrSignal(ratio: Double, acute: Double, chronic: Double): Signal {
+        val pct = String.format(Locale.US, "%.2f", ratio)
+        val evidence = "7d ${String.format(Locale.US, "%.1f", acute)} / 28d ${String.format(Locale.US, "%.1f", chronic)}"
         return when {
             ratio < 0.8 -> Signal(
                 key = "acwr", label = "Training load",
+                evidence = evidence,
                 detail = "ramping down (acute:chronic $pct) — room to build", flag = Flag.WATCH,
             )
             ratio < 1.3 -> Signal(
                 key = "acwr", label = "Training load",
+                evidence = evidence,
                 detail = "in the sweet spot (acute:chronic $pct)", flag = Flag.GOOD,
             )
             ratio < 1.5 -> Signal(
                 key = "acwr", label = "Training load",
+                evidence = evidence,
                 detail = "building fast (acute:chronic $pct) — watch fatigue", flag = Flag.WATCH,
             )
             else -> Signal(
                 key = "acwr", label = "Training load",
+                evidence = evidence,
                 detail = "spiking (acute:chronic $pct) — higher injury risk", flag = Flag.BAD,
             )
         }
     }
+
+    private fun evidence(value: Double, baseline: Double, unit: String, decimals: Int): String =
+        "${format(value, decimals)} vs ${format(baseline, decimals)} $unit"
+
+    private fun format(value: Double, decimals: Int): String =
+        if (decimals == 0) value.roundToInt().toString() else String.format(Locale.US, "%.${decimals}f", value)
 
     // MARK: Synthesis
 

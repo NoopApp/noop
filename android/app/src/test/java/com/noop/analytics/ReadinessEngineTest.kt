@@ -66,6 +66,9 @@ class ReadinessEngineTest {
         assertEquals(ReadinessEngine.Flag.GOOD, r.signals.firstOrNull { it.key == "hrv" }?.flag)
         assertEquals(ReadinessEngine.Flag.GOOD, r.signals.firstOrNull { it.key == "rhr" }?.flag)
         assertEquals(ReadinessEngine.Flag.GOOD, r.signals.firstOrNull { it.key == "acwr" }?.flag)
+        assertEquals("72 vs 60 ms", r.signals.firstOrNull { it.key == "hrv" }?.evidence)
+        assertEquals("46 vs 52 bpm", r.signals.firstOrNull { it.key == "rhr" }?.evidence)
+        assertEquals("7d 10.0 / 28d 10.0", r.signals.firstOrNull { it.key == "acwr" }?.evidence)
     }
 
     @Test
@@ -96,6 +99,7 @@ class ReadinessEngineTest {
             baseline(todayHrv = 60.0, todayRhr = 52, todayStrain = 10.0, todayResp = 18.0)
         )
         assertTrue(r.signals.any { it.key == "respRate" })
+        assertEquals("18.0 vs 14.0 rpm", r.signals.firstOrNull { it.key == "respRate" }?.evidence)
     }
 
     @Test

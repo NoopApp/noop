@@ -34,6 +34,9 @@ final class ReadinessEngineTests: XCTestCase {
         XCTAssertEqual(r.signals.first { $0.key == "hrv" }?.flag, .good)
         XCTAssertEqual(r.signals.first { $0.key == "rhr" }?.flag, .good)
         XCTAssertEqual(r.signals.first { $0.key == "acwr" }?.flag, .good)
+        XCTAssertEqual(r.signals.first { $0.key == "hrv" }?.evidence, "72 vs 60 ms")
+        XCTAssertEqual(r.signals.first { $0.key == "rhr" }?.evidence, "46 vs 52 bpm")
+        XCTAssertEqual(r.signals.first { $0.key == "acwr" }?.evidence, "7d 10.0 / 28d 10.0")
     }
 
     func testRundownWhenTwoRecoverySignalsDown() {
@@ -59,6 +62,7 @@ final class ReadinessEngineTests: XCTestCase {
         // Today resp rate well above baseline (~14) → illness-ish watch/bad signal present.
         let r = ReadinessEngine.evaluate(days: baseline(todayHrv: 60, todayRhr: 52, todayStrain: 10, todayResp: 18))
         XCTAssertTrue(r.signals.contains { $0.key == "respRate" })
+        XCTAssertEqual(r.signals.first { $0.key == "respRate" }?.evidence, "18.0 vs 14.0 rpm")
     }
 
     func testExplicitTodayWithoutMatchingRowIsInsufficient() {
