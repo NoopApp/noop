@@ -89,6 +89,23 @@ final class VitalSourceResolutionTests: XCTestCase {
         XCTAssertTrue(skin?.stateCaption.contains("Overnight computed") == true)
     }
 
+    func testVitalsFallBackToLatestHistoricalDayWhenTodayHasNoValue() {
+        let readings = BodyVitalSigns.readings(
+            sourceRows: [
+                SourcedDailyMetric(metric: daily(day: "2026-06-11", respRateBpm: 15.2), source: .whoopImport),
+                SourcedDailyMetric(metric: daily(day: "2026-06-12", respRateBpm: 16.1), source: .noopComputed)
+            ],
+            temperatureUnit: .celsius,
+            now: localNoon(day: "2026-06-13")
+        )
+
+        let resp = readings.first { $0.key == "resp" }
+        XCTAssertEqual(resp?.day, "2026-06-12")
+        XCTAssertEqual(resp?.value, 16.1)
+        XCTAssertEqual(resp?.source, .noopComputed)
+        XCTAssertEqual(BodyVitalSigns.latestDayLabel(readings), BodyVitalReading.dayLabel("2026-06-12"))
+    }
+
     private func daily(
         day: String,
         totalSleepMin: Double? = nil,
@@ -118,5 +135,15 @@ final class VitalSourceResolutionTests: XCTestCase {
             steps: steps,
             activeKcalEst: nil
         )
+    }
+
+    private func localNoon(day: String) -> Date {
+        let parts = day.split(separator: "-").compactMap { Int($0) }
+        return Calendar.current.date(from: DateComponents(
+            year: parts[0],
+            month: parts[1],
+            day: parts[2],
+            hour: 12
+        ))!
     }
 }
