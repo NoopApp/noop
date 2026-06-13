@@ -163,6 +163,12 @@ final class AppModel: ObservableObject {
     private func refreshAfterCompletedBackfill() async {
         live.append(log: "Backfill: refreshing dashboard cache from completed sync")
         await repo.refresh(days: 120)
+        // Score the freshly-offloaded raw data RIGHT NOW rather than waiting for the next
+        // 15-minute analyzeRecent tick — otherwise a just-synced night's recovery / sleep /
+        // strain can take up to 15 minutes to appear on a strap-only dashboard. The engine
+        // no-ops if a tick is already running (its `computing` guard) and refreshes the
+        // dashboard itself once the new scores are persisted.
+        await intelligence.analyzeRecent()
     }
 
     /// Fold a fresh reading into the smoothing window and republish a stable bpm.
