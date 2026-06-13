@@ -1160,11 +1160,19 @@ public final class BLEManager: NSObject, ObservableObject {
         }
         // R-R: the standard profile is the RELIABLE source (the custom REALTIME_DATA stream
         // usually reports rr_count=0), so always surface intervals when present.
-        if !m.rr.isEmpty { state.rr = m.rr }
+        var didUpdateBiometrics = false
+        if !m.rr.isEmpty {
+            state.rr = m.rr
+            didUpdateBiometrics = true
+        }
         // HR: the standard 0x2A37 profile is the RELIABLE source (BLE-standard, ~1Hz). Let it
         // drive the value whenever it's physiologically plausible; reject 0/garbage (off-wrist).
         // AppModel medians these into a stable display value.
-        if m.hr >= 30 && m.hr <= 220 { state.heartRate = m.hr }
+        if m.hr >= 30 && m.hr <= 220 {
+            state.heartRate = m.hr
+            didUpdateBiometrics = true
+        }
+        if didUpdateBiometrics { state.markBiometricSample() }
         // Record it continuously — independent of the realtime stream or the open screen.
         collector?.ingestStandardHR(hr: m.hr, rr: m.rr, at: Int(Date().timeIntervalSince1970))
     }

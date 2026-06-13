@@ -12,7 +12,7 @@ import WhoopStore
 // chart (each metric min–max scaled to 0–1 within the window so different units
 // share an axis). Below, every pair of selected metrics gets a live Pearson-r
 // correlation readout with a plain-English conclusion. Pure read-side: each
-// metric loads from repo.series; everything else is derived in-view.
+// metric loads from repo.resolvedSeries; everything else is derived in-view.
 
 // yyyy-MM-dd → Date, fixed UTC / en_US_POSIX (per task spec).
 private let compareDayParser: DateFormatter = {
@@ -243,7 +243,7 @@ struct CompareView: View {
     /// Load (and cache) the full history for any selected metric not yet fetched.
     private func loadSelected() async {
         for metric in selected where fullSeries[metric.id] == nil {
-            let s = await repo.series(key: metric.key, source: metric.source)
+            let s = await repo.resolvedSeries(key: metric.key, source: metric.source).values
             fullSeries[metric.id] = s
         }
         loadedOnce = true

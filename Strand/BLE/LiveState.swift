@@ -23,6 +23,9 @@ public final class LiveState: ObservableObject {
     @Published public var encryptedBond: Bool = false
     @Published public var heartRate: Int? = nil
     @Published public var rr: [Int] = []
+    /// Monotonic tick for any fresh biometric notification, even when the displayed value repeats.
+    /// Views that render live traces should observe this instead of `heartRate` equality.
+    @Published public private(set) var biometricSampleSeq: UInt64 = 0
     @Published public var batteryPct: Double? = nil
     /// Charging flag from the strap's BATTERY_LEVEL events — wire observation: u8 bit0 in the
     /// event payload (4.0 @26 / 5.0 @30), pushed ~every 8 min on captured links. nil until the
@@ -116,6 +119,10 @@ public final class LiveState: ObservableObject {
     @Published public var standardHRMode: String? = nil
 
     public init() {}
+
+    public func markBiometricSample() {
+        biometricSampleSeq &+= 1
+    }
 
     /// Single funnel for battery readings — updates the published value AND notifies the hook,
     /// so both write sites (FrameRouter, BLEManager) drive the alert monitor identically.

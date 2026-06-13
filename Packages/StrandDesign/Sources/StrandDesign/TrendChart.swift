@@ -156,6 +156,8 @@ public struct TrendChart: View {
             GeometryReader { geo in
                 let plot = geo[proxy.plotAreaFrame]
                 ZStack(alignment: .topLeading) {
+                    Rectangle()
+                        .fill(Color.clear)
                     if showsHover,
                        let hx = hoverX,
                        let p = nearestPoint(toX: hx, proxy: proxy, plot: plot),
@@ -184,6 +186,7 @@ public struct TrendChart: View {
                         )
                     }
                 }
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
                 .animation(StrandMotion.fade, value: hoverX)
                 .contentShape(Rectangle())
                 .onContinuousHover(coordinateSpace: .local) { phase in

@@ -59,3 +59,59 @@ final class JournalLogicTests: XCTestCase {
         XCTAssertEqual(cat.count, JournalCatalogStore.starterQuestions.count - 1)
     }
 }
+
+final class MetricResolutionTests: XCTestCase {
+    func testWhoopSourceFallsBackToComputedThenCompatibleAppleHealth() {
+        let candidates = MetricCatalog.sourceCandidates(
+            forKey: "rhr",
+            preferredSource: "my-whoop",
+            actualWhoopSource: "my-whoop"
+        )
+        XCTAssertEqual(candidates, [
+            MetricSourceCandidate(source: "my-whoop", key: "rhr"),
+            MetricSourceCandidate(source: "my-whoop-noop", key: "rhr"),
+            MetricSourceCandidate(source: "apple-health", key: "resting_hr"),
+        ])
+    }
+
+    func testAppleHealthSourceStaysExactSource() {
+        let candidates = MetricCatalog.sourceCandidates(
+            forKey: "steps",
+            preferredSource: "apple-health",
+            actualWhoopSource: "my-whoop"
+        )
+        XCTAssertEqual(candidates, [
+            MetricSourceCandidate(source: "apple-health", key: "steps"),
+        ])
+    }
+
+    func testResolvedSeriesMergesByPriorityPerDay() {
+        let merged = Repository.mergeMetricSeries([
+            MetricSourceSeries(
+                candidate: MetricSourceCandidate(source: "my-whoop", key: "hrv"),
+                rows: [
+                    (day: "2026-06-09", value: 50),
+                    (day: "2026-06-11", value: 55),
+                ]
+            ),
+            MetricSourceSeries(
+                candidate: MetricSourceCandidate(source: "my-whoop-noop", key: "hrv"),
+                rows: [
+                    (day: "2026-06-09", value: 40),
+                    (day: "2026-06-10", value: 45),
+                ]
+            ),
+            MetricSourceSeries(
+                candidate: MetricSourceCandidate(source: "apple-health", key: "hrv"),
+                rows: [
+                    (day: "2026-06-10", value: 35),
+                    (day: "2026-06-12", value: 60),
+                ]
+            ),
+        ])
+
+        XCTAssertEqual(merged.map(\.day), ["2026-06-09", "2026-06-10", "2026-06-11", "2026-06-12"])
+        XCTAssertEqual(merged.map(\.value), [50, 45, 55, 60])
+        XCTAssertEqual(merged.map(\.source), ["my-whoop", "my-whoop-noop", "my-whoop", "apple-health"])
+    }
+}

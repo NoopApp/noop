@@ -10,8 +10,8 @@ import WhoopStore
 // autonomic load.
 //
 // Source of the daily 0–3 value, in priority order:
-//   1. The persisted `stress` metric series ("my-whoop") via `repo.series` — if a
-//      day has a stored stress value we trust it.
+//   1. The resolved persisted `stress` metric series via `repo.resolvedSeries` — if a
+//      day has a stored stress value from the preferred source chain we trust it.
 //   2. Otherwise we DERIVE it from how today's resting HR / HRV sit against a
 //      personal 30-day baseline. Stress shows up as HIGHER resting HR and LOWER
 //      HRV, so we sum two z-scores and squash onto 0–3 with a logistic curve:
@@ -59,7 +59,7 @@ struct StressView: View {
     }
 
     private func load() async {
-        storedSeries = await repo.series(key: "stress", source: "my-whoop")
+        storedSeries = await repo.resolvedSeries(key: "stress", source: "my-whoop").values
         loaded = true
         rebuildModelIfNeeded()
     }

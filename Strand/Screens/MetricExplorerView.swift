@@ -151,8 +151,8 @@ struct MetricExplorerView: View {
         guard emptyByID.isEmpty else { return }
         var map: [String: Bool] = [:]
         for metric in MetricCatalog.all {
-            let s = await repo.series(key: metric.key, source: metric.source)
-            map[metric.id] = s.isEmpty
+            let resolved = await repo.resolvedSeries(key: metric.key, source: metric.source)
+            map[metric.id] = resolved.points.isEmpty
         }
         emptyByID = map
     }
@@ -188,7 +188,7 @@ private struct MetricRow: View {
                 Text(metric.title)
                     .font(StrandFont.body)
                     .foregroundStyle(StrandPalette.textPrimary)
-                Text(metric.source == "apple-health" ? "Apple Health" : "Whoop")
+                Text(MetricCatalog.sourceTitle(metric.source))
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.textTertiary)
             }
@@ -242,6 +242,7 @@ struct MetricDetailView: View {
     @State private var range: ExploreRange = .month
     /// Full ascending series for this metric — ALL history.
     @State private var series: [(day: String, value: Double)] = []
+    @State private var resolution: MetricSeriesResolution?
     /// Every OTHER catalog series, loaded once for the correlation scan.
     @State private var others: [(metric: MetricDescriptor, series: [(day: String, value: Double)])] = []
     @State private var loaded = false
@@ -344,10 +345,12 @@ struct MetricDetailView: View {
     }
 
     private func load() async {
-        series = await repo.series(key: metric.key, source: metric.source)
+        let resolved = await repo.resolvedSeries(key: metric.key, source: metric.source)
+        series = resolved.values
+        resolution = resolved
         var loadedOthers: [(metric: MetricDescriptor, series: [(day: String, value: Double)])] = []
         for other in MetricCatalog.all where other.id != metric.id {
-            let s = await repo.series(key: other.key, source: other.source)
+            let s = await repo.resolvedSeries(key: other.key, source: other.source).values
             if !s.isEmpty { loadedOthers.append((other, s)) }
         }
         others = loadedOthers
@@ -405,9 +408,10 @@ struct MetricDetailView: View {
             return "as of \(longDate(d))"
         }()
         let heroValue = latest.map { fmt($0.value) } ?? "—"
+        let source = resolution?.sourceCaption ?? MetricCatalog.sourceTitle(metric.source)
         let subtitle = windowFellBack
-            ? "Sparse — widened to \(effectiveRange.name) · \(windowed.count) readings"
-            : "\(windowed.count) readings · \(range.name)"
+            ? "Sparse — widened to \(effectiveRange.name) · \(windowed.count) readings · \(source)"
+            : "\(windowed.count) readings · \(range.name) · \(source)"
         return ChartCard(
             title: "\(metric.title)",
             subtitle: subtitle,
@@ -425,6 +429,7 @@ struct MetricDetailView: View {
             ChartFooter([
                 ("Window", effectiveRange.label),
                 ("Points", "\(windowed.count)"),
+                ("Source", source),
                 ("Latest", heroValue),
             ])
         }

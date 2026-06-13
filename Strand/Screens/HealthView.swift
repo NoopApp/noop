@@ -1,4 +1,5 @@
 import SwiftUI
+import Foundation
 import StrandDesign
 import StrandAnalytics
 import WhoopStore
@@ -66,7 +67,7 @@ private struct HeartRateSection: View {
     /// continuous time-series instead of collapsing to a 2-point flat line when the strap streams HR
     /// but little/no R-R (the #105 case — Live HR works, but the Health graph showed only 2 samples).
     /// Capped to ~3 min @ ~1 Hz; resets when the view is recreated, which is fine for a live trace.
-    @State private var hrHistory: [Double] = []
+    @State private var hrHistory: [(date: Date, value: Double)] = []
 
     /// HR to display: reported value when >0, else derived from the latest R-R
     /// interval (the strap streams R-R even when its HR field reads 0).
@@ -100,7 +101,7 @@ private struct HeartRateSection: View {
         // Prefer the accumulated live HR time-series — that's what a "live" graph should show, and it
         // keeps growing even when the strap streams HR but sparse R-R (#105). Fall back to R-R-derived
         // beats, then a flat line at the current HR.
-        if hrHistory.count > 1 { return hrHistory }
+        if hrHistory.count > 1 { return hrHistory.map(\.value) }
         let beats = live.rr.suffix(60).compactMap { rr -> Double? in
             rr > 0 ? 60_000.0 / Double(rr) : nil
         }
@@ -138,12 +139,21 @@ private struct HeartRateSection: View {
                 ])
             }
         }
-        .onChange(of: displayHR) { newHR in
-            // Append each new live HR reading so the hero graph grows a continuous time-series (#105).
-            guard let v = newHR else { return }
-            hrHistory.append(Double(v))
-            if hrHistory.count > 180 { hrHistory.removeFirst(hrHistory.count - 180) }
+        .onAppear { appendLiveSample() }
+        .onChange(of: live.biometricSampleSeq) { _ in
+            appendLiveSample()
         }
+        .onChange(of: live.connected) { connected in
+            if !connected { hrHistory.removeAll() }
+        }
+    }
+
+    private func appendLiveSample() {
+        guard let v = displayHR else { return }
+        let now = Date()
+        hrHistory.append((date: now, value: Double(v)))
+        hrHistory.removeAll { now.timeIntervalSince($0.date) > 180 }
+        if hrHistory.count > 240 { hrHistory.removeFirst(hrHistory.count - 240) }
     }
 
     /// The hero chart body: a tall HR sparkline tinted to the current zone, with a
@@ -160,7 +170,8 @@ private struct HeartRateSection: View {
                     ]),
                     lineWidth: 2.5,
                     showsArea: true,
-                    valueFormat: { "\(Int($0.rounded())) bpm" }
+                    valueFormat: { "\(Int($0.rounded())) bpm" },
+                    indexLabel: hrHistory.count > 1 ? liveSampleLabel : nil
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -185,6 +196,13 @@ private struct HeartRateSection: View {
     private func zoneLabel(hasLiveHR: Bool, zone: Int, fraction: Double) -> String {
         guard hasLiveHR else { return "Idle" }
         return "Zone \(zone) · \(Int((fraction * 100).rounded()))%"
+    }
+
+    private func liveSampleLabel(_ index: Int) -> String {
+        guard hrHistory.indices.contains(index) else { return "sample \(index + 1)" }
+        let seconds = max(0, Int(Date().timeIntervalSince(hrHistory[index].date).rounded()))
+        if seconds <= 1 { return "now" }
+        return "\(seconds)s ago"
     }
 }
 

@@ -558,7 +558,7 @@ struct TodayView: View {
     /// `latestString` reads `.last` of this windowed series, so a value older than the window shows
     /// "—" rather than a stale number under a Today tile (#49).
     private func sparkValues(_ key: String, source: String, window: Int) async -> [Double] {
-        let all = await repo.series(key: key, source: source)   // full history, asc
+        let all = await repo.resolvedSeries(key: key, source: source).values   // full history, asc
         guard !all.isEmpty else { return [] }
         return trailingWindow(all, days: window).map { $0.value }
     }

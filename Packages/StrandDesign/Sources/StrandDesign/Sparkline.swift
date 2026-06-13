@@ -66,6 +66,8 @@ public struct Sparkline: View {
         GeometryReader { geo in
             let pts = points(in: geo.size)
             ZStack {
+                Rectangle()
+                    .fill(Color.clear)
                 if showsArea, pts.count > 1 {
                     areaPath(pts, in: geo.size)
                         .fill(
@@ -114,6 +116,7 @@ public struct Sparkline: View {
                     )
                 }
             }
+            .frame(width: geo.size.width, height: geo.size.height)
             .animation(StrandMotion.fade, value: hoverX)
             .contentShape(Rectangle())
             .onContinuousHover(coordinateSpace: .local) { phase in

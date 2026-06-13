@@ -30,17 +30,21 @@ public final class FrameRouter {
 
         switch parsed.typeName {
         case "REALTIME_DATA", "REALTIME_RAW_DATA":
+            var didUpdateBiometrics = false
             // Reject 0 / out-of-range spikes from realtime streams; AppModel medians the rest.
             // Some firmware exposes live BPM only on the R10/R11 raw stream after acknowledging
             // BLE_REALTIME_HR_ON, so the UI can consume it even though persistence still ignores raw43.
             if let hr = parsed.parsed["heart_rate"]?.intValue, hr >= 30, hr <= 220 {
                 state.heartRate = hr
+                didUpdateBiometrics = true
             }
             // The realtime stream usually reports rr_count=0; only update R-R when this frame
             // actually carries intervals, so we don't wipe R-R sourced from the 0x2A37 profile.
             if let rr = parsed.parsed["rr_intervals"]?.intArrayValue, !rr.isEmpty {
                 state.rr = rr
+                didUpdateBiometrics = true
             }
+            if didUpdateBiometrics { state.markBiometricSample() }
 
         case "COMMAND_RESPONSE":
             if let pct = parsed.parsed["battery_pct"]?.doubleValue {

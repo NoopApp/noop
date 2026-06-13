@@ -223,6 +223,58 @@ final class Repository: ObservableObject {
         return pts.map { ($0.day, $0.value) }
     }
 
+    /// Product-facing daily series for a metric. Exact-source reads remain available through
+    /// `series(key:source:)`; this resolver is for cross-source surfaces where the user expects the
+    /// best available signal. Precedence is explicit: imported WHOOP wins, NOOP-computed fills gaps,
+    /// and Apple Health only fills compatible vitals when neither strap source has that day.
+    func resolvedSeries(key: String, source preferredSource: String, days: Int = 4000) async -> MetricSeriesResolution {
+        let candidates = MetricCatalog.sourceCandidates(
+            forKey: key,
+            preferredSource: preferredSource,
+            actualWhoopSource: deviceId
+        )
+        guard let store = await ensureStore() else {
+            return MetricSeriesResolution(requestedSource: preferredSource, candidates: candidates, points: [])
+        }
+        let now = Date()
+        let from = Self.dayString(now.addingTimeInterval(-Double(days) * 86_400))
+        let to = Self.dayString(now.addingTimeInterval(86_400))
+        var sourceSeries: [MetricSourceSeries] = []
+        sourceSeries.reserveCapacity(candidates.count)
+        for candidate in candidates {
+            let pts = (try? await store.metricSeries(
+                deviceId: candidate.source,
+                key: candidate.key,
+                from: from,
+                to: to
+            )) ?? []
+            sourceSeries.append(MetricSourceSeries(
+                candidate: candidate,
+                rows: pts.map { ($0.day, $0.value) }
+            ))
+        }
+        return MetricSeriesResolution(
+            requestedSource: preferredSource,
+            candidates: candidates,
+            points: Self.mergeMetricSeries(sourceSeries)
+        )
+    }
+
+    static func mergeMetricSeries(_ sourceSeries: [MetricSourceSeries]) -> [ResolvedMetricPoint] {
+        var byDay: [String: ResolvedMetricPoint] = [:]
+        for series in sourceSeries {
+            for row in series.rows where byDay[row.day] == nil {
+                byDay[row.day] = ResolvedMetricPoint(
+                    day: row.day,
+                    value: row.value,
+                    source: series.candidate.source,
+                    sourceKey: series.candidate.key
+                )
+            }
+        }
+        return byDay.values.sorted { $0.day < $1.day }
+    }
+
     func availableKeys(source: String) async -> [String] {
         guard let store = await ensureStore() else { return [] }
         return (try? await store.metricKeys(deviceId: source)) ?? []

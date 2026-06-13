@@ -52,9 +52,59 @@ struct MetricDescriptor: Identifiable, Hashable {
     }
 }
 
+struct MetricSourceCandidate: Equatable, Hashable, Sendable {
+    let source: String
+    let key: String
+}
+
+struct MetricSourceSeries {
+    let candidate: MetricSourceCandidate
+    let rows: [(day: String, value: Double)]
+}
+
+struct ResolvedMetricPoint: Equatable, Sendable {
+    let day: String
+    let value: Double
+    let source: String
+    let sourceKey: String
+}
+
+struct MetricSeriesResolution: Equatable, Sendable {
+    let requestedSource: String
+    let candidates: [MetricSourceCandidate]
+    let points: [ResolvedMetricPoint]
+
+    var values: [(day: String, value: Double)] {
+        points.map { ($0.day, $0.value) }
+    }
+
+    var usedSources: [String] {
+        var seen = Set<String>()
+        var ordered: [String] = []
+        for point in points where !seen.contains(point.source) {
+            seen.insert(point.source)
+            ordered.append(point.source)
+        }
+        return ordered
+    }
+
+    var sourceCaption: String {
+        let sources = usedSources
+        guard !sources.isEmpty else {
+            return candidates.first.map { MetricCatalog.sourceTitle($0.source) } ?? MetricCatalog.sourceTitle(requestedSource)
+        }
+        return sources.map(MetricCatalog.sourceTitle).joined(separator: " + ")
+    }
+}
+
 /// Canonical catalog — mirrors the WHOOP "Trend View" plus Apple Health body metrics.
 /// Keys match exactly what the importers write into metricSeries.
 enum MetricCatalog {
+    static let whoopSource = "my-whoop"
+    static let appleHealthSource = "apple-health"
+    static let nutritionSource = "nutrition-csv"
+    static let moodSource = "noop-mood"
+
     static let categories = ["Heart", "Charge", "Rest", "Effort", "Health", "Nutrition", "Mind"]
 
     static let all: [MetricDescriptor] = [
@@ -114,6 +164,62 @@ enum MetricCatalog {
     ]
 
     static func inCategory(_ c: String) -> [MetricDescriptor] { all.filter { $0.category == c } }
+
+    static func sourceTitle(_ source: String) -> String {
+        switch source {
+        case whoopSource:
+            return "WHOOP"
+        case appleHealthSource:
+            return "Apple Health"
+        case nutritionSource:
+            return "Nutrition"
+        case moodSource:
+            return "Mood"
+        case let s where s.hasSuffix("-noop"):
+            return "NOOP computed"
+        default:
+            return source
+        }
+    }
+
+    static func sourceCandidates(
+        forKey key: String,
+        preferredSource: String,
+        actualWhoopSource: String = whoopSource
+    ) -> [MetricSourceCandidate] {
+        if preferredSource == whoopSource || preferredSource == actualWhoopSource {
+            var candidates = [
+                MetricSourceCandidate(source: actualWhoopSource, key: key),
+                MetricSourceCandidate(source: actualWhoopSource + "-noop", key: key),
+            ]
+            if let appleKey = appleCompatibleKey(forWhoopKey: key) {
+                candidates.append(MetricSourceCandidate(source: appleHealthSource, key: appleKey))
+            }
+            return uniqued(candidates)
+        }
+        return [MetricSourceCandidate(source: preferredSource, key: key)]
+    }
+
+    private static func appleCompatibleKey(forWhoopKey key: String) -> String? {
+        switch key {
+        case "rhr":
+            return "resting_hr"
+        case "hrv", "spo2", "resp_rate":
+            return key
+        default:
+            return nil
+        }
+    }
+
+    private static func uniqued(_ candidates: [MetricSourceCandidate]) -> [MetricSourceCandidate] {
+        var seen = Set<MetricSourceCandidate>()
+        var out: [MetricSourceCandidate] = []
+        for candidate in candidates where !seen.contains(candidate) {
+            seen.insert(candidate)
+            out.append(candidate)
+        }
+        return out
+    }
 
     private static func d(_ key: String, _ title: String, _ category: String, _ unit: String,
                           _ source: String, _ icon: String, _ decimals: Int,
