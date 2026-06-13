@@ -98,7 +98,11 @@ public enum PpgHr {
             }
         }
         let lag = bestLag ?? (vals.max { $0.value < $1.value }!.key)
-        let bpm = (fsD * 60 / Double(lag) * 10).rounded() / 10
+        // Round to a WHOLE bpm — matching the Kotlin lane's `Math.round(60*fs/lag).toInt()` so the two
+        // platforms store the same value for the same window (#219). The estimate is quantized by the
+        // integer `lag` already, so the prior 0.1-bpm form only exposed that quantization as false
+        // precision; downstream HR consumers round PPG bpm to Int anyway (hrSample / CachedHrPoint).
+        let bpm = (fsD * 60 / Double(lag)).rounded()
         let conf = (vals[lag]! * 1000).rounded() / 1000
         return (bpm, conf)
     }
