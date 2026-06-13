@@ -57,6 +57,29 @@ struct MetricSeriesResolution: Equatable, Sendable {
     }
 }
 
+/// Source provenance for daily rows before product surfaces merge them. The UI uses this to say
+/// where a vital came from without changing the stored data.
+enum DailyMetricSource: Equatable {
+    case whoopImport
+    case noopComputed
+    case appleHealth
+    case localCache
+
+    var vitalPriority: Int {
+        switch self {
+        case .whoopImport:  return 0
+        case .noopComputed: return 1
+        case .appleHealth:  return 2
+        case .localCache:   return 3
+        }
+    }
+}
+
+struct SourcedDailyMetric: Equatable {
+    let metric: DailyMetric
+    let source: DailyMetricSource
+}
+
 /// A compact snapshot of how much history each source holds, fed to the Data Sources "Freshness
 /// Pipeline" card and the Android equivalent. Counts only — no per-day rows leave the refresh.
 struct RepositoryFreshness: Equatable, Sendable {
@@ -94,6 +117,9 @@ final class Repository: ObservableObject {
     /// How much history each source currently holds, recomputed on every `refresh()`. Powers the
     /// Data Sources "Freshness Pipeline" card so the user can see imported vs computed vs Apple coverage.
     @Published private(set) var freshness: RepositoryFreshness = .empty
+    /// Daily metric rows with source provenance, used by vital-sign surfaces that need honest
+    /// "WHOOP import / NOOP computed / Apple Health" captions instead of a silent merged row.
+    @Published private(set) var vitalRows: [SourcedDailyMetric] = []
     /// Monotonic counter bumped on every successful `refresh()`. Intraday-updating views key their
     /// data load on this so they reload when fresh strap data lands — `today?.day` alone is a stable
     /// date string within a day and would freeze e.g. the Today HR trend until the date rolls over.
@@ -118,6 +144,12 @@ final class Repository: ObservableObject {
         return days.filter { $0.day >= cutoff }
     }
 
+    /// Source-aware rows for vital-sign cards. During previews/tests that set `days` directly,
+    /// fall back to the merged local cache so the component still renders.
+    var vitalMetricRows: [SourcedDailyMetric] {
+        vitalRows.isEmpty ? days.map { SourcedDailyMetric(metric: $0, source: .localCache) } : vitalRows
+    }
+
     /// Canonical source ids the resolver knows how to cross-reference. The strap's actual id is
     /// `deviceId` (and its computed sibling `deviceId + "-noop"`); these are the FIXED ids.
     static let whoopSource = "my-whoop"
@@ -130,7 +162,7 @@ final class Repository: ObservableObject {
     static func localDayKey(_ date: Date) -> String { dayKeyFormatter.string(from: date) }
 
     /// The hour the LOGICAL day rolls (04:00 local). Between midnight and this hour, "Today" stays put.
-    static let logicalDayRolloverHour = 4
+    nonisolated static let logicalDayRolloverHour = 4
 
     /// The LOGICAL local day for `now` — the calendar date of `now - rolloverHour hours`. Rolls at
     /// 04:00 local rather than midnight, so the small hours after midnight still resolve to the prior
@@ -222,6 +254,7 @@ final class Repository: ObservableObject {
         self.importedSleep = fig   // assigned BEFORE days/sleeps: one consistent publish per refresh
         self.days = Self.mergeDaily(imported: imported, computed: computed)
         self.sleeps = Self.mergeSleep(imported: impSleep, computed: compSleep)
+        self.vitalRows = Self.sourceRows(imported: imported, computed: computed, apple: apple)
         self.freshness = Self.computeFreshness(imported: imported, computed: computed, apple: apple,
                                                importedSleeps: impSleep, computedSleeps: compSleep)
         self.loaded = true
@@ -244,12 +277,33 @@ final class Repository: ObservableObject {
         )
     }
 
-    /// Imported daily rows win per day; computed rows fill the days the import doesn't cover.
-    private static func mergeDaily(imported: [DailyMetric], computed: [DailyMetric]) -> [DailyMetric] {
+    /// Imported daily values win field-by-field; computed rows fill only nil imported fields.
+    /// This preserves official export/import values while allowing fresh local analysis to populate
+    /// Charge, skin temperature deviation, activity totals, or other fields missing from that row.
+    nonisolated static func mergeDaily(imported: [DailyMetric], computed: [DailyMetric]) -> [DailyMetric] {
         var byDay: [String: DailyMetric] = [:]
-        for d in computed { byDay[d.day] = d }   // computed first…
-        for d in imported { byDay[d.day] = d }   // …import overwrites, so a real WHOOP import always wins
+        for d in computed { byDay[d.day] = d }
+        for d in imported {
+            if let existing = byDay[d.day] {
+                byDay[d.day] = d.fillingNilFields(from: existing)
+            } else {
+                byDay[d.day] = d
+            }
+        }
         return byDay.values.sorted { $0.day < $1.day }
+    }
+
+    private static func sourceRows(imported: [DailyMetric], computed: [DailyMetric],
+                                   apple: [DailyMetric]) -> [SourcedDailyMetric] {
+        (imported.map { SourcedDailyMetric(metric: $0, source: .whoopImport) }
+            + computed.map { SourcedDailyMetric(metric: $0, source: .noopComputed) }
+            + apple.map { SourcedDailyMetric(metric: $0, source: .appleHealth) })
+            .sorted { lhs, rhs in
+                if lhs.metric.day == rhs.metric.day {
+                    return lhs.source.vitalPriority < rhs.source.vitalPriority
+                }
+                return lhs.metric.day < rhs.metric.day
+            }
     }
 
     /// Same precedence for sleep sessions, keyed by the day the night ends on.
@@ -541,7 +595,7 @@ final class Repository: ObservableObject {
 
     /// Union; the NATIVE row wins per (day, question) — the in-app answer is the user's most recent
     /// explicit action and stays editable, unlike the immutable imported history.
-    static func mergeJournal(imported: [JournalEntry], native: [JournalEntry]) -> [JournalEntry] {
+    nonisolated static func mergeJournal(imported: [JournalEntry], native: [JournalEntry]) -> [JournalEntry] {
         var byKey: [String: JournalEntry] = [:]
         for e in imported { byKey[e.day + "\u{1F}" + e.question] = e }
         for e in native { byKey[e.day + "\u{1F}" + e.question] = e }
@@ -675,4 +729,28 @@ final class Repository: ObservableObject {
     }()
 
     static func dayString(_ d: Date) -> String { dayFormatter.string(from: d) }
+}
+
+private extension DailyMetric {
+    func fillingNilFields(from fallback: DailyMetric) -> DailyMetric {
+        DailyMetric(
+            day: day,
+            totalSleepMin: totalSleepMin ?? fallback.totalSleepMin,
+            efficiency: efficiency ?? fallback.efficiency,
+            deepMin: deepMin ?? fallback.deepMin,
+            remMin: remMin ?? fallback.remMin,
+            lightMin: lightMin ?? fallback.lightMin,
+            disturbances: disturbances ?? fallback.disturbances,
+            restingHr: restingHr ?? fallback.restingHr,
+            avgHrv: avgHrv ?? fallback.avgHrv,
+            recovery: recovery ?? fallback.recovery,
+            strain: strain ?? fallback.strain,
+            exerciseCount: exerciseCount ?? fallback.exerciseCount,
+            spo2Pct: spo2Pct ?? fallback.spo2Pct,
+            skinTempDevC: skinTempDevC ?? fallback.skinTempDevC,
+            respRateBpm: respRateBpm ?? fallback.respRateBpm,
+            steps: steps ?? fallback.steps,
+            activeKcalEst: activeKcalEst ?? fallback.activeKcalEst
+        )
+    }
 }

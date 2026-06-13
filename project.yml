@@ -83,6 +83,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.noopapp.noop
         PRODUCT_NAME: NOOP
+        PRODUCT_MODULE_NAME: Strand
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: NO
         # Hardened Runtime closes the DYLD_INSERT_LIBRARIES injection vector for the
@@ -110,6 +111,8 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.noopapp.strandtests
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/NOOP.app/Contents/MacOS/NOOP"
+        BUNDLE_LOADER: "$(TEST_HOST)"
 
   # ---------------------------------------------------------------------------
   # iOS app target (community build-from-source; never distributed via the App
@@ -235,3 +238,21 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
     dependencies:
       - package: StrandDesign
+
+schemes:
+  Strand:
+    build:
+      targets:
+        Strand: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - StrandTests
+  NOOPiOS:
+    build:
+      targets:
+        NOOPiOS: all
+    run:
+      config: Debug
