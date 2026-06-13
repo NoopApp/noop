@@ -48,10 +48,14 @@ final class SingleInstanceAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func enforceSingleInstance() {
+        guard !ProcessInfo.processInfo.environment.keys.contains("XCTestConfigurationFilePath") else { return }
         guard let bundleID = Bundle.main.bundleIdentifier else { return }
         let currentPID = ProcessInfo.processInfo.processIdentifier
         let currentURL = Bundle.main.bundleURL.standardizedFileURL
-        let installedURL = URL(fileURLWithPath: "/Applications/NOOP.app").standardizedFileURL
+        let displayName = (Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+            ?? (Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String)
+            ?? "NOOP"
+        let installedURL = URL(fileURLWithPath: "/Applications/\(displayName).app").standardizedFileURL
         let otherApps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
             .filter { $0.processIdentifier != currentPID }
         guard !otherApps.isEmpty else { return }
