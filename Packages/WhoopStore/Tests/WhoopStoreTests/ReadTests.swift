@@ -3,6 +3,18 @@ import WhoopProtocol
 @testable import WhoopStore
 
 final class ReadTests: XCTestCase {
+    private static let utcDayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    private static func utcDay(_ ts: Int) -> String {
+        utcDayFormatter.string(from: Date(timeIntervalSince1970: TimeInterval(ts)))
+    }
+
     private func seeded() async throws -> WhoopStore {
         let store = try await WhoopStore.inMemory()
         try await store.upsertDevice(id: "dev1", mac: nil, name: nil)
@@ -42,6 +54,34 @@ final class ReadTests: XCTestCase {
         // The decoy on "other" (ts200, bpm99) must never bleed into dev1's bucket.
         let other = try await store.hrBuckets(deviceId: "other", from: 0, to: 1000, bucketSeconds: 200)
         XCTAssertEqual(other, [HRBucket(ts: 200, bpm: 99)])
+    }
+
+    func testHrSampleDaysFindsCoveredUtcDaysNewestFirst() async throws {
+        let store = try await WhoopStore.inMemory()
+        let dev = "dev1"
+        try await store.upsertDevice(id: dev, mac: nil, name: nil)
+        try await store.upsertDevice(id: "other", mac: nil, name: nil)
+
+        let day0 = 1_780_000_000
+        let day1 = day0 + 86_400
+        try await store.insert(Streams(hr: [
+            HRSample(ts: day0 + 10, bpm: 60),
+            HRSample(ts: day0 + 20, bpm: 61),
+            HRSample(ts: day1 + 10, bpm: 62),
+            HRSample(ts: day1 + 20, bpm: 63),
+            HRSample(ts: day1 + 30, bpm: 64),
+        ]), deviceId: dev)
+        try await store.insert(Streams(hr: [
+            HRSample(ts: day1 + 40, bpm: 99),
+            HRSample(ts: day1 + 50, bpm: 99),
+        ]), deviceId: "other")
+
+        let days = try await store.hrSampleDays(deviceId: dev, from: day0, to: day1 + 100,
+                                                minSamples: 2, limit: 10)
+        XCTAssertEqual(days.map(\.day), [Self.utcDay(day1), Self.utcDay(day0)])
+        XCTAssertEqual(days.map(\.sampleCount), [3, 2])
+        XCTAssertEqual(days.first?.firstTs, day1 + 10)
+        XCTAssertEqual(days.first?.lastTs, day1 + 30)
     }
 
     func testRrIntervalsReturnsBothTiedRows() async throws {

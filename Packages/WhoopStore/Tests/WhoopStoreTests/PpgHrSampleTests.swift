@@ -52,6 +52,39 @@ final class PpgHrSampleTests: XCTestCase {
         XCTAssertEqual(buckets[0].bpm, 80.0, accuracy: 0.001)
     }
 
+    func testHrSamplesCoalescesPpgWhereNoMeasuredHr() async throws {
+        let store = try await WhoopStore.inMemory()
+        let dev = "my-whoop"
+        let base = 1_780_000_000
+        try await store.insert(Streams(hr: [HRSample(ts: base, bpm: 90)]), deviceId: dev)
+        try await store.insert(Streams(ppgHr: [
+            PpgHrSample(ts: base, bpm: 60.2, conf: 0.9),
+            PpgHrSample(ts: base + 1, bpm: 70.6, conf: 0.9),
+        ]), deviceId: dev)
+
+        let samples = try await store.hrSamples(deviceId: dev, from: base, to: base + 10, limit: 10)
+        XCTAssertEqual(samples, [
+            HRSample(ts: base, bpm: 90),
+            HRSample(ts: base + 1, bpm: 71),
+        ])
+    }
+
+    func testHrSampleDaysCountsPpgFallbackOnlyWhenMeasuredIsMissing() async throws {
+        let store = try await WhoopStore.inMemory()
+        let dev = "my-whoop"
+        let base = 1_780_000_000
+        try await store.insert(Streams(hr: [HRSample(ts: base, bpm: 90)]), deviceId: dev)
+        try await store.insert(Streams(ppgHr: [
+            PpgHrSample(ts: base, bpm: 60, conf: 0.9),
+            PpgHrSample(ts: base + 1, bpm: 70, conf: 0.9),
+        ]), deviceId: dev)
+
+        let days = try await store.hrSampleDays(deviceId: dev, from: base, to: base + 10,
+                                                minSamples: 1, limit: 10)
+        XCTAssertEqual(days.count, 1)
+        XCTAssertEqual(days[0].sampleCount, 2)
+    }
+
     /// With no PPG rows at all, hrBuckets is unchanged from the measured-only behaviour.
     func testHrBucketsUnchangedWithoutPpg() async throws {
         let store = try await WhoopStore.inMemory()

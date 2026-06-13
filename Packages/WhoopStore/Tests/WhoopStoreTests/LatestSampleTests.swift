@@ -15,4 +15,15 @@ final class LatestSampleTests: XCTestCase {
         let latest = try await store.latestHRSampleTs(deviceId: "d")
         XCTAssertEqual(latest, 250)
     }
+
+    func testLatestHRSampleTsIncludesPpgFallbackRows() async throws {
+        let store = try await WhoopStore.inMemory()
+        try await store.upsertDevice(id: "d", mac: nil, name: nil)
+        try await store.insert(Streams(hr: [HRSample(ts: 100, bpm: 60)]), deviceId: "d")
+        try await store.insert(Streams(ppgHr: [PpgHrSample(ts: 300, bpm: 61.5, conf: 0.8)]),
+                               deviceId: "d")
+
+        let latest = try await store.latestHRSampleTs(deviceId: "d")
+        XCTAssertEqual(latest, 300)
+    }
 }

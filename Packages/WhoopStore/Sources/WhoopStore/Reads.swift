@@ -11,20 +11,86 @@ public struct HRBucket: Sendable, Equatable {
     public init(ts: Int, bpm: Double) { self.ts = ts; self.bpm = bpm }
 }
 
+/// One UTC calendar day with enough heart-rate coverage to be worth analysing.
+public struct HRSampleDay: Sendable, Equatable {
+    public let day: String
+    public let firstTs: Int
+    public let lastTs: Int
+    public let sampleCount: Int
+
+    public init(day: String, firstTs: Int, lastTs: Int, sampleCount: Int) {
+        self.day = day
+        self.firstTs = firstTs
+        self.lastTs = lastTs
+        self.sampleCount = sampleCount
+    }
+}
+
 extension WhoopStore {
     /// Shared decoder — JSONDecoder is stateless across decodes and was previously allocated once
     /// per event row. Battery events are dense (~every 8 min), so a multi-year read decodes
     /// thousands of rows; reusing one decoder removes that per-row allocation.
     fileprivate static let eventDecoder = JSONDecoder()
 
+    /// Raw HR samples over `[from, to]`, measured-first with PPG-derived fallback.
+    ///
+    /// WHOOP 4.0 measured rows are returned unchanged. On newer/PPG-heavy payloads, a PPG-derived
+    /// second fills only when that exact second has no measured HR row, matching `hrBuckets` so the
+    /// charting and algorithm paths see the same heart-rate coverage.
     public func hrSamples(deviceId: String, from: Int, to: Int, limit: Int) async throws -> [HRSample] {
         try syncRead { db in
             try Row.fetchAll(db, sql: """
-                SELECT ts, bpm FROM hrSample
-                WHERE deviceId = ? AND ts >= ? AND ts <= ?
+                SELECT ts, bpm FROM (
+                    SELECT ts, bpm FROM hrSample
+                    WHERE deviceId = ? AND ts >= ? AND ts <= ?
+                    UNION ALL
+                    SELECT p.ts, CAST(ROUND(p.bpm) AS INTEGER) AS bpm FROM ppgHrSample p
+                    WHERE p.deviceId = ? AND p.ts >= ? AND p.ts <= ?
+                      AND NOT EXISTS (
+                        SELECT 1 FROM hrSample h
+                        WHERE h.deviceId = p.deviceId AND h.ts = p.ts)
+                )
                 ORDER BY ts ASC LIMIT ?
-                """, arguments: [deviceId, from, to, limit])
+                """, arguments: [deviceId, from, to,
+                                 deviceId, from, to,
+                                 limit])
                 .map { HRSample(ts: $0["ts"], bpm: $0["bpm"]) }
+        }
+    }
+
+    /// UTC days with measured-or-PPG HR coverage. Ordered newest first.
+    public func hrSampleDays(deviceId: String,
+                             from: Int,
+                             to: Int,
+                             minSamples: Int = 200,
+                             limit: Int = 4000) async throws -> [HRSampleDay] {
+        let minSamples = max(1, minSamples)
+        let limit = max(1, limit)
+        return try syncRead { db in
+            try Row.fetchAll(db, sql: """
+                SELECT day, MIN(ts) AS firstTs, MAX(ts) AS lastTs, COUNT(*) AS sampleCount FROM (
+                    SELECT ts, strftime('%Y-%m-%d', ts, 'unixepoch') AS day FROM hrSample
+                    WHERE deviceId = ? AND ts >= ? AND ts <= ?
+                    UNION ALL
+                    SELECT p.ts, strftime('%Y-%m-%d', p.ts, 'unixepoch') AS day FROM ppgHrSample p
+                    WHERE p.deviceId = ? AND p.ts >= ? AND p.ts <= ?
+                      AND NOT EXISTS (
+                        SELECT 1 FROM hrSample h
+                        WHERE h.deviceId = p.deviceId AND h.ts = p.ts)
+                )
+                GROUP BY day
+                HAVING COUNT(*) >= ?
+                ORDER BY day DESC
+                LIMIT ?
+                """, arguments: [deviceId, from, to,
+                                 deviceId, from, to,
+                                 minSamples, limit])
+                .map {
+                    HRSampleDay(day: $0["day"],
+                                firstTs: $0["firstTs"],
+                                lastTs: $0["lastTs"],
+                                sampleCount: $0["sampleCount"])
+                }
         }
     }
 
@@ -158,8 +224,13 @@ extension WhoopStore {
     /// used by the stuck-strap watchdog (advances iff the strap is actually logging + offloading).
     public func latestHRSampleTs(deviceId: String) async throws -> Int? {
         try syncRead { db in
-            try Int.fetchOne(db,
-                sql: "SELECT MAX(ts) FROM hrSample WHERE deviceId = ?", arguments: [deviceId])
+            try Int.fetchOne(db, sql: """
+                SELECT MAX(ts) FROM (
+                    SELECT ts FROM hrSample WHERE deviceId = ?
+                    UNION ALL
+                    SELECT ts FROM ppgHrSample WHERE deviceId = ?
+                )
+                """, arguments: [deviceId, deviceId])
         }
     }
 
