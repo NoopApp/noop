@@ -92,6 +92,7 @@ targets:
         APP_ICON_FILE: AppIcon
         PRODUCT_BUNDLE_IDENTIFIER: com.noopapp.noop
         PRODUCT_NAME: NOOP
+        PRODUCT_MODULE_NAME: Strand
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: NO
         # Hardened Runtime closes the DYLD_INSERT_LIBRARIES injection vector for the
@@ -126,7 +127,11 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.noopapp.strandtests
-
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/NOOP.app/Contents/MacOS/NOOP"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+      configs:
+        Personal:
+          TEST_HOST: "$(BUILT_PRODUCTS_DIR)/NOOP Personal.app/Contents/MacOS/NOOP Personal"
   # ---------------------------------------------------------------------------
   # iOS app target (community build-from-source; never distributed via the App
   # Store — NOOP stays anonymous). Reuses the five shared packages + most of the
@@ -245,3 +250,15 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
     dependencies:
       - package: StrandDesign
+
+schemes:
+  Strand:
+    build:
+      targets:
+        Strand: all
+    run:
+      config: Personal
+    test:
+      config: Personal
+      targets:
+        - StrandTests
