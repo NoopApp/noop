@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -31,7 +32,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -39,17 +42,21 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.app.DatePickerDialog
+import android.app.TimePickerDialog
 import java.util.Calendar
 import com.noop.analytics.AnalyticsEngine
 import com.noop.data.DailyMetric
@@ -141,6 +148,7 @@ fun SleepScreen(
     }
 
     val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
     var showJournalPrompt by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val metricSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -235,6 +243,14 @@ fun SleepScreen(
                 nightOffset = nightOffset,
                 lastIndex = max(sleeps.lastIndex, 0),
                 onNavigate = { nightOffset = it },
+                session = night?.session,
+                onUpdateTimes = { s, start, end ->
+                    sleeps = sleeps.map {
+                        if (it.deviceId == s.deviceId && it.startTs == s.startTs) it.copy(startTs = start, endTs = end)
+                        else it
+                    }
+                    scope.launch { vm.updateSleepSessionTimes(s, start, end) }
+                },
                 onPickNightDate = onPickNightDate,
             )
             if (model != null) {
@@ -255,6 +271,7 @@ fun SleepScreen(
 
 // MARK: - 1. HERO — stage breakdown for the navigated night
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun Hero(
     display: HeroDisplay?,
@@ -262,10 +279,12 @@ private fun Hero(
     nightOffset: Int,
     lastIndex: Int,
     onNavigate: (Int) -> Unit,
+    session: SleepSession? = null,
+    onUpdateTimes: (SleepSession, Long, Long) -> Unit = { _, _, _ -> },
     onPickNightDate: ((LocalDate) -> Unit)? = null,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        NightNavHeader(nightOffset, lastIndex, clock, onNavigate, onPickNightDate)
+        NightNavHeader(nightOffset, lastIndex, clock, onNavigate, session, onUpdateTimes, onPickNightDate)
         if (display == null) {
             // Honest fallback: this night recorded no usable stage data — never silently
             // substitute another night's hypnogram. (#160)
@@ -278,9 +297,10 @@ private fun Hero(
             }
         } else {
             val s = display.stages
+            val inBedMin = session?.let { (it.endTs - it.startTs) / 60.0 } ?: s.total
             ChartCard(
                 title = "Stage breakdown",
-                subtitle = "${durationText(s.total)} in bed · ${display.efficiencyText} efficiency" +
+                subtitle = "${durationText(inBedMin)} in bed · ${display.efficiencyText} efficiency" +
                     (if (display.realSegments != null) " · approx. stages (on-device)" else ""),
                 trailing = durationText(s.asleep),
                 footer = {
@@ -325,24 +345,133 @@ private fun Hero(
 }
 
 /**
- * Hero header with ◀/▶ to browse past nights. Tapping the accent center block opens a
- * DatePickerDialog to jump to any recorded night by date. Mirrors [DayNavBar]. (#160)
+ * Hero header with ◀/▶ to browse past nights plus an accent-tinted center block that
+ * mirrors [DayNavBar]: tapping the block opens a [DatePickerDialog] to jump to any night
+ * by date; the edit-pen icon adjusts the session's bed/wake times. Matches the Today
+ * page's date-nav visual exactly. (#160)
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun NightNavHeader(
     offset: Int,
     lastIndex: Int,
     clock: String?,
     onNavigate: (Int) -> Unit,
+    session: SleepSession? = null,
+    onUpdateTimes: (SleepSession, Long, Long) -> Unit = { _, _, _ -> },
     onPickNightDate: ((LocalDate) -> Unit)? = null,
 ) {
     val canGoOlder = offset < lastIndex
     val canGoNewer = offset > 0
     val context = LocalContext.current
+    var showTimeChoice by remember { mutableStateOf(false) }
+    var editingBed by remember { mutableStateOf(false) }
+    var editingWake by remember { mutableStateOf(false) }
     var showDatePicker by remember { mutableStateOf(false) }
 
+    // Choice dialog: which time to edit?
+    if (showTimeChoice && session != null) {
+        val timeFmt = SimpleDateFormat("HH:mm", Locale.US)
+        val bedText = timeFmt.format(Date(session.startTs * 1000L))
+        val wakeText = timeFmt.format(Date(session.endTs * 1000L))
+        val blockShape2 = androidx.compose.foundation.shape.RoundedCornerShape(Metrics.cornerSm)
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showTimeChoice = false },
+            containerColor = Palette.surfaceRaised,
+            titleContentColor = Palette.textPrimary,
+            textContentColor = Palette.textSecondary,
+            title = { Text("Adjust sleep times", style = NoopType.headline) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(Metrics.space6)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(blockShape2)
+                            .background(Palette.surfaceOverlay)
+                            .clickable { showTimeChoice = false; editingBed = true }
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Overline("Bedtime", color = Palette.textTertiary)
+                            Spacer(Modifier.height(4.dp))
+                            Text(bedText, style = NoopType.headline, color = Palette.textPrimary)
+                        }
+                        Icon(Icons.Filled.Edit, contentDescription = null, tint = Palette.accent, modifier = Modifier.size(20.dp))
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(blockShape2)
+                            .background(Palette.surfaceOverlay)
+                            .clickable { showTimeChoice = false; editingWake = true }
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Overline("Wake-up", color = Palette.textTertiary)
+                            Spacer(Modifier.height(4.dp))
+                            Text(wakeText, style = NoopType.headline, color = Palette.textPrimary)
+                        }
+                        Icon(Icons.Filled.Edit, contentDescription = null, tint = Palette.accent, modifier = Modifier.size(20.dp))
+                    }
+                }
+            },
+            confirmButton = {},
+        )
+    }
+
+    // Bed-time picker
+    if (editingBed && session != null) {
+        val startCal = Calendar.getInstance().apply { timeInMillis = session.startTs * 1000L }
+        DisposableEffect(Unit) {
+            val dialog = TimePickerDialog(
+                context,
+                { _, h, m ->
+                    val cal = Calendar.getInstance().apply {
+                        timeInMillis = session.startTs * 1000L
+                        set(Calendar.HOUR_OF_DAY, h); set(Calendar.MINUTE, m)
+                    }
+                    onUpdateTimes(session, cal.timeInMillis / 1000L, session.endTs)
+                    editingBed = false
+                },
+                startCal.get(Calendar.HOUR_OF_DAY),
+                startCal.get(Calendar.MINUTE),
+                true,
+            ).apply { setTitle("Bedtime") }
+            dialog.setOnDismissListener { editingBed = false }
+            dialog.show()
+            onDispose { runCatching { dialog.dismiss() } }
+        }
+    }
+
+    // Wake-up time picker
+    if (editingWake && session != null) {
+        val endCal = Calendar.getInstance().apply { timeInMillis = session.endTs * 1000L }
+        DisposableEffect(Unit) {
+            val dialog = TimePickerDialog(
+                context,
+                { _, h, m ->
+                    val cal = Calendar.getInstance().apply {
+                        timeInMillis = session.endTs * 1000L
+                        set(Calendar.HOUR_OF_DAY, h); set(Calendar.MINUTE, m)
+                    }
+                    onUpdateTimes(session, session.startTs, cal.timeInMillis / 1000L)
+                    editingWake = false
+                },
+                endCal.get(Calendar.HOUR_OF_DAY),
+                endCal.get(Calendar.MINUTE),
+                true,
+            ).apply { setTitle("Wake-up time") }
+            dialog.setOnDismissListener { editingWake = false }
+            dialog.show()
+            onDispose { runCatching { dialog.dismiss() } }
+        }
+    }
+
     if (showDatePicker && onPickNightDate != null) {
-        val cal = Calendar.getInstance()
+        val cal = session?.let { Calendar.getInstance().apply { timeInMillis = it.startTs * 1000L } }
+            ?: Calendar.getInstance()
         DisposableEffect(Unit) {
             val dialog = DatePickerDialog(
                 context,
@@ -412,6 +541,15 @@ private fun NightNavHeader(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (session != null) {
+                Spacer(Modifier.width(6.dp))
+                Icon(
+                    Icons.Filled.Edit,
+                    contentDescription = "Adjust sleep times",
+                    tint = Palette.textTertiary,
+                    modifier = Modifier.size(14.dp).clickable { showTimeChoice = true },
+                )
+            }
         }
     }
 }
@@ -582,6 +720,7 @@ private fun StageRow(label: String, last: Double, typical: Double?, color: Color
                 .height(Metrics.progressHeight)
                 .clip(RoundedCornerShape(Metrics.cornerPill))
                 .background(Palette.surfaceInset)
+                .semantics { contentDescription = "Hours vs Needed progress chart" }
                 .drawBehind {
                     // last-night fill
                     if (fillFrac > 0f) {
@@ -640,7 +779,8 @@ private fun DurationTrend(m: SleepModel) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     LineChart(
                         values = pts,
-                        modifier = Modifier.fillMaxWidth().height(Metrics.compactChartHeight),
+                        modifier = Modifier.fillMaxWidth().height(Metrics.compactChartHeight)
+                            .semantics { contentDescription = "Sleep hours trend chart" },
                         color = Palette.accent,
                         fill = true,
                         selectionEnabled = true,
@@ -992,7 +1132,20 @@ internal fun buildSleepModel(
     val deep = latest.deepMin ?: 0.0
     val rem = latest.remMin ?: 0.0
     val light = latest.lightMin ?: 0.0
-    val asleep = latest.totalSleepMin ?: (deep + rem + light)
+
+    // When the session matches this night, derive totalSleepMin from its window so editing
+    // bed/wake times immediately reflects in every metric (performance, hours vs needed, etc.).
+    val sessionDurationMin = session
+        ?.takeIf { AnalyticsEngine.dayString(it.endTs) == latest.day || localDayString(it.endTs) == latest.day }
+        ?.let { ((it.endTs - it.startTs) / 60.0).takeIf { d -> d > 0.0 } }
+    // metricsWindow replaces the selected night's totalSleepMin for per-tile calculations.
+    // typicalTotalMin intentionally keeps the unmodified windowDays so the personal mean
+    // isn't skewed by one edited night.
+    val metricsWindow = if (sessionDurationMin != null)
+        windowDays.dropLast(1) + latest.copy(totalSleepMin = sessionDurationMin)
+    else windowDays
+
+    val asleep = sessionDurationMin ?: latest.totalSleepMin ?: (deep + rem + light)
     // Awake estimate: prefer (time-in-bed − asleep) implied by efficiency; else from
     // disturbances; matches the macOS "awake minutes" carried in the stagesJSON.
     val effFrac = latest.efficiency?.let { if (it > 1.0) it / 100.0 else it }
@@ -1013,37 +1166,36 @@ internal fun buildSleepModel(
     // Personal sleep need (minutes): mean asleep, floored at 7.5h (450 min).
     val needMin = max(450.0, typicalTotalMin ?: 450.0)
 
-    // Per-tile metrics — each a full pass over `days`, exactly as the macOS screen.
-    // Where the WHOOP export carried the figure verbatim (metricSeries), it wins per day;
-    // the on-device recomputation is the APPROXIMATE fallback for strap-only days.
-    val performance = metric(windowDays) { d ->
+    // Per-tile metrics — each a full pass over metricsWindow so the selected night reflects
+    // the edited session duration. Where the WHOOP export carried a figure verbatim it wins.
+    val performance = metric(metricsWindow) { d ->
         imported.performance[d.day]   // WHOOP's own 0–100 figure wins per day
             ?: d.totalSleepMin?.takeIf { it > 0.0 && needMin > 0.0 }
                 ?.let { minOf(100.0, it / needMin * 100.0) }   // APPROXIMATE fallback
     }
-    val efficiency = metric(windowDays) { d ->
+    val efficiency = metric(metricsWindow) { d ->
         d.efficiency?.let { if (it <= 1.0) it * 100.0 else it }
     }
     val consistency = run {
         // Prefer the imported sleep_consistency series, but only when it covers the latest
         // night — otherwise "latest" would silently be a months-old import-era value.
-        val lastDay = windowDays.lastOrNull()?.day
+        val lastDay = metricsWindow.lastOrNull()?.day
         if (lastDay != null && imported.consistency[lastDay] != null) {
-            val series = windowDays.mapNotNull { imported.consistency[it.day] }
+            val series = metricsWindow.mapNotNull { imported.consistency[it.day] }
             Metric(series.lastOrNull(), mean(series), series)
-        } else consistencySeries(windowDays)   // APPROXIMATE duration-spread proxy
+        } else consistencySeries(metricsWindow)   // APPROXIMATE duration-spread proxy
     }
-    val hoursVsNeeded = metric(windowDays) { d ->
+    val hoursVsNeeded = metric(metricsWindow) { d ->
         val need = imported.needMin[d.day] ?: needMin   // imported need wins per day
         d.totalSleepMin?.takeIf { it > 0.0 && need > 0.0 }?.let { it / need * 100.0 }
     }
-    val restorative = metric(windowDays) { d ->
+    val restorative = metric(metricsWindow) { d ->
         val dp = d.deepMin; val rm = d.remMin; val sl = d.totalSleepMin
         if (dp != null && rm != null && sl != null && sl > 0.0) (dp + rm) / sl * 100.0 else null
     }
-    val respiratory = metric(windowDays) { it.respRateBpm }
+    val respiratory = metric(metricsWindow) { it.respRateBpm }
     val sleepDebt = run {
-        val series = windowDays.mapNotNull { d ->
+        val series = metricsWindow.mapNotNull { d ->
             imported.debtMin[d.day]   // minutes, export-verbatim
                 ?: d.totalSleepMin?.takeIf { it > 0.0 && needMin > 0.0 }
                     ?.let { max(0.0, needMin - it) }   // APPROXIMATE fallback
@@ -1051,8 +1203,9 @@ internal fun buildSleepModel(
         Metric(series.lastOrNull(), mean(series), series)
     }
 
-    // 14-day trend set ending on the selected day.
-    val trendRows = windowDays.filter { (it.totalSleepMin ?: 0.0) > 0.0 }.takeLast(14)
+    // 14-day trend set ending on the selected day (uses metricsWindow so the last bar
+    // reflects the edited session window).
+    val trendRows = metricsWindow.filter { (it.totalSleepMin ?: 0.0) > 0.0 }.takeLast(14)
     val trendHours = trendRows.mapNotNull { it.totalSleepMin?.let { minutes -> minutes / 60.0 } }
     val trendNeedHours = trendRows.map { row -> ((imported.needMin[row.day] ?: needMin) / 60.0) }
     val trendDebtHours = trendRows.map { row ->
@@ -1405,6 +1558,7 @@ internal fun SleepConsistencyCard(sleeps: List<SleepSession>) {
                     .fillMaxWidth()
                     .height(160.dp)
                     .clip(androidx.compose.foundation.shape.RoundedCornerShape(Metrics.cornerSm))
+                    .semantics { contentDescription = "Sleep Consistency nightly chart" }
                     .drawBehind {
                         val yAxisW = 52f
                         val chartW = size.width - yAxisW
