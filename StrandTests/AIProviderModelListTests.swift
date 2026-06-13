@@ -96,4 +96,56 @@ final class AIProviderModelListTests: XCTestCase {
         let body: [String: Any] = ["models": [["name": "models/llama3.1"]]]
         XCTAssertTrue(CustomClient().parseModels(body).isEmpty)
     }
+
+    // MARK: - Custom chat-content parsing (context-window truncation surfacing)
+
+    func testCustomChatContentReturnsBodyWhenStopped() throws {
+        // A normal completion (finish_reason "stop") returns the content verbatim — no notice.
+        let body: [String: Any] = [
+            "choices": [["finish_reason": "stop", "message": ["content": "All done."]]]
+        ]
+        let out = try CustomClient().parseChatContent(body)
+        XCTAssertEqual(out, "All done.")
+        XCTAssertFalse(out.contains("Reply cut off"))
+    }
+
+    func testCustomChatContentAppendsNoticeWhenTruncated() throws {
+        // Ollama and friends stop with finish_reason "length" at the context-window edge and give
+        // NO error — the parser must keep the partial text and append the actionable notice.
+        let body: [String: Any] = [
+            "choices": [["finish_reason": "length", "message": ["content": "Today's plan is"]]]
+        ]
+        let out = try CustomClient().parseChatContent(body)
+        XCTAssertTrue(out.hasPrefix("Today's plan is"))
+        XCTAssertTrue(out.contains("Reply cut off"))
+        XCTAssertTrue(out.contains("num_ctx"))
+    }
+
+    func testCustomChatContentThrowsOnMalformedBody() {
+        // No choices/message/content — surfaces a decode error rather than a silent empty reply.
+        XCTAssertThrowsError(try CustomClient().parseChatContent(["unexpected": true]))
+    }
+
+    // MARK: - Coach history sliding window (small-context protection)
+
+    func testTrimmedHistoryKeepsShortChatsWhole() {
+        let msgs = [
+            ChatMessage(role: .user, text: "q1"),
+            ChatMessage(role: .assistant, text: "a1"),
+            ChatMessage(role: .user, text: "q2")
+        ]
+        XCTAssertEqual(AICoachEngine.trimmedHistory(msgs, maxRecent: 10).map(\.text),
+                       ["q1", "a1", "q2"])
+    }
+
+    func testTrimmedHistoryPreservesFirstUserTurnAndRecentTail() {
+        // First user turn carries the data context, so it must survive even when the middle is
+        // dropped; the tail keeps the most recent `maxRecent` messages.
+        var msgs: [ChatMessage] = [ChatMessage(role: .user, text: "FIRST")]
+        for i in 0..<8 { msgs.append(ChatMessage(role: i % 2 == 0 ? .assistant : .user, text: "m\(i)")) }
+        let kept = AICoachEngine.trimmedHistory(msgs, maxRecent: 3)
+        XCTAssertEqual(kept.first?.text, "FIRST")          // context-bearing turn retained
+        XCTAssertEqual(kept.suffix(3).map(\.text), ["m5", "m6", "m7"]) // recent tail retained
+        XCTAssertEqual(kept.count, 4)                      // first + 3, middle dropped
+    }
 }

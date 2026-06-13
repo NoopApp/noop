@@ -408,11 +408,20 @@ final class AICoachEngine: ObservableObject {
         )
     }
 
+    /// Max chat turns sent on a single request, beyond the context-bearing first user turn. Caps how
+    /// much history we ship so a long conversation can't crowd out the reply on a small local context
+    /// window (e.g. Ollama's 2048-token default). High enough that normal chats are sent in full.
+    static let maxHistoryTurns = 10
+
     /// The chat as `(role, content)` pairs, with the metrics context prepended to the first user turn.
+    /// On a long conversation we keep the first user turn (it carries the data context) plus the most
+    /// recent `maxHistoryTurns` messages, dropping the middle — a sliding window that protects the
+    /// reply from being squeezed out by history on small-context local servers.
     private func wireMessages(context: String) -> [(role: ChatMessage.Role, content: String)] {
+        let kept = Self.trimmedHistory(messages, maxRecent: Self.maxHistoryTurns)
         var out: [(role: ChatMessage.Role, content: String)] = []
         var contextInjected = false
-        for m in messages {
+        for m in kept {
             if m.role == .user && !contextInjected {
                 contextInjected = true
                 out.append((.user, context + "\n\n---\n\nQuestion: " + m.text))
@@ -421,6 +430,17 @@ final class AICoachEngine: ObservableObject {
             }
         }
         return out
+    }
+
+    /// Pure: sliding-window the chat. Returns everything when short; otherwise the first user turn
+    /// (so the data context still has a turn to ride) followed by the last `maxRecent` messages, with
+    /// no duplication. No state — unit-tested.
+    static func trimmedHistory(_ msgs: [ChatMessage], maxRecent: Int) -> [ChatMessage] {
+        guard msgs.count > maxRecent + 1 else { return msgs }
+        let tail = Array(msgs.suffix(maxRecent))
+        guard let firstUser = msgs.first(where: { $0.role == .user }) else { return tail }
+        if tail.contains(where: { $0.id == firstUser.id }) { return tail }
+        return [firstUser] + tail
     }
 
     // MARK: - Context builder

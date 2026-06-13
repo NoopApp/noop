@@ -30,6 +30,32 @@ struct CustomClient: AIProviderClient {
         }
     }
 
+    /// Appended to a reply when the server stopped early because it ran out of context window.
+    /// Local OpenAI-compatible servers (notably Ollama, which defaults to a 2048-token window and
+    /// IGNORES `num_ctx` on the `/v1` endpoint) truncate silently — no error, the text just stops
+    /// mid-sentence. We can't raise the window over the OpenAI wire format, so we make the cutoff
+    /// visible and tell the user exactly how to fix it.
+    static let truncationNote = "\n\n---\n*Reply cut off: the model hit its context-window limit. "
+        + "On a local server like Ollama (default 2048 tokens), raise it — create a Modelfile with "
+        + "`PARAMETER num_ctx 8192` and select that model, or set `OLLAMA_CONTEXT_LENGTH=8192` and "
+        + "relaunch Ollama — then ask again.*"
+
+    /// Pure: unwrap an OpenAI-compatible chat-completions body into the assistant text. Appends
+    /// `truncationNote` when the server stopped early (`finish_reason == "length"`) so a context-
+    /// window cutoff is never silent. No network — unit-tested.
+    func parseChatContent(_ json: [String: Any]) throws -> String {
+        guard let choices = json["choices"] as? [[String: Any]],
+              let first = choices.first,
+              let message = first["message"] as? [String: Any],
+              let content = message["content"] as? String else {
+            throw AICoachError.decode
+        }
+        if (first["finish_reason"] as? String)?.lowercased() == "length" {
+            return content + Self.truncationNote
+        }
+        return content
+    }
+
     func fetchModels(key: String, session: URLSession) async throws -> [String] {
         var req = URLRequest(url: AIProvider.custom.modelsEndpoint)
         req.httpMethod = "GET"
@@ -74,12 +100,6 @@ struct CustomClient: AIProviderClient {
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let json = try await performRequest(req, session: session)
-        guard let choices = json["choices"] as? [[String: Any]],
-              let first = choices.first,
-              let message = first["message"] as? [String: Any],
-              let content = message["content"] as? String else {
-            throw AICoachError.decode
-        }
-        return content
+        return try parseChatContent(json)
     }
 }
