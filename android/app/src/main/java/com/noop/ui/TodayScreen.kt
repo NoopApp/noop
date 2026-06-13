@@ -18,8 +18,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Battery5Bar
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Icon
@@ -204,7 +206,31 @@ fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
         )
     }
 
+    val streak = remember(days) { nightStreak(days) }
+    val streakTotal = remember(days) { days.count { (it.totalSleepMin ?: 0.0) > 0.0 } }
+
     ScreenScaffold(title = "Control Center", subtitle = "Your day, read in full") {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (live.connected && live.batteryPct != null) {
+                Icon(Icons.Filled.Battery5Bar, contentDescription = null, tint = Palette.textTertiary, modifier = Modifier.size(14.dp))
+                Text(
+                    "${live.batteryPct!!.roundToInt()}%",
+                    style = NoopType.footnote,
+                    color = Palette.textTertiary,
+                    modifier = Modifier.padding(start = 2.dp, end = 12.dp),
+                )
+            }
+            val streakColor = when {
+                streak >= 2 -> Palette.statusCritical
+                else -> Palette.textTertiary
+            }
+            Icon(Icons.Filled.LocalFireDepartment, contentDescription = null, tint = streakColor, modifier = Modifier.size(14.dp))
+            Text("$streakTotal", style = NoopType.footnote, color = streakColor, modifier = Modifier.padding(start = 2.dp))
+        }
         // One-time "New here?" card pointing at the scoring guide — dismissible, shown until the
         // user opens the guide OR closes it, after which ScoringGuidePrefs keeps it gone for good.
         if (!scoringCardSeen) {
@@ -1211,3 +1237,24 @@ private fun workoutCaption(row: WorkoutRow): String {
 
 private fun grouped(value: Int): String =
     String.format(Locale.US, "%,d", value)
+
+internal fun nightStreak(days: List<com.noop.data.DailyMetric>): Int {
+    val sleepDays = days.filter { (it.totalSleepMin ?: 0.0) > 0.0 }
+        .map { it.day }.toSortedSet()
+    if (sleepDays.isEmpty()) return 0
+    var streak = 0
+    var cursor = java.time.LocalDate.now()
+    while (true) {
+        val key = cursor.toString()
+        if (key in sleepDays) {
+            streak++
+            cursor = cursor.minusDays(1)
+        } else {
+            if (streak == 0) {
+                cursor = cursor.minusDays(1)
+                if (cursor.toString() in sleepDays) { streak = 1; cursor = cursor.minusDays(1) } else break
+            } else break
+        }
+    }
+    return streak
+}
