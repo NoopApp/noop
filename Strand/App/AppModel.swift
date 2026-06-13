@@ -133,8 +133,8 @@ final class AppModel: ObservableObject {
             guard let self, bonded, self.behavior.smartAlarmEnabled else { return }
             self.applySmartAlarm()
         }.store(in: &hrCancellables)
-        // A completed backfill has just written strap history. Refresh the dashboard cache,
-        // but leave heavyweight analysis to its own guarded/background-friendly path.
+        // A completed backfill has just written strap history. Refresh the dashboard cache, then run a
+        // bounded analysis pass so Explore/Intelligence do not sit stale until the 15-minute loop.
         live.$lastSyncedAt
             .dropFirst()
             .compactMap { $0 }
@@ -166,6 +166,8 @@ final class AppModel: ObservableObject {
     private func refreshAfterCompletedBackfill() async {
         live.append(log: "Backfill: refreshing dashboard cache from completed sync")
         await repo.refresh(days: 120)
+        live.append(log: "Backfill: analysing recent synced days")
+        await intelligence.analyzeRecent(maxDays: 45)
     }
 
     /// Fold a fresh reading into the smoothing window and republish a stable bpm.
@@ -488,6 +490,7 @@ final class AppModel: ObservableObject {
                 defer { local.cleanup() }
                 let summary = try await WhoopImporter.importExport(url: local.url, into: store, deviceId: deviceId)
                 await repo.refresh()
+                await intelligence.analyzeRecent(maxDays: 45)
                 let span: String
                 if let a = summary.earliest, let b = summary.latest {
                     let f = DateFormatter(); f.dateFormat = "MMM yyyy"

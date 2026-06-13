@@ -1169,7 +1169,7 @@ public final class BLEManager: NSObject, ObservableObject {
         // drive the value whenever it's physiologically plausible; reject 0/garbage (off-wrist).
         // AppModel medians these into a stable display value.
         if m.hr >= 30 && m.hr <= 220 {
-            state.heartRate = m.hr
+            state.setHeartRate(m.hr, at: now)
             didUpdateBiometrics = true
         }
         if didUpdateBiometrics { state.markBiometricSample() }

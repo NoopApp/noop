@@ -31,6 +31,7 @@ final class Repository: ObservableObject {
     /// Imported (export-verbatim) sleep figures by day. Empty until a WHOOP import lands.
     @Published var importedSleep: [String: ImportedSleepFigures] = [:]
     @Published var loaded = false
+    @Published private(set) var freshness: RepositoryFreshness = .empty
     /// Monotonic counter bumped on every successful `refresh()`. Intraday-updating views key their
     /// data load on this so they reload when fresh strap data lands — `today?.day` alone is a stable
     /// date string within a day and would freeze e.g. the Today HR trend until the date rolls over.
@@ -119,6 +120,7 @@ final class Repository: ObservableObject {
 
         let imported = (try? await store.dailyMetrics(deviceId: deviceId, from: fromDay, to: toDay)) ?? []
         let computed = (try? await store.dailyMetrics(deviceId: computedDeviceId, from: fromDay, to: toDay)) ?? []
+        let apple = (try? await store.dailyMetrics(deviceId: MetricCatalog.appleHealthSource, from: fromDay, to: toDay)) ?? []
         let impSleep = (try? await store.sleepSessions(deviceId: deviceId, from: lo, to: hi, limit: 4000)) ?? []
         let compSleep = (try? await store.sleepSessions(deviceId: computedDeviceId, from: lo, to: hi, limit: 4000)) ?? []
 
@@ -137,8 +139,34 @@ final class Repository: ObservableObject {
         self.importedSleep = fig   // assigned BEFORE days/sleeps: one consistent publish per refresh
         self.days = Self.mergeDaily(imported: imported, computed: computed)
         self.sleeps = Self.mergeSleep(imported: impSleep, computed: compSleep)
+        self.freshness = Self.freshness(
+            imported: imported,
+            computed: computed,
+            apple: apple,
+            importedSleeps: impSleep,
+            computedSleeps: compSleep
+        )
         self.loaded = true
         self.refreshSeq += 1
+    }
+
+    private static func freshness(
+        imported: [DailyMetric],
+        computed: [DailyMetric],
+        apple: [DailyMetric],
+        importedSleeps: [CachedSleepSession],
+        computedSleeps: [CachedSleepSession]
+    ) -> RepositoryFreshness {
+        let days = (imported + computed + apple).map(\.day)
+        return RepositoryFreshness(
+            importedDays: imported.count,
+            computedDays: computed.count,
+            appleDays: apple.count,
+            importedSleeps: importedSleeps.count,
+            computedSleeps: computedSleeps.count,
+            earliestDay: days.min(),
+            latestDay: days.max()
+        )
     }
 
     /// Imported daily rows win per day; computed rows fill the days the import doesn't cover.
@@ -281,42 +309,11 @@ final class Repository: ObservableObject {
     }
 
     static func dailyMetricValue(_ row: DailyMetric, key: String) -> Double? {
-        switch key {
-        case "recovery":
-            return row.recovery
-        case "strain":
-            return row.strain
-        case "sleep_total_min":
-            return row.totalSleepMin
-        case "sleep_efficiency":
-            return row.efficiency.map(normalizedPercent)
-        case "sleep_deep_min":
-            return row.deepMin
-        case "sleep_rem_min":
-            return row.remMin
-        case "sleep_light_min":
-            return row.lightMin
-        case "rhr", "resting_hr":
-            return row.restingHr.map(Double.init)
-        case "hrv":
-            return row.avgHrv
-        case "spo2":
-            return row.spo2Pct
-        case "skin_temp":
-            return row.skinTempDevC
-        case "resp_rate":
-            return row.respRateBpm
-        case "steps":
-            return row.steps.map(Double.init)
-        case "active_kcal", "energy_kcal":
-            return row.activeKcalEst
-        default:
-            return nil
-        }
+        DerivedMetricMath.dailyMetricValue(row, key: key)
     }
 
     static func normalizedPercent(_ value: Double) -> Double {
-        value <= 1.5 ? value * 100.0 : value
+        DerivedMetricMath.normalizedPercent(value)
     }
 
     static func mergeMetricSeries(_ sourceSeries: [MetricSourceSeries]) -> [ResolvedMetricPoint] {

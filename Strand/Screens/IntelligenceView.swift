@@ -10,7 +10,7 @@ struct IntelligenceView: View {
     var body: some View {
         ScreenScaffold(title: "Intelligence",
                        subtitle: "NOOP scores your charge, effort and rest itself — on-device, no cloud.") {
-            explainerCard
+            analysisSummaryCard
             if intelligence.computing {
                 StrandCard(padding: 20) {
                     HStack(spacing: 10) {
@@ -41,6 +41,9 @@ struct IntelligenceView: View {
                     dayCard(day)
                 }
             }
+            if !intelligence.audits.isEmpty {
+                auditList
+            }
         }
         .task { if intelligence.results.isEmpty { await intelligence.analyzeRecent() } }
         .toolbar {
@@ -53,28 +56,43 @@ struct IntelligenceView: View {
         }
     }
 
-    private var explainerCard: some View {
+    private var analysisSummaryCard: some View {
         StrandCard(padding: 20) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 10) {
-                    Image(systemName: "brain.head.profile").foregroundStyle(StrandPalette.accent)
-                        .accessibilityHidden(true)
-                    Text("How this works").font(StrandFont.headline).foregroundStyle(StrandPalette.textPrimary)
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .firstTextBaseline) {
+                    Label("Analysis State", systemImage: "brain.head.profile")
+                        .font(StrandFont.headline)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                    Spacer()
+                    SourceBadge("\(intelligence.computing ? "RUNNING" : "LOCAL")", tint: intelligence.computing ? StrandPalette.statusWarning : StrandPalette.accent)
                 }
-                Text("Charge weighs your HRV against your personal baseline (~55%), resting heart rate (~20%), rest quality (~15%), respiration (~5%) and skin-temperature deviation (~5%). Effort is a 0–100 cardiovascular load from time in heart-rate zones. Rest is staged from movement and heart rate. Everything is computed here from the strap's raw data — it works for any day NOOP collected raw streams.")
-                    .font(StrandFont.subhead).foregroundStyle(StrandPalette.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 138), spacing: 10)], spacing: 10) {
+                    summaryStat("Candidates", intelligence.lastRun.map { "\($0.candidateDays)" } ?? "—")
+                    summaryStat("Computed", intelligence.lastRun.map { "\($0.computedDays)" } ?? "\(intelligence.results.count)")
+                    summaryStat("Partial", intelligence.lastRun.map { "\($0.partialDays)" } ?? "—")
+                    summaryStat("Values", intelligence.lastRun.map { "\($0.metricPoints)" } ?? "—")
+                }
+                if let run = intelligence.lastRun {
+                    Text(run.compactDetail)
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                } else {
+                    Text(live.backfilling ? "History is syncing before analysis." : "Run analysis after live history or import lands.")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                }
             }
         }
     }
 
     private func dayCard(_ d: IntelligenceEngine.Computed) -> some View {
-        StrandCard(padding: 18) {
+        let audit = auditByDay[d.day]
+        return StrandCard(padding: 18) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Text(d.day).font(StrandFont.headline).foregroundStyle(StrandPalette.textPrimary)
                     Spacer()
-                    SourceBadge("NOOP-computed")
+                    SourceBadge("\(audit?.status.rawValue ?? "NOOP-computed")", tint: statusColor(audit?.status))
                 }
                 HStack(spacing: 0) {
                     stat("Charge", d.recovery.map { "\(Int($0.rounded()))%" } ?? "—", recoveryColor(d.recovery))
@@ -83,8 +101,67 @@ struct IntelligenceView: View {
                     stat("HRV", d.hrv.map { "\(Int($0.rounded()))" } ?? "—", StrandPalette.metricPurple)
                     stat("RHR", d.rhr.map { "\($0)" } ?? "—", StrandPalette.metricRose)
                 }
+                if let audit {
+                    HStack(spacing: 10) {
+                        Text(audit.detail)
+                        Spacer(minLength: 0)
+                        Text("\(audit.hrSamples) HR · \(audit.rrIntervals) R-R")
+                    }
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.75)
+                }
             }
         }
+    }
+
+    private var auditList: some View {
+        VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+            SectionHeader("Analysis Audit", overline: "Recent candidate days")
+            ForEach(intelligence.audits.prefix(10)) { audit in
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    SourceBadge("\(audit.status.rawValue)", tint: statusColor(audit.status))
+                    Text(audit.day)
+                        .font(StrandFont.captionNumber)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                        .frame(width: 92, alignment: .leading)
+                    Text(audit.detail)
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    Spacer(minLength: 0)
+                    Text("\(audit.metricPoints) values")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                }
+                .padding(12)
+                .background(StrandPalette.surfaceRaised, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(StrandPalette.hairline, lineWidth: 1))
+            }
+        }
+    }
+
+    private var auditByDay: [String: IntelligenceEngine.AnalysisDayAudit] {
+        Dictionary(uniqueKeysWithValues: intelligence.audits.map { ($0.day, $0) })
+    }
+
+    private func summaryStat(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label.uppercased())
+                .font(StrandFont.footnote)
+                .foregroundStyle(StrandPalette.textTertiary)
+            Text(value)
+                .font(StrandFont.number(22))
+                .foregroundStyle(StrandPalette.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(StrandPalette.surfaceInset, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private func stat(_ label: String, _ value: String, _ color: Color) -> some View {
@@ -100,5 +177,14 @@ struct IntelligenceView: View {
         if r >= 67 { return StrandPalette.statusPositive }
         if r >= 34 { return StrandPalette.statusWarning }
         return StrandPalette.statusCritical
+    }
+
+    private func statusColor(_ status: IntelligenceEngine.AnalysisDayStatus?) -> Color {
+        switch status {
+        case .computed: return StrandPalette.statusPositive
+        case .partial: return StrandPalette.statusWarning
+        case .skipped: return StrandPalette.statusCritical
+        case nil: return StrandPalette.accent
+        }
     }
 }

@@ -99,20 +99,37 @@ struct LiveView: View {
                     .contentTransition(.numericText())
                     .animation(.snappy, value: displayHR)
                 Text("bpm").font(StrandFont.caption).foregroundStyle(StrandPalette.textSecondary)
-                if !live.rr.isEmpty {
-                    Text("R-R: " + live.rr.suffix(4).map(String.init).joined(separator: " · ") + " ms")
-                        .font(StrandFont.mono).foregroundStyle(StrandPalette.textTertiary)
-                }
+                Text(rrLine)
+                    .font(StrandFont.mono)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
             .frame(maxWidth: .infinity).padding(.vertical, 20)
         }
     }
 
+    private var rrLine: String {
+        guard !live.rrRecent.isEmpty else {
+            return Self.rrEmptyMessage(hasLiveHeartRate: displayHR != nil, activeConnection: activeConnection)
+        }
+        return "R-R: " + live.rrRecent.suffix(6).map(String.init).joined(separator: " · ") + " ms"
+    }
+
+    static func rrEmptyMessage(hasLiveHeartRate: Bool, activeConnection: Bool) -> String {
+        if hasLiveHeartRate { return "Heart rate is live; this stream has not delivered R-R intervals yet." }
+        if activeConnection { return "Stream is active, waiting for R-R intervals." }
+        return "Waiting for a live stream."
+    }
+
     // MARK: - Status tiles
 
     private var statusGrid: some View {
-        HStack(spacing: NoopMetrics.gap) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: NoopMetrics.gap)],
+                  spacing: NoopMetrics.gap) {
             stat("Battery", live.batteryPct.map { "\(Int($0))%" } ?? "—")
+            stat("HR samples", "\(live.heartRateSamplesThisSession)")
+            stat("R-R packets", "\(live.rrPacketsThisSession)")
             stat("Last frame", live.lastFrameType ?? "—")
             stat("Last event", live.lastEvent ?? "—")
         }

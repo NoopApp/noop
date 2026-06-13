@@ -8,6 +8,7 @@ struct DataSourcesView: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var repo: Repository
     @EnvironmentObject var live: LiveState
+    @EnvironmentObject var intelligence: IntelligenceEngine
     @State private var showingImporter = false
     @State private var importTarget: ImportTarget = .whoop
     // Nutrition CSV import state — local to this screen (the import is a quick, self-contained
@@ -19,6 +20,7 @@ struct DataSourcesView: View {
     var body: some View {
         ScreenScaffold(title: "Data Sources",
                        subtitle: "Everything stays on this Mac. Bring your history in once, then it's yours.") {
+            pipelineCard
             whoopCard
             appleHealthCard
             nutritionCard
@@ -55,6 +57,8 @@ struct DataSourcesView: View {
             }
             Text("\(repo.days.count) days · \(repo.sleeps.count) sleeps stored")
                 .font(StrandFont.footnote).foregroundStyle(StrandPalette.textTertiary)
+            statusRow("Imported", "\(repo.freshness.importedDays) days", "\(repo.freshness.importedSleeps) sleeps", .good)
+            statusRow("Computed fill", "\(repo.freshness.computedDays) days", "\(repo.freshness.computedSleeps) sleeps", .neutral)
         }
     }
 
@@ -75,6 +79,7 @@ struct DataSourcesView: View {
                 Text(s).font(StrandFont.subhead)
                     .foregroundStyle(model.appleHealthImportFailed ? StrandPalette.statusWarning : StrandPalette.statusPositive)
             }
+            statusRow("Available", "\(repo.freshness.appleDays) days", "Used only as declared-compatible fill", repo.freshness.appleDays > 0 ? .good : .missing)
         }
     }
 
@@ -196,6 +201,88 @@ struct DataSourcesView: View {
                 Circle().fill(dot).frame(width: 8, height: 8)
                 Text(label).font(StrandFont.subhead).foregroundStyle(StrandPalette.textSecondary)
             }
+            statusRow("Heart rate", live.heartRate.map { "\($0) bpm" } ?? "Waiting", "\(live.heartRateSamplesThisSession) samples this session", live.heartRate == nil ? .warning : .good)
+            statusRow("R-R intervals", live.rrRecent.isEmpty ? "No intervals" : "\(live.rrRecent.count) buffered", "\(live.rrPacketsThisSession) packets this session", live.rrRecent.isEmpty ? .warning : .good)
+            statusRow("History", live.backfilling ? "\(live.syncChunksThisSession) chunks" : lastSyncLabel, live.lastSyncError ?? "Offload feeds daily analysis", live.lastSyncedAt == nil ? .missing : .good)
+        }
+    }
+
+    private var pipelineCard: some View {
+        card(title: "Freshness Pipeline", icon: "point.3.connected.trianglepath.dotted",
+             subtitle: "Current path from strap and imports into charts.") {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 10) {
+                ForEach(FreshnessSnapshot.pipelineSteps(live: live, repo: repo, intelligence: intelligence)) { step in
+                    pipelineTile(step)
+                }
+            }
+        }
+    }
+
+    private func pipelineTile(_ step: DataPipelineStep) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: step.symbol)
+                    .foregroundStyle(color(for: step.tone))
+                    .frame(width: 16)
+                Text(step.title)
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            Text(step.value)
+                .font(StrandFont.headline)
+                .foregroundStyle(StrandPalette.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(step.detail)
+                .font(StrandFont.footnote)
+                .foregroundStyle(StrandPalette.textSecondary)
+                .lineLimit(2)
+                .minimumScaleFactor(0.75)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, minHeight: 106, alignment: .topLeading)
+        .background(StrandPalette.surfaceInset, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .strokeBorder(StrandPalette.hairline, lineWidth: 1))
+    }
+
+    private func statusRow(_ label: String, _ value: String, _ detail: String, _ tone: FreshnessTone) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Circle().fill(color(for: tone)).frame(width: 7, height: 7)
+            Text(label.uppercased())
+                .font(StrandFont.footnote)
+                .foregroundStyle(StrandPalette.textTertiary)
+                .frame(width: 92, alignment: .leading)
+            Text(value)
+                .font(StrandFont.captionNumber)
+                .foregroundStyle(StrandPalette.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(detail)
+                .font(StrandFont.footnote)
+                .foregroundStyle(StrandPalette.textSecondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var lastSyncLabel: String {
+        guard let ts = live.lastSyncedAt else { return "Never" }
+        let date = Date(timeIntervalSince1970: ts)
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+
+    private func color(for tone: FreshnessTone) -> Color {
+        switch tone {
+        case .good: return StrandPalette.statusPositive
+        case .warning: return StrandPalette.statusWarning
+        case .missing: return StrandPalette.statusCritical
+        case .neutral: return StrandPalette.textSecondary
         }
     }
 

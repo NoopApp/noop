@@ -97,6 +97,22 @@ struct MetricSeriesResolution: Equatable, Sendable {
     }
 }
 
+struct RepositoryFreshness: Equatable, Sendable {
+    var importedDays: Int = 0
+    var computedDays: Int = 0
+    var appleDays: Int = 0
+    var importedSleeps: Int = 0
+    var computedSleeps: Int = 0
+    var earliestDay: String?
+    var latestDay: String?
+
+    static let empty = RepositoryFreshness()
+
+    var hasAnyHistory: Bool {
+        importedDays > 0 || computedDays > 0 || appleDays > 0
+    }
+}
+
 /// Canonical catalog — mirrors the WHOOP "Trend View" plus Apple Health body metrics.
 /// Keys match exactly what the importers write into metricSeries.
 enum MetricCatalog {
@@ -187,13 +203,21 @@ enum MetricCatalog {
         preferredSource: String,
         actualWhoopSource: String = whoopSource
     ) -> [MetricSourceCandidate] {
+        let computedSource = actualWhoopSource + "-noop"
         if preferredSource == whoopSource || preferredSource == actualWhoopSource {
             var candidates = [
                 MetricSourceCandidate(source: actualWhoopSource, key: key),
-                MetricSourceCandidate(source: actualWhoopSource + "-noop", key: key),
+                MetricSourceCandidate(source: computedSource, key: key),
             ]
             if let appleKey = appleCompatibleKey(forWhoopKey: key) {
                 candidates.append(MetricSourceCandidate(source: appleHealthSource, key: appleKey))
+            }
+            return uniqued(candidates)
+        }
+        if preferredSource == appleHealthSource {
+            var candidates = [MetricSourceCandidate(source: appleHealthSource, key: key)]
+            if noopComputedCanFillAppleMetric(key) {
+                candidates.append(MetricSourceCandidate(source: computedSource, key: key))
             }
             return uniqued(candidates)
         }
@@ -204,10 +228,27 @@ enum MetricCatalog {
         switch key {
         case "rhr":
             return "resting_hr"
-        case "hrv", "spo2", "resp_rate":
+        case "hrv", "spo2", "resp_rate", "avg_hr", "max_hr", "in_bed_min", "active_kcal":
             return key
+        case "sleep_total_min":
+            return "asleep_min"
+        case "sleep_deep_min":
+            return "deep_min"
+        case "sleep_rem_min":
+            return "rem_min"
+        case "sleep_light_min":
+            return "core_min"
         default:
             return nil
+        }
+    }
+
+    private static func noopComputedCanFillAppleMetric(_ key: String) -> Bool {
+        switch key {
+        case "steps", "active_kcal":
+            return true
+        default:
+            return false
         }
     }
 

@@ -18,6 +18,20 @@ final class IntelligenceEngine: ObservableObject {
     @Published var results: [Computed] = []      // newest first
     @Published var computing = false
     @Published var note: String?
+    @Published private(set) var audits: [AnalysisDayAudit] = []
+    @Published private(set) var lastRun: AnalysisRunSummary?
+    @Published private(set) var lastAnalyzedAt: Date?
+
+    private static let minSamplesPerDay = 200
+    private static let defaultAnalysisDays = 4000
+
+    private static let utcDayParser: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
 
     struct Computed: Identifiable {
         let day: String
@@ -29,6 +43,35 @@ final class IntelligenceEngine: ObservableObject {
         var id: String { day }
     }
 
+    enum AnalysisDayStatus: String, Equatable {
+        case computed = "Computed"
+        case partial = "Partial"
+        case skipped = "Skipped"
+    }
+
+    struct AnalysisDayAudit: Identifiable, Equatable {
+        let day: String
+        let status: AnalysisDayStatus
+        let detail: String
+        let hrSamples: Int
+        let rrIntervals: Int
+        let metricPoints: Int
+        var id: String { day }
+    }
+
+    struct AnalysisRunSummary: Equatable {
+        let candidateDays: Int
+        let computedDays: Int
+        let partialDays: Int
+        let skippedDays: Int
+        let metricPoints: Int
+        let finishedAt: Date
+
+        var compactDetail: String {
+            "\(candidateDays) candidates · \(partialDays) partial · \(skippedDays) skipped · \(metricPoints) values"
+        }
+    }
+
     init(repo: Repository, profile: ProfileStore, deviceId: String) {
         self.repo = repo; self.profile = profile; self.deviceId = deviceId
     }
@@ -36,7 +79,7 @@ final class IntelligenceEngine: ObservableObject {
     /// Compute on-device scores for each of the last `maxDays` that actually has raw HR data.
     /// Personal baselines (HRV / resting HR) are folded from the imported history, so even the first
     /// live night can be scored against your norm.
-    func analyzeRecent(maxDays: Int = 21) async {
+    func analyzeRecent(maxDays: Int = 4000) async {
         guard !computing else { return }
         guard let store = await repo.storeHandle() else { note = "No on-device store yet."; return }
         guard let hrvCfg = Baselines.metricCfg["hrv"],
@@ -46,6 +89,7 @@ final class IntelligenceEngine: ObservableObject {
 
         computing = true
         defer { computing = false }
+        let startedAt = Date()
 
         let up = UserProfile(weightKg: profile.weightKg, heightCm: profile.heightCm,
                              age: Double(profile.age), sex: profile.sex,
@@ -73,7 +117,9 @@ final class IntelligenceEngine: ObservableObject {
         // except recovery is baseline-independent, so pass 2 only re-scores the cheap recovery
         // composite. The hr/rr/resp/gravity arrays go out of scope each iteration (memory stays bounded).
         var scoredNights: [(daily: DailyMetric, strain: Double?, cachedSleep: [CachedSleepSession],
-                            workouts: [ExerciseSession], nightlySkin: Double?)] = []
+                            workouts: [ExerciseSession], nightlySkin: Double?,
+                            metricPoints: [MetricPoint], hrSamples: Int, rrIntervals: Int)] = []
+        var dayAudits: [AnalysisDayAudit] = []
         // Nightly values harvested in pass 1, keyed by day, to seed the pass-2 baseline.
         var nightlyHrvByDay: [String: Double?] = [:]
         var nightlyRhrByDay: [String: Double?] = [:]
@@ -82,34 +128,49 @@ final class IntelligenceEngine: ObservableObject {
         var nightlyRespByDay: [String: Double?] = [:]
         var nightlySkinByDay: [String: Double?] = [:]
 
-        for offset in 0..<maxDays {
-            let dayStart = now - offset * 86_400
-            let day = AnalyticsEngine.dayString(dayStart)
+        let candidateDays = Self.analysisDays(now: now, maxDays: maxDays)
+
+        for day in candidateDays {
+            guard let dayMid = Self.utcDayStart(day) else { continue }
             // Read a generous window around the night that ends on `day`; the stager finds the span.
-            let from = dayStart - 30 * 3_600
-            let to = dayStart + 12 * 3_600
+            let from = dayMid - 30 * 3_600
+            let to = dayMid + 12 * 3_600
 
             let hr = (try? await store.hrSamples(deviceId: deviceId, from: from, to: to, limit: 200_000)) ?? []
-            guard hr.count >= 200 else { continue }   // need real raw data, not a stray sample
             let rr = (try? await store.rrIntervals(deviceId: deviceId, from: from, to: to, limit: 200_000)) ?? []
             let resp = (try? await store.respSamples(deviceId: deviceId, from: from, to: to, limit: 200_000)) ?? []
             let grav = (try? await store.gravitySamples(deviceId: deviceId, from: from, to: to, limit: 200_000)) ?? []
             let steps = (try? await store.stepSamples(deviceId: deviceId, from: from, to: to, limit: 200_000)) ?? []
             let skin = (try? await store.skinTempSamples(deviceId: deviceId, from: from, to: to, limit: 200_000)) ?? []
 
-            // Calendar-day window for the ADDITIVE daily totals (steps + calories). The night window
-            // above is anchored to the current UTC time-of-day and ends at dayStart+12h, so for a PAST
-            // day whose late hours sit after that bound those hours are never read and the totals
-            // undercount. Read exactly [midnightUtc(day), midnightUtc(day)+86400) and hand it to
-            // analyzeDay's dayHr/daySteps, which use it ONLY for those totals. (floorMod so the
-            // midnight floor is correct for any sign; the store range is inclusive, so end at -1 s.)
-            let dayMid = dayStart - ((dayStart % 86_400) + 86_400) % 86_400
+            // Calendar-day window for additive daily totals (steps, calories, HR zones). The sleep
+            // detector reads a night window ending on `day`; totals need the exact UTC day instead.
             let dayEnd = dayMid + 86_400 - 1
             let dayHr = (try? await store.hrSamples(deviceId: deviceId, from: dayMid, to: dayEnd, limit: 200_000)) ?? []
             let daySteps = (try? await store.stepSamples(deviceId: deviceId, from: dayMid, to: dayEnd, limit: 200_000)) ?? []
+            // Sleep/HRV prefers the night window. If a day only has daytime HR, still compute the
+            // day-level metrics (effort, calories, avg/max HR, zones) instead of skipping the row.
+            let analysisHr = hr.count >= Self.minSamplesPerDay ? hr : dayHr
+            guard analysisHr.count >= Self.minSamplesPerDay else {
+                dayAudits.append(AnalysisDayAudit(
+                    day: day,
+                    status: .skipped,
+                    detail: "Not enough heart-rate coverage",
+                    hrSamples: max(hr.count, dayHr.count),
+                    rrIntervals: rr.count,
+                    metricPoints: 0
+                ))
+                continue
+            }
+            let hrProfilePoints = DerivedMetricMath.heartRateProfilePoints(
+                day: day,
+                samples: dayHr,
+                age: up.age,
+                maxHROverride: maxHR
+            )
 
             let res = await Task.detached(priority: .utility) {
-                AnalyticsEngine.analyzeDay(day: day, hr: hr, rr: rr, resp: resp, gravity: grav,
+                AnalyticsEngine.analyzeDay(day: day, hr: analysisHr, rr: rr, resp: resp, gravity: grav,
                                            steps: steps, dayHr: dayHr, daySteps: daySteps,
                                            skinTemp: skin,
                                            profile: up, baselines: baselines1, maxHROverride: maxHR,
@@ -120,7 +181,10 @@ final class IntelligenceEngine: ObservableObject {
             nightlyRespByDay[res.daily.day] = res.daily.respRateBpm
             nightlySkinByDay[res.daily.day] = res.nightlySkinTempC
             scoredNights.append((daily: res.daily, strain: res.strain, cachedSleep: res.cachedSleep,
-                                 workouts: res.workouts, nightlySkin: res.nightlySkinTempC))
+                                 workouts: res.workouts, nightlySkin: res.nightlySkinTempC,
+                                 metricPoints: hrProfilePoints,
+                                 hrSamples: analysisHr.count,
+                                 rrIntervals: rr.count))
             await Task.yield()
         }
 
@@ -168,11 +232,16 @@ final class IntelligenceEngine: ObservableObject {
         // re-labelled rows (both written under `deviceId`), and apple-health carries Health imports —
         // a detected bout overlapping ANY of them is skipped below. Port of the Android dedup block.
         let computedId = deviceId + "-noop"
-        let windowStart = now - maxDays * 86_400 - 30 * 3_600
+        let fallbackWindowStart = now - max(1, min(maxDays, Self.defaultAnalysisDays)) * 86_400 - 30 * 3_600
+        let windowStart = candidateDays
+            .compactMap(Self.utcDayStart)
+            .min()
+            .map { $0 - 30 * 3_600 } ?? fallbackWindowStart
+        let windowEnd = now + 86_400
         var realWorkouts = (try? await store.workouts(deviceId: deviceId, from: windowStart,
-                                                       to: now, limit: 100_000)) ?? []
+                                                       to: windowEnd, limit: 100_000)) ?? []
         realWorkouts += (try? await store.workouts(deviceId: "apple-health", from: windowStart,
-                                                    to: now, limit: 100_000)) ?? []
+                                                    to: windowEnd, limit: 100_000)) ?? []
 
         // ── Pass 2: re-score ONLY recovery against the now-seeded baseline (cheap, baseline-dependent);
         // every other field was computed once in pass 1. Recovery stays nil until the HRV baseline is
@@ -181,19 +250,34 @@ final class IntelligenceEngine: ObservableObject {
         var dailies: [DailyMetric] = []
         var cachedSleep: [CachedSleepSession] = []
         var workoutRows: [WorkoutRow] = []
-        // Rest composite (0–100) per computed night, persisted as the `sleep_performance` metric
-        // series so the dashboard's Rest score reflects the new composite, not raw efficiency.
-        var restPoints: [MetricPoint] = []
+        var metricPoints: [MetricPoint] = []
         for night in scoredNights {
             let recovery = recomputeRecovery(night.daily, baselines2)
             let skinDev = recomputeSkinTempDev(night.nightlySkin, baselines2.skinTemp)
-            out.append(Computed(day: night.daily.day, recovery: recovery, strain: night.strain,
-                                sleepMin: night.daily.totalSleepMin, hrv: night.daily.avgHrv,
-                                rhr: night.daily.restingHr))
-            dailies.append(night.daily.with(recovery: recovery, skinTempDevC: skinDev))
-            if let rest = AnalyticsEngine.Rest.composite(daily: night.daily) {
-                restPoints.append(MetricPoint(day: night.daily.day, key: "sleep_performance", value: rest))
-            }
+            let finalDaily = night.daily.with(recovery: recovery, skinTempDevC: skinDev)
+            out.append(Computed(day: finalDaily.day, recovery: recovery, strain: night.strain,
+                                sleepMin: finalDaily.totalSleepMin, hrv: finalDaily.avgHrv,
+                                rhr: finalDaily.restingHr))
+            dailies.append(finalDaily)
+            let stress = DerivedMetricMath.stressScore(
+                daily: finalDaily,
+                hrvBaseline: baselines2.hrv,
+                rhrBaseline: baselines2.restingHR
+            )
+            let dailyPoints = DerivedMetricMath.metricPoints(from: finalDaily, stress: stress)
+            metricPoints.append(contentsOf: dailyPoints)
+            metricPoints.append(contentsOf: night.metricPoints)
+            let audit = Self.audit(
+                day: finalDaily.day,
+                daily: finalDaily,
+                recovery: recovery,
+                strain: night.strain,
+                stress: stress,
+                rrIntervals: night.rrIntervals,
+                hrSamples: night.hrSamples,
+                metricPoints: dailyPoints.count + night.metricPoints.count
+            )
+            dayAudits.append(audit)
             cachedSleep.append(contentsOf: night.cachedSleep)
             // Persist the detected workouts the pipeline already computes (previously discarded).
             // Skip any bout overlapping a real imported workout so import+wear users don't
@@ -214,13 +298,13 @@ final class IntelligenceEngine: ObservableObject {
         // Repository merges these UNDER any imported "my-whoop" rows, so a real WHOOP import
         // always wins; this only fills the days the strap collected but no import covered.
         if !dailies.isEmpty { _ = try? await store.upsertDailyMetrics(dailies, deviceId: computedId) }
-        if !restPoints.isEmpty { _ = try? await store.upsertMetricSeries(restPoints, deviceId: computedId) }
+        if !metricPoints.isEmpty { _ = try? await store.upsertMetricSeries(metricPoints, deviceId: computedId) }
         if !cachedSleep.isEmpty { _ = try? await store.upsertSleepSessions(cachedSleep, deviceId: computedId) }
         // Make re-detection idempotent across runs: clear the prior computed detected workouts in the
         // scored window (a bout's startTs can drift as more HR arrives, which would otherwise orphan
         // stale rows under the (deviceId,startTs,sport) key), then re-insert.
         _ = try? await store.deleteWorkouts(deviceId: computedId, sport: "detected",
-                                            from: windowStart, to: now)
+                                            from: windowStart, to: windowEnd)
         if !workoutRows.isEmpty { _ = try? await store.upsertWorkouts(workoutRows, deviceId: computedId) }
 
         // #137: a manually-started workout is scored from sparse live HR at save time — near-zero
@@ -229,12 +313,73 @@ final class IntelligenceEngine: ObservableObject {
         await rescoreManualWorkouts(store: store, profile: up)
 
         results = out
+        audits = dayAudits.sorted { $0.day > $1.day }
+        lastAnalyzedAt = Date()
+        lastRun = AnalysisRunSummary(
+            candidateDays: candidateDays.count,
+            computedDays: dayAudits.filter { $0.status == .computed || $0.status == .partial }.count,
+            partialDays: dayAudits.filter { $0.status == .partial }.count,
+            skippedDays: dayAudits.filter { $0.status == .skipped }.count,
+            metricPoints: metricPoints.count,
+            finishedAt: lastAnalyzedAt ?? startedAt
+        )
         note = out.isEmpty
             ? "No scored nights yet. Wear the strap with NOOP connected overnight and the engine will score your charge, effort and rest itself, no WHOOP cloud required."
             : nil
 
         // Reload the dashboard caches so the freshly computed scores show up immediately.
         if !dailies.isEmpty { await repo.refresh() }
+    }
+
+    private static func analysisDays(now: Int, maxDays: Int) -> [String] {
+        let boundedDays = max(1, min(maxDays, Self.defaultAnalysisDays))
+        return (0..<boundedDays).map { offset in
+            AnalyticsEngine.dayString(now - offset * 86_400)
+        }
+    }
+
+    private static func utcDayStart(_ day: String) -> Int? {
+        utcDayParser.date(from: day).map { Int($0.timeIntervalSince1970) }
+    }
+
+    private static func audit(
+        day: String,
+        daily: DailyMetric,
+        recovery: Double?,
+        strain: Double?,
+        stress: Double?,
+        rrIntervals: Int,
+        hrSamples: Int,
+        metricPoints: Int
+    ) -> AnalysisDayAudit {
+        var missing: [String] = []
+        if recovery == nil { missing.append("charge baseline") }
+        if daily.totalSleepMin == nil { missing.append("rest window") }
+        if daily.avgHrv == nil { missing.append("HRV") }
+        if daily.restingHr == nil { missing.append("resting HR") }
+        if stress == nil { missing.append("stress baseline") }
+        if rrIntervals == 0 { missing.append("R-R") }
+
+        let status: AnalysisDayStatus
+        if strain == nil && recovery == nil && daily.totalSleepMin == nil {
+            status = .skipped
+        } else if missing.isEmpty {
+            status = .computed
+        } else {
+            status = .partial
+        }
+
+        let detail = missing.isEmpty
+            ? "Charge, effort, rest, stress and intervals available"
+            : "Missing " + missing.joined(separator: ", ")
+        return AnalysisDayAudit(
+            day: day,
+            status: status,
+            detail: detail,
+            hrSamples: hrSamples,
+            rrIntervals: rrIntervals,
+            metricPoints: metricPoints
+        )
     }
 
     /// #137: re-score under-sampled manual workouts. A `manual` workout is scored from the live HR

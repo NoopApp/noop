@@ -31,6 +31,17 @@ final class ResolvedSeriesFallbackTests: XCTestCase {
         XCTAssertEqual(Repository.dailyMetricValue(row, key: "resp_rate"), 10.4)
         XCTAssertEqual(Repository.dailyMetricValue(row, key: "steps"), 8123)
         XCTAssertEqual(Repository.dailyMetricValue(row, key: "active_kcal"), 3464.8)
+        XCTAssertEqual(Repository.dailyMetricValue(row, key: "sleep_performance") ?? -1, 69.39, accuracy: 0.01)
+        XCTAssertEqual(Repository.dailyMetricValue(row, key: "asleep_min"), 407)
+        XCTAssertEqual(Repository.dailyMetricValue(row, key: "in_bed_min") ?? -1, 459.37, accuracy: 0.01)
+        XCTAssertEqual(Repository.dailyMetricValue(row, key: "restorative_min"), 43.5)
+        XCTAssertEqual(Repository.dailyMetricValue(row, key: "restorative_pct") ?? -1, 10.69, accuracy: 0.01)
+        XCTAssertEqual(Repository.dailyMetricValue(row, key: "hours_vs_needed_pct") ?? -1, 84.79, accuracy: 0.01)
+        XCTAssertEqual(Repository.dailyMetricValue(row, key: "sleep_need_min"), 480)
+        XCTAssertEqual(Repository.dailyMetricValue(row, key: "sleep_debt_min"), 73)
+        XCTAssertEqual(Repository.dailyMetricValue(row, key: "deep_min"), 13.5)
+        XCTAssertEqual(Repository.dailyMetricValue(row, key: "rem_min"), 30)
+        XCTAssertEqual(Repository.dailyMetricValue(row, key: "core_min"), 363.5)
     }
 
     func testEfficiencyFallbackNormalizesFractionsToPercent() {

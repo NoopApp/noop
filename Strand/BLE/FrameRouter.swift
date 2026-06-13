@@ -35,7 +35,7 @@ public final class FrameRouter {
             // Some firmware exposes live BPM only on the R10/R11 raw stream after acknowledging
             // BLE_REALTIME_HR_ON, so the UI can consume it even though persistence still ignores raw43.
             if let hr = parsed.parsed["heart_rate"]?.intValue, hr >= 30, hr <= 220 {
-                state.heartRate = hr
+                state.setHeartRate(hr)
                 didUpdateBiometrics = true
             }
             // The realtime stream usually reports rr_count=0; only update R-R when this frame
