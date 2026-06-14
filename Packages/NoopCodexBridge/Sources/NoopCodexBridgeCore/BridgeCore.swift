@@ -2,6 +2,10 @@ import Darwin
 import Foundation
 import Network
 
+public enum BridgeBuildInfo {
+    public static let version = "1.0.0"
+}
+
 public struct BridgeConfiguration: Sendable {
     public let host: String
     public let port: UInt16
@@ -268,6 +272,7 @@ public final class CodexExecRunner: CodexRunning, @unchecked Sendable {
 public final class BridgeHTTPServer: @unchecked Sendable {
     private let configuration: BridgeConfiguration
     private let runner: CodexRunning
+    private let startedAt = Date()
     private let listenerQueue = DispatchQueue(label: "noop.codex.bridge.listener")
     private let workerQueue = DispatchQueue(label: "noop.codex.bridge.worker", attributes: .concurrent)
     private var listener: NWListener?
@@ -340,6 +345,9 @@ public final class BridgeHTTPServer: @unchecked Sendable {
         switch (request.method, request.path) {
         case ("GET", "/health"), ("GET", "/v1/health"):
             return json([
+                "bridge_version": BridgeBuildInfo.version,
+                "pid": Int(getpid()),
+                "uptime_seconds": Date().timeIntervalSince(startedAt),
                 "status": FileManager.default.isExecutableFile(atPath: configuration.codexPath) ? "ready" : "missing",
                 "transport": "codex-exec",
                 "base_url": configuration.baseURL,

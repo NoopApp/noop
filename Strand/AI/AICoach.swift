@@ -264,11 +264,9 @@ final class AICoachEngine: ObservableObject {
     }
 
     var dataTargetName: String {
-        #if PERSONAL
-        return "NOOP Personal"
-        #else
-        return "NOOP Standard"
-        #endif
+        let displayName = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+        let bundleName = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String
+        return displayName ?? bundleName ?? "NOOP"
     }
 
     /// Commit the Custom (local) provider once the user has entered a server URL. Optionally stores a

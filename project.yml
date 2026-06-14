@@ -42,6 +42,8 @@ packages:
     path: Packages/StrandImport
   StrandDesign:
     path: Packages/StrandDesign
+  NoopCodexBridge:
+    path: Packages/NoopCodexBridge
 targets:
   Strand:
     type: application
@@ -79,6 +81,9 @@ targets:
         # re-sign), so this matters only for a SIGNED/sandboxed build (where the sandbox
         # otherwise blocks the Coach's request — #128). Data path stays network-free.
         com.apple.security.network.client: true
+        # Codex Local can launch the bundled loopback bridge helper on demand. The helper listens
+        # only on 127.0.0.1 and remains explicit opt-in from Coach.
+        com.apple.security.network.server: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.noopapp.noop
@@ -99,6 +104,26 @@ targets:
       - package: StrandImport
       - package: StrandDesign
       - package: MarkdownUI
+      - target: noop-codex-bridge
+        copy:
+          destination: wrapper
+          subpath: Contents/Helpers
+        link: false
+  noop-codex-bridge:
+    type: tool
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - path: Packages/NoopCodexBridge/Sources/noop-codex-bridge
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.noopapp.noop.codex-bridge
+        PRODUCT_NAME: noop-codex-bridge
+        GENERATE_INFOPLIST_FILE: YES
+        ENABLE_HARDENED_RUNTIME: YES
+    dependencies:
+      - package: NoopCodexBridge
+        product: NoopCodexBridgeCore
   StrandTests:
     type: bundle.unit-test
     platform: macOS
