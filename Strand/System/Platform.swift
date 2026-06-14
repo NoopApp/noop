@@ -69,3 +69,17 @@ enum PlatformOpen {
         #endif
     }
 }
+
+// MARK: - Screen idle (keep-awake for hands-free sessions)
+
+/// Prevent the display from auto-locking during a live, watched session (the breathing
+/// orb, the HIIT interval timer). iOS-only; a no-op on macOS, which has no idle-lock
+/// concern for these screens. Apple guidance: set `true` only while genuinely needed and
+/// reset to `false` the moment the session ends so the system idle timer resumes normally.
+enum ScreenIdle {
+    @MainActor static func keepAwake(_ on: Bool) {
+        #if os(iOS)
+        UIApplication.shared.isIdleTimerDisabled = on
+        #endif
+    }
+}

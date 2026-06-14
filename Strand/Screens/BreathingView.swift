@@ -448,6 +448,7 @@ struct BreathingView: View {
 
     private func start() {
         running = true
+        ScreenIdle.keepAwake(true)      // hands-free session — don't let iPhone auto-lock (no-op on macOS)
         sessionSeconds = 0
         breathCount = 0
         endedOutcome = nil
@@ -463,6 +464,7 @@ struct BreathingView: View {
     private func stop() {
         let wasRunning = running
         running = false
+        ScreenIdle.keepAwake(false)     // session over (also reached via .onDisappear) — restore auto-lock
         phaseDeadline = .distantFuture
         // Leaving mid-session (onDisappear) still banks the outcome.
         if wasRunning { captureOutcome() }
