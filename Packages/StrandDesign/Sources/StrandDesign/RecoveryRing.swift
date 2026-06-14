@@ -101,12 +101,12 @@ public struct RecoveryRing: View {
             }
         }
         .onAppear {
-            withAnimation(StrandMotion.drawIn) { animatedFraction = fraction }
+            withAnimation(StrandMotion.drawIn(reduced: reduceMotion)) { animatedFraction = fraction }
             // Reduce Motion: leave the bloom at its resting opacity instead of breathing.
             if !reduceMotion { bloomPulse = true }
         }
         .onChange(of: score) { _ in
-            withAnimation(StrandMotion.drawIn) { animatedFraction = fraction }
+            withAnimation(StrandMotion.drawIn(reduced: reduceMotion)) { animatedFraction = fraction }
         }
     }
 

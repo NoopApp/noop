@@ -40,10 +40,16 @@ public struct TrendChart: View {
     public var valueFormat: (Double) -> String
     /// Formats a point's date for the tooltip's secondary line.
     public var dateFormat: (Date) -> String
+    /// Optional human-readable series name for VoiceOver (e.g. "HRV trend, 90 days").
+    /// When nil the element falls back to a generic "Trend" label so it's never unlabeled.
+    public var accessibilityLabel: String?
 
     /// Mean of all point values, computed once in `init` so the area fill's gradient
     /// stop doesn't run an O(n) reduce for every mark on every render.
     private let averageValue: Double
+
+    /// One-line VoiceOver summary (count + mean + range), built once in `init`.
+    private let a11ySummary: String
 
     public init(
         points: [TrendPoint],
@@ -53,7 +59,8 @@ public struct TrendChart: View {
         height: CGFloat = 220,
         showsHover: Bool = true,
         valueFormat: @escaping (Double) -> String = { String(Int($0.rounded())) },
-        dateFormat: @escaping (Date) -> String = { TrendChart.defaultDateString($0) }
+        dateFormat: @escaping (Date) -> String = { TrendChart.defaultDateString($0) },
+        accessibilityLabel: String? = nil
     ) {
         let sorted = points.sorted { $0.date < $1.date }
         self.points = sorted
@@ -64,9 +71,22 @@ public struct TrendChart: View {
         self.showsHover = showsHover
         self.valueFormat = valueFormat
         self.dateFormat = dateFormat
+        self.accessibilityLabel = accessibilityLabel
         self.averageValue = sorted.isEmpty
             ? valueRange.lowerBound
             : sorted.map(\.value).reduce(0, +) / Double(sorted.count)
+
+        // VoiceOver one-liner: count + mean + range — formatted with the SAME valueFormat the
+        // tooltip uses, so units match. Computed once here, not per render.
+        if sorted.isEmpty {
+            self.a11ySummary = "No data"
+        } else {
+            let vals = sorted.map(\.value)
+            let lo = vals.min()!, hi = vals.max()!
+            let mean = self.averageValue
+            let n = sorted.count
+            self.a11ySummary = "\(n) points, mean \(valueFormat(mean)), range \(valueFormat(lo)) to \(valueFormat(hi))"
+        }
     }
 
     /// The x-position the cursor is hovering, in chart-local coordinates.
@@ -224,6 +244,15 @@ public struct TrendChart: View {
         // Belt-and-suspenders: also bound the whole chart (axes + overlay) to its frame so nothing
         // a Charts internal might draw outside the plot can reach the surrounding layout.
         .clipped()
+        // Collapse the Swift Charts marks (line/area/points) into ONE meaningful VoiceOver element
+        // instead of letting VoiceOver walk raw per-mark axis values with no series context.
+        // Gated on showsHover so the DECORATIVE stacked underglow copy (TrendsView.glowChart passes
+        // showsHover:false, no label) is hidden rather than double-announcing the same series; the
+        // crisp interactive copy passes showsHover:true (default) and speaks.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(accessibilityLabel ?? "Trend"))
+        .accessibilityValue(Text(a11ySummary))
+        .accessibilityHidden(!showsHover && accessibilityLabel == nil)
     }
 }
 

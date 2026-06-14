@@ -619,7 +619,8 @@ struct SleepView: View {
                                    valueRange: trendRange(pts),
                                    showsArea: true,
                                    height: NoopMetrics.chartHeight,
-                                   valueFormat: { String(format: "%.1f h", $0) })
+                                   valueFormat: { String(format: "%.1f h", $0) },
+                                   accessibilityLabel: "Hours asleep trend")
                     } else {
                         sparsePlaceholder
                     }

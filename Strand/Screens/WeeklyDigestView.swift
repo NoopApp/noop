@@ -381,6 +381,7 @@ private struct DigestScoreCard: View {
     /// 0–100 scores and ignore it, keeping their "of 100" caption and integer mean.
     var effortScale: EffortScale = .hundred
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var animatedFraction: Double = 0
 
     /// The Effort card is the only one that follows the 0–100/0–21 toggle; the rest are fixed 0–100.
@@ -433,7 +434,7 @@ private struct DigestScoreCard: View {
             .frame(maxWidth: .infinity)
         }
         .onAppear {
-            withAnimation(.easeOut(duration: 0.9)) { animatedFraction = fraction }
+            withAnimation(StrandMotion.drawIn(reduced: reduceMotion)) { animatedFraction = fraction }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibility)

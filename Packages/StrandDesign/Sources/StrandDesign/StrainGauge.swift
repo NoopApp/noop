@@ -119,12 +119,12 @@ public struct StrainGauge: View {
             }
         }
         .onAppear {
-            withAnimation(StrandMotion.drawIn) { animatedFraction = fraction }
+            withAnimation(StrandMotion.drawIn(reduced: reduceMotion)) { animatedFraction = fraction }
             // Reduce Motion: leave the bloom at its resting opacity instead of breathing.
             if !reduceMotion { bloomPulse = true }
         }
         .onChange(of: strain) { _ in
-            withAnimation(StrandMotion.drawIn) { animatedFraction = fraction }
+            withAnimation(StrandMotion.drawIn(reduced: reduceMotion)) { animatedFraction = fraction }
         }
     }
 

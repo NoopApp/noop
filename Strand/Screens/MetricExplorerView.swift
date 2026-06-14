@@ -602,7 +602,8 @@ struct MetricDetailView: View {
                 valueRange: valueRange(windowed.map(\.value)),
                 showsArea: true,
                 height: NoopMetrics.chartHeight,
-                valueFormat: { fmt($0) }
+                valueFormat: { fmt($0) },
+                accessibilityLabel: "\(metric.title) trend"
             )
         } footer: {
             ChartFooter([

@@ -259,7 +259,8 @@ struct TrendsView: View {
                               // clear the top gridline, matching the padded small multiples.
                               valueRange: 0...106,
                               tip: StrandPalette.chargeBright,
-                              valueFormat: { "\(Int($0.rounded()))" })
+                              valueFormat: { "\(Int($0.rounded()))" },
+                              accessibilityLabel: "Charge trend")
                 } else {
                     sparsePlaceholder
                 }
@@ -296,6 +297,7 @@ struct TrendsView: View {
                 // keeping its established metric hue for legibility. Effort sits in its amber world.
                 metricChart(
                     title: "Heart rate variability", unit: "ms",
+                    accessibilityTitle: "Heart rate variability",
                     points: hrvPts,
                     gradient: gradient(StrandPalette.metricPurple),
                     tip: StrandPalette.metricPurple,
@@ -306,6 +308,7 @@ struct TrendsView: View {
                 )
                 metricChart(
                     title: "Resting heart rate", unit: "bpm",
+                    accessibilityTitle: "Resting heart rate",
                     points: rhrPts,
                     gradient: gradient(StrandPalette.metricRose),
                     tip: StrandPalette.metricRose,
@@ -318,6 +321,7 @@ struct TrendsView: View {
                     // Plotted points + range stay on the stored 0–100 scale (line shape unchanged); only the
                     // displayed numbers + unit follow the Effort-scale toggle, converted inside `fmt`. (#268)
                     title: "Effort", unit: "/ \(UnitFormatter.effortScaleMax(effortScale))",
+                    accessibilityTitle: "Effort",
                     points: strainPts,
                     gradient: StrandPalette.strainGradient,
                     tip: StrandPalette.effortBright,
@@ -333,6 +337,9 @@ struct TrendsView: View {
     @ViewBuilder
     private func metricChart(
         title: LocalizedStringKey, unit: String,
+        // Plain-string series name for VoiceOver (the `title` is a LocalizedStringKey and can't be
+        // re-read as a String); supplied by callers so the line announces e.g. "HRV trend".
+        accessibilityTitle: String,
         points pts: [TrendPoint],
         subtitle: String? = nil,
         gradient: Gradient,
@@ -352,7 +359,8 @@ struct TrendsView: View {
             chart: {
                 if pts.count >= 2 {
                     glowChart(points: pts, gradient: gradient, valueRange: range,
-                              tip: tip, valueFormat: { "\(fmt($0)) \(unit)" })
+                              tip: tip, valueFormat: { "\(fmt($0)) \(unit)" },
+                              accessibilityLabel: "\(accessibilityTitle) trend")
                 } else {
                     sparsePlaceholder
                 }
@@ -426,17 +434,21 @@ struct TrendsView: View {
     /// Pure presentation: it forwards every value to the locked `TrendChart` unchanged.
     @ViewBuilder
     private func glowChart(points pts: [TrendPoint], gradient: Gradient, valueRange: ClosedRange<Double>,
-                           tip: Color, valueFormat: @escaping (Double) -> String) -> some View {
+                           tip: Color, valueFormat: @escaping (Double) -> String,
+                           accessibilityLabel: String) -> some View {
         ZStack(alignment: .topLeading) {
             // Soft underglow — the same line, blurred and dimmed, so the curve reads as lit.
+            // No accessibilityLabel + showsHover:false ⇒ TrendChart auto-hides this decorative copy
+            // from VoiceOver so the series is announced once (by the crisp copy below), not twice.
             TrendChart(points: pts, gradient: gradient, valueRange: valueRange,
                        showsArea: false, height: NoopMetrics.chartHeight, showsHover: false)
                 .blur(radius: 6)
                 .opacity(0.5)
                 .allowsHitTesting(false)
-            // The crisp, interactive line + area.
+            // The crisp, interactive line + area — the one VoiceOver reads, named by series.
             TrendChart(points: pts, gradient: gradient, valueRange: valueRange,
-                       showsArea: true, height: NoopMetrics.chartHeight, valueFormat: valueFormat)
+                       showsArea: true, height: NoopMetrics.chartHeight, valueFormat: valueFormat,
+                       accessibilityLabel: accessibilityLabel)
             // Bright end-cap at the most-recent sample — "now".
             NowEndCap(value: pts.last?.value, valueRange: valueRange, tip: tip)
                 .allowsHitTesting(false)

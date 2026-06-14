@@ -341,7 +341,8 @@ struct StressView: View {
                         valueRange: 0...3,
                         showsArea: true,
                         height: NoopMetrics.chartHeight,
-                        valueFormat: { String(format: "%.1f", $0) }
+                        valueFormat: { String(format: "%.1f", $0) },
+                        accessibilityLabel: "Stress trend"
                     )
                 } footer: {
                     ChartFooter([
@@ -689,6 +690,7 @@ struct StressHeroGauge: View {
     let band: StressBand
     var diameter: CGFloat = 220
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var animatedFraction: Double = 0
 
     private var fraction: Double { min(max(score / 3.0, 0), 1) }
@@ -708,7 +710,7 @@ struct StressHeroGauge: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Stress \(String(format: "%.1f", score)) of 3, \(band.title)")
         .onAppear {
-            withAnimation(StrandMotion.drawIn) { animatedFraction = fraction }
+            withAnimation(StrandMotion.drawIn(reduced: reduceMotion)) { animatedFraction = fraction }
         }
     }
 }
