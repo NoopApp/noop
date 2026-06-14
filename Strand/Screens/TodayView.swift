@@ -274,6 +274,7 @@ struct TodayView: View {
                 scoringGuideCardSeen = true
                 showGuideTop = true
             }
+            .strandPressable()
         }
     }
 
@@ -308,7 +309,7 @@ struct TodayView: View {
                 }
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(StrandPressableButtonStyle())
         .accessibilityLabel("Support NOOP — donate or get in touch")
     }
     #endif

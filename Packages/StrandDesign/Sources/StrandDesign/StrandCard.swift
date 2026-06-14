@@ -149,6 +149,82 @@ public extension View {
     }
 }
 
+// MARK: - Touch press feedback (iOS) — the hover lift's touch analogue.
+//
+// `.onHover` never fires on a touchscreen, so tappable cards/rows feel dead on iPhone.
+// This gives a subtle press-DOWN state (scale + edge emphasis) for direct manipulation,
+// honouring Reduce Motion (which swaps the transform for a gentle dim). macOS keeps hover;
+// press is additive — hover (pointer NEAR) and pressed (finger/click DOWN) animate distinct
+// properties on the shared StrandMotion.interactive spring, so they compose without a
+// double-bounce. Exposed two ways: a ButtonStyle for Button/NavigationLink-as-card (the
+// `.plain` replacement) and a `.strandPressable()` modifier for `.onTapGesture`-driven cards.
+
+/// Drop-in replacement for `.buttonStyle(.plain)` on full-card Buttons / NavigationLinks:
+/// a subtle press-down scale + hairline-strong edge.
+public struct StrandPressableButtonStyle: ButtonStyle {
+    var cornerRadius: CGFloat
+    var scale: CGFloat
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    public init(cornerRadius: CGFloat = NoopMetrics.cardRadius, scale: CGFloat = 0.985) {
+        self.cornerRadius = cornerRadius
+        self.scale = scale
+    }
+
+    public func makeBody(configuration: Configuration) -> some View {
+        let pressed = configuration.isPressed
+        return configuration.label
+            .scaleEffect(reduceMotion ? 1 : (pressed ? scale : 1))
+            .opacity(reduceMotion && pressed ? 0.82 : 1)
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(StrandPalette.hairlineStrong, lineWidth: 1)
+                    .opacity(pressed ? 1 : 0)
+            )
+            .animation(StrandMotion.interactive, value: pressed)
+            .contentShape(Rectangle())
+    }
+}
+
+/// Backs `.strandPressable()` — a press-down state for cards driven by `.onTapGesture`
+/// (no Button). A 0-distance drag tracks the finger; @GestureState auto-resets on release
+/// or when a parent scroll claims the gesture.
+public struct StrandPressableModifier: ViewModifier {
+    var cornerRadius: CGFloat
+    var scale: CGFloat
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @GestureState private var pressed = false
+
+    public init(cornerRadius: CGFloat = NoopMetrics.cardRadius, scale: CGFloat = 0.985) {
+        self.cornerRadius = cornerRadius
+        self.scale = scale
+    }
+
+    public func body(content: Content) -> some View {
+        content
+            .scaleEffect(reduceMotion ? 1 : (pressed ? scale : 1))
+            .opacity(reduceMotion && pressed ? 0.82 : 1)
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(StrandPalette.hairlineStrong, lineWidth: 1)
+                    .opacity(pressed ? 1 : 0)
+            )
+            .animation(StrandMotion.interactive, value: pressed)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .updating($pressed) { _, state, _ in state = true }
+            )
+    }
+}
+
+public extension View {
+    /// Subtle touch press-down feedback for a tappable card/row that uses `.onTapGesture`
+    /// (not a Button). For Buttons/NavigationLinks, use `StrandPressableButtonStyle` instead.
+    func strandPressable(cornerRadius: CGFloat = NoopMetrics.cardRadius, scale: CGFloat = 0.985) -> some View {
+        modifier(StrandPressableModifier(cornerRadius: cornerRadius, scale: scale))
+    }
+}
+
 #if DEBUG
 #Preview("StrandCard") {
     VStack(spacing: 16) {

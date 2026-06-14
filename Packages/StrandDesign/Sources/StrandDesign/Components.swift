@@ -256,7 +256,11 @@ public struct SegmentedPillControl<T: Hashable>: View {
         HStack(spacing: 4) {
             ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                 let sel = item == selection
-                Button { withAnimation(StrandMotion.interactive) { selection = item } } label: {
+                Button {
+                    guard selection != item else { return }   // re-tapping the active segment stays silent
+                    StrandHaptic.selection.play()
+                    withAnimation(StrandMotion.interactive) { selection = item }
+                } label: {
                     Text(label(item))
                         .font(StrandFont.captionNumber)
                         .foregroundStyle(sel ? StrandPalette.surfaceBase : StrandPalette.textSecondary)

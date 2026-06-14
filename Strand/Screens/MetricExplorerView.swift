@@ -187,7 +187,7 @@ struct MetricExplorerView: View {
                                         MetricRow(metric: metric,
                                                   isEmpty: emptyByID[metric.id] ?? false)
                                     }
-                                    .buttonStyle(.plain)
+                                    .buttonStyle(StrandPressableButtonStyle(cornerRadius: 0))
                                     if idx < metrics.count - 1 {
                                         Divider().overlay(StrandPalette.hairline)
                                             .padding(.leading, 56)
