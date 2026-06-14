@@ -86,7 +86,15 @@ struct ManualWorkoutSheet: View {
             footer
         }
         .padding(24)
+        // A fixed 420pt is right for the free-floating macOS sheet, but on iPhone it's wider than
+        // the screen, so the Avg HR/Calories row, the Start DatePicker and the footer ran off the
+        // right edge (#185, same fix as WhatsNewView/ScoringGuideView). iOS fills the presented
+        // sheet's width and sizes to content height instead.
+        #if os(macOS)
         .frame(width: 420)
+        #else
+        .frame(maxWidth: .infinity)
+        #endif
         .background(StrandPalette.surfaceOverlay)
     }
 

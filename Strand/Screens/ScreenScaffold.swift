@@ -7,6 +7,14 @@ struct ScreenScaffold<Content: View>: View {
     var subtitle: LocalizedStringKey? = nil
     @ViewBuilder var content: () -> Content
 
+    // iPad runs the shared screens full-screen, where an uncapped column gives 120+ character lines
+    // in landscape. On iOS regular width (iPad) the readable column is capped + centred; compact
+    // (iPhone) and macOS are unchanged. macOS also reports a horizontalSizeClass, so the cap is gated
+    // by `#if os(iOS)` — a runtime size-class check alone would also narrow the Mac detail pane.
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var hSizeClass
+    #endif
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
@@ -19,7 +27,15 @@ struct ScreenScaffold<Content: View>: View {
                 content()
             }
             .padding(28)
+            #if os(iOS)
+            // iPad: cap the readable column, then centre it in the full-width scroll viewport.
+            // iPhone (.compact): the inner frame is .infinity/.leading, identical to before.
+            .frame(maxWidth: hSizeClass == .regular ? 700 : .infinity,
+                   alignment: hSizeClass == .regular ? .center : .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
+            #else
             .frame(maxWidth: .infinity, alignment: .leading)
+            #endif
         }
         .background(StrandPalette.surfaceBase)
     }
