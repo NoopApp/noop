@@ -29,7 +29,6 @@ import WhoopStore
 
 struct StressView: View {
     @EnvironmentObject var repo: Repository
-    @EnvironmentObject var live: LiveState
 
     /// The stored 0–3 stress series ("my-whoop"), oldest→newest. Empty → derive.
     @State private var storedSeries: [(day: String, value: Double)] = []
