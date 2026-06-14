@@ -83,6 +83,14 @@ enum class CommandNumber(val rawValue: Int) {
     GET_DATA_RANGE(34),
     GET_HELLO_HARVARD(35),
     SEND_R10_R11_REALTIME(63),
+    // WHOOP 5/MG deep-stream START burst (#278/#276): toggle IMU/optical + persistent R20/R21. The
+    // toggles take payload [revision=1, enabled]. Transcribed from b-nnett/goose `startPhysiologyCapture`;
+    // keep in lockstep with the Swift WhoopCommand cases.
+    TOGGLE_IMU_MODE(106),
+    ENABLE_OPTICAL_DATA(107),
+    TOGGLE_OPTICAL_MODE(108),
+    TOGGLE_PERSISTENT_R20(153),
+    TOGGLE_PERSISTENT_R21(154),
     // WHOOP 5.0/MG (device family GOOSE/MAVERICK) one-shot buzz. Gen-4 straps use the legacy
     // RUN_HAPTICS_PATTERN(79) below; a 5/MG strap only honors this command.
     RUN_HAPTIC_PATTERN_MAVERICK(19),

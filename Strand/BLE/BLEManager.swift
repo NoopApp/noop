@@ -521,6 +521,16 @@ public final class BLEManager: NSObject, ObservableObject {
                 // data the strap emits) and is what the official app sends. Driven only by
                 // enableWhoop5DeepData(). (#174)
                 || (command == .setConfig && PuffinExperiment.deepDataEnabled)
+                // The sensor-stream START burst — the official app's deep-stream "on" commands (realtime
+                // HR/IMU/optical toggles, the R10/R11 raw stream, the persistent R20/R21 toggles). These
+                // actually BEGIN the type-0x2F deep stream the R22 flags only configure (#278/#276): the
+                // exact commands NOOP was dropping as "no framing yet". Gated behind the same deep-data
+                // opt-in; reversible; driven only by enableWhoop5DeepData(). (toggleRealtimeHR is allowed
+                // above already.)
+                || ((command == .sendR10R11Realtime || command == .toggleIMUMode
+                     || command == .enableOpticalData || command == .toggleOpticalMode
+                     || command == .togglePersistentR20 || command == .togglePersistentR21)
+                    && PuffinExperiment.deepDataEnabled)
                 // SET_DEVICE_CONFIG (the Broadcast-HR flag) is allowed ONLY while that opt-in is on —
                 // it writes one persistent device-config value so the strap advertises standard HR.
                 // Reversible; driven only by setBroadcastHr(_:). (#181)
@@ -997,7 +1007,21 @@ public final class BLEManager: NSObject, ObservableObject {
                           writeType: .withResponse)
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(80 * frames.count + 200)) { [weak self] in
+        // The R22 flags only configure WHICH deep packets the strap MAY emit; they don't start the
+        // stream (#278: all 15 flags ACKed, still no type-0x2F). Follow them with the sensor-stream
+        // START burst the official app sends — toggle HR/IMU/optical + the R10/R11 raw stream + the
+        // persistent toggles — which actually turns the high-rate stream on. (Protocol facts from
+        // b-nnett/goose; built with NOOP's own puffin framing.) Spaced after the flag writes settle.
+        let startSeq = Whoop5Config.deepStreamStartSequence
+        let startBase = 80 * frames.count + 160
+        for (j, s) in startSeq.enumerated() {
+            guard let cmd = WhoopCommand(rawValue: s.cmd) else { continue }
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(startBase + 80 * j)) { [weak self] in
+                self?.send(cmd, payload: s.payload, writeType: .withResponse)
+            }
+        }
+        log("Deep-data: + sending the \(startSeq.count)-command sensor-stream start burst (incl. the R10/R11 raw stream)…")
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(startBase + 80 * startSeq.count + 200)) { [weak self] in
             self?.log("Deep-data: sequence sent. Keep the strap on, let it sync, then share your strap log — we're looking for new deep records (type-0x2F) to start arriving. (#174)")
         }
     }

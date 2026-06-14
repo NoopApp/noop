@@ -96,4 +96,45 @@ public enum Whoop5Config {
             frame(flag: flag, seq: UInt8((Int(firstSeq) + idx) & 0xFF))
         }
     }
+
+    // MARK: - Sensor-stream START burst (begins the type-0x2F deep stream)
+    //
+    // The `enableR22Sequence` above only tells the strap WHICH deep packets it MAY emit — it does not
+    // start the high-rate stream. That gap is exactly #278: a strap ACKed all 15 R22 flags but never
+    // sent a type-0x2F packet, while NOOP's "R10/R11 raw stream" was dropped as "no framing yet". The
+    // official app ALSO sends a short burst of sensor-stream commands that actually turn the stream on.
+    // The command numbers + payloads below are protocol facts transcribed from the b-nnett/goose 5/MG
+    // mapping (`GooseBLEClient.startPhysiologyCapture`) — re-expressed here in NOOP's own code and built
+    // with NOOP's existing `puffinCommandFrame` envelope (no goose source is used). cmd 63
+    // (SEND_R10_R11_REALTIME) is the raw-stream framing #278 reported missing.
+
+    /// One sensor-stream command in the start burst: a puffin command number + its inner payload bytes.
+    public struct StreamStart: Equatable, Sendable {
+        public let cmd: UInt8
+        public let payload: [UInt8]
+        public init(_ cmd: UInt8, _ payload: [UInt8]) { self.cmd = cmd; self.payload = payload }
+    }
+
+    /// `[revision=1, enabled]` — the two-byte body the IMU/optical/persistent toggles take.
+    public static func revisionBoolean(_ on: Bool) -> [UInt8] { [0x01, on ? 0x01 : 0x00] }
+
+    /// The start burst, in the official app's order: realtime HR, the R10/R11 raw stream, then the
+    /// IMU / optical / persistent toggles. Sent AFTER `enableR22Sequence` over the same encrypted command
+    /// channel, each as one puffin command WITH RESPONSE. Reversible — it only turns the stream on.
+    public static let deepStreamStartSequence: [StreamStart] = [
+        StreamStart(3,   [0x01]),                 // TOGGLE_REALTIME_HR on
+        StreamStart(63,  [0x01]),                 // SEND_R10_R11_REALTIME on  ← the missing raw stream
+        StreamStart(106, revisionBoolean(true)),  // TOGGLE_IMU_MODE on (motion)
+        StreamStart(154, revisionBoolean(true)),  // TOGGLE_PERSISTENT_R21 on
+        StreamStart(107, revisionBoolean(true)),  // ENABLE_OPTICAL_DATA on (PPG)
+        StreamStart(108, revisionBoolean(true)),  // TOGGLE_OPTICAL_MODE on
+        StreamStart(153, revisionBoolean(true)),  // TOGGLE_PERSISTENT_R20 on
+    ]
+
+    /// Every start-burst command framed with the puffin envelope, sequence-numbered from `firstSeq`.
+    public static func deepStreamStartFrames(firstSeq: UInt8 = 1) -> [[UInt8]] {
+        deepStreamStartSequence.enumerated().map { idx, s in
+            puffinCommandFrame(cmd: s.cmd, seq: UInt8((Int(firstSeq) + idx) & 0xFF), payload: s.payload)
+        }
+    }
 }

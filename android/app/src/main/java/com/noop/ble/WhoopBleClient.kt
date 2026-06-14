@@ -920,6 +920,13 @@ class WhoopBleClient(
                 // is opted in — it writes a persistent feature flag to the strap, so it must never fire
                 // on a default install. Reversible; driven only by enableWhoop5DeepData(). (#174)
                 !(cmd == CommandNumber.SET_CONFIG && puffinExperiment.isDeepDataEnabled) &&
+                // The sensor-stream START burst (the official app's deep-stream "on" commands) — begins
+                // the type-0x2F stream the R22 flags only configure (#278/#276). Gated behind the same
+                // deep-data opt-in; reversible; driven only by enableWhoop5DeepData().
+                !(cmd in setOf(CommandNumber.SEND_R10_R11_REALTIME, CommandNumber.TOGGLE_IMU_MODE,
+                               CommandNumber.ENABLE_OPTICAL_DATA, CommandNumber.TOGGLE_OPTICAL_MODE,
+                               CommandNumber.TOGGLE_PERSISTENT_R20, CommandNumber.TOGGLE_PERSISTENT_R21) &&
+                    puffinExperiment.isDeepDataEnabled) &&
                 // SET_DEVICE_CONFIG (the Broadcast-HR flag) is allowed ONLY while that opt-in is on.
                 // Reversible; driven only by setBroadcastHr(). (#181)
                 !(cmd == CommandNumber.SET_DEVICE_CONFIG && puffinExperiment.broadcastHr)) {
@@ -1891,9 +1898,19 @@ class WhoopBleClient(
                 )
             }, 80L * i)
         }
+        // The R22 flags only configure WHICH deep packets the strap may emit; they don't start the
+        // stream (#278: all flags ACKed, no type-0x2F). Follow them with the sensor-stream START burst
+        // the official app sends — toggle HR/IMU/optical + the R10/R11 raw stream — which actually turns
+        // the high-rate stream on. (Protocol facts from b-nnett/goose; built with NOOP's puffin framing.)
+        val startSeq = Whoop5Config.deepStreamStartSequence
+        val startBase = 80L * flags.size + 160L
+        startSeq.forEachIndexed { j, s ->
+            handler.postDelayed({ send(s.cmd, s.payload, withResponse = true) }, startBase + 80L * j)
+        }
+        log("Deep-data: + sending the ${startSeq.size}-command sensor-stream start burst (incl. the R10/R11 raw stream)…")
         handler.postDelayed({
             log("Deep-data: sequence sent. Keep the strap on, let it sync, then share your strap log — we're looking for new deep records (type-0x2F) to start arriving. (#174)")
-        }, 80L * flags.size + 200L)
+        }, startBase + 80L * startSeq.size + 200L)
     }
 
     /**

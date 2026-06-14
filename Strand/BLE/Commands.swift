@@ -28,6 +28,9 @@ public enum WhoopCommand: UInt8, CaseIterable {
     case getExtendedBatteryInfo = 98
     case toggleIMUMode         = 106
     case enableOpticalData     = 107
+    /// TOGGLE_OPTICAL_MODE (108) — part of the WHOOP 5/MG deep-stream start burst. Payload
+    /// `[revision=1, enabled]`. (Transcribed from b-nnett/goose `startPhysiologyCapture`.)
+    case toggleOpticalMode     = 108
     /// SET_CONFIG / SET_FF_VALUE (0x78) — write one persistent device feature-flag. Used by the
     /// WHOOP 5.0/MG "enable R22 packets" sequence that switches on the deep biometric streams the
     /// strap otherwise withholds from third-party apps (documented independently by judes.club and
@@ -53,6 +56,10 @@ public enum WhoopCommand: UInt8, CaseIterable {
     /// biometric retention + disconnected operation). Safe/reversible (just a data stream). Verified
     /// on-device: 2.1/s → 0/s, and it persists across reconnect.
     case sendR10R11Realtime    = 63
+    /// TOGGLE_PERSISTENT_R20 (153) / TOGGLE_PERSISTENT_R21 (154) — part of the WHOOP 5/MG deep-stream
+    /// start burst; payload `[revision=1, enabled]`. (Transcribed from b-nnett/goose `startPhysiologyCapture`.)
+    case togglePersistentR20   = 153
+    case togglePersistentR21   = 154
 
     // MARK: Alarm commands (confirmed for interoperability)
     /// Arm the strap's FIRMWARE alarm for a specific UTC time. The strap will buzz at that time
@@ -90,11 +97,14 @@ public enum WhoopCommand: UInt8, CaseIterable {
         case .getExtendedBatteryInfo:return "Get Extended Battery Info"
         case .toggleIMUMode:         return "Toggle IMU Mode"
         case .enableOpticalData:     return "Enable Optical Data"
+        case .toggleOpticalMode:     return "Toggle Optical Mode"
         case .setConfig:             return "Set Config (R22 feature flag)"
         case .setDeviceConfig:       return "Set Device Config (broadcast HR)"
         case .runHapticsPattern:     return "Run Haptics Pattern"
         case .stopHaptics:           return "Stop Haptics"
         case .sendR10R11Realtime:    return "R10/R11 Realtime (raw stream)"
+        case .togglePersistentR20:   return "Toggle Persistent R20"
+        case .togglePersistentR21:   return "Toggle Persistent R21"
         case .setAlarmTime:          return "Set Alarm Time"
         case .getAlarmTime:          return "Get Alarm Time"
         case .runAlarm:              return "Run Alarm"

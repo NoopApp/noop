@@ -83,4 +83,36 @@ object Whoop5Config {
             seq = seq,
             payload = byteArrayOf(0x01) + payloadBody(flag.name, flag.value),
         )
+
+    // Sensor-stream START burst — begins the type-0x2F deep stream (#278/#276). The R22 flags above only
+    // configure WHICH deep packets the strap may emit; they don't start the stream (a strap ACKed all 15
+    // flags but sent no type-0x2F). The official app ALSO sends this short burst of sensor-stream commands
+    // to turn the stream on. Command numbers + payloads are protocol facts from the b-nnett/goose 5/MG
+    // mapping (startPhysiologyCapture), built with NOOP's own puffin envelope. cmd 63 is the missing
+    // R10/R11 raw-stream framing. Keep in lockstep with the Swift `Whoop5Config.deepStreamStartSequence`.
+
+    /** [revision=1, enabled] — the two-byte body the IMU/optical/persistent toggles take. */
+    fun revisionBoolean(on: Boolean): ByteArray = byteArrayOf(1, (if (on) 1 else 0).toByte())
+
+    /** One sensor-stream command: the puffin command + its inner payload bytes. */
+    class StreamStart(val cmd: CommandNumber, val payload: ByteArray)
+
+    /** The start burst, in the official app's order: realtime HR, the R10/R11 raw stream, then the
+     *  IMU/optical/persistent toggles. Sent AFTER enableR22Sequence, each as one puffin command WITH
+     *  RESPONSE. Reversible — it only turns the stream on. */
+    val deepStreamStartSequence: List<StreamStart> = listOf(
+        StreamStart(CommandNumber.TOGGLE_REALTIME_HR, byteArrayOf(0x01)),
+        StreamStart(CommandNumber.SEND_R10_R11_REALTIME, byteArrayOf(0x01)),
+        StreamStart(CommandNumber.TOGGLE_IMU_MODE, revisionBoolean(true)),
+        StreamStart(CommandNumber.TOGGLE_PERSISTENT_R21, revisionBoolean(true)),
+        StreamStart(CommandNumber.ENABLE_OPTICAL_DATA, revisionBoolean(true)),
+        StreamStart(CommandNumber.TOGGLE_OPTICAL_MODE, revisionBoolean(true)),
+        StreamStart(CommandNumber.TOGGLE_PERSISTENT_R20, revisionBoolean(true)),
+    )
+
+    /** Every start-burst command framed with the puffin envelope, sequence-numbered from firstSeq. */
+    fun deepStreamStartFrames(firstSeq: Int = 1): List<ByteArray> =
+        deepStreamStartSequence.mapIndexed { idx, s ->
+            Framing.puffinCommandFrame(cmd = s.cmd.rawValue, seq = (firstSeq + idx) and 0xFF, payload = s.payload)
+        }
 }

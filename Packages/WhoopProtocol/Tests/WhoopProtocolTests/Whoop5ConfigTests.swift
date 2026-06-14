@@ -63,4 +63,31 @@ final class Whoop5ConfigTests: XCTestCase {
         XCTAssertEqual(body[32], 0x31, "value byte should be ASCII '1'")
         XCTAssertEqual(Whoop5Config.deviceConfigBody(name: "whoop_live_hr_in_adv_ind_pkt", value: 0x30)[32], 0x30)
     }
+
+    /// The deep-stream START burst (#278/#276): the sensor-stream "on" commands that actually begin the
+    /// type-0x2F stream after the R22 flags. Command numbers transcribed from b-nnett/goose's 5/MG
+    /// mapping, built with NOOP's own puffin envelope. cmd 63 (payload [0x01]) is the R10/R11 raw-stream
+    /// framing #278 reported missing as "no WHOOP 5/MG framing for this command yet".
+    func testDeepStreamStartSequence() {
+        let seq = Whoop5Config.deepStreamStartSequence
+        // Official-app order: realtime HR, the R10/R11 raw stream, then IMU/optical/persistent toggles.
+        XCTAssertEqual(seq.map { $0.cmd }, [3, 63, 106, 154, 107, 108, 153])
+        XCTAssertEqual(seq[0].payload, [0x01])         // TOGGLE_REALTIME_HR on
+        XCTAssertEqual(seq[1].payload, [0x01])         // SEND_R10_R11_REALTIME on
+        XCTAssertEqual(seq[2].payload, [0x01, 0x01])   // revisionBoolean(true)
+
+        let frames = Whoop5Config.deepStreamStartFrames(firstSeq: 1)
+        XCTAssertEqual(frames.count, 7)
+        // seq byte at inner offset 1 (frame offset 9): 1…7, distinct and incrementing
+        XCTAssertEqual(frames.map { $0[9] }, Array(1...7))
+        // every frame is a well-formed puffin command envelope (CRC16 header + CRC32 payload)
+        for f in frames { XCTAssertTrue(verifyFrame(f, family: .whoop5).ok, "start-burst frame must pass whoop5 CRC verification") }
+
+        // The R10/R11 raw-stream command, byte-for-byte: type(0x23) seq(2) cmd(63) payload(0x01 = on).
+        let r10r11 = frames[1]
+        XCTAssertEqual(r10r11[8], 0x23, "inner packet type = COMMAND")
+        XCTAssertEqual(r10r11[9], 2,    "seq")
+        XCTAssertEqual(r10r11[10], 63,  "command number = SEND_R10_R11_REALTIME")
+        XCTAssertEqual(r10r11[11], 0x01, "payload = on")
+    }
 }

@@ -44,4 +44,26 @@ class Whoop5ConfigTest {
         assertEquals(0x32, body[32].toInt() and 0xFF)
         for (i in 33 until 40) assertEquals(0, body[i].toInt())
     }
+
+    /** The deep-stream START burst (#278/#276): the sensor-stream "on" commands that actually begin the
+     *  type-0x2F stream after the R22 flags. Mirrors the Swift `testDeepStreamStartSequence`. cmd 63 is
+     *  the R10/R11 raw-stream framing #278 reported missing. */
+    @Test
+    fun deepStreamStartSequenceBeginsTheStream() {
+        val seq = Whoop5Config.deepStreamStartSequence
+        // Official-app order: realtime HR, the R10/R11 raw stream, then IMU/optical/persistent toggles.
+        assertEquals(listOf(3, 63, 106, 154, 107, 108, 153), seq.map { it.cmd.rawValue })
+        assertEquals(listOf(0x01), seq[1].payload.map { it.toInt() and 0xFF })        // R10/R11 on
+        assertEquals(listOf(0x01, 0x01), seq[2].payload.map { it.toInt() and 0xFF })  // revisionBoolean(true)
+
+        val frames = Whoop5Config.deepStreamStartFrames(1)
+        assertEquals(7, frames.size)
+        assertEquals(listOf(1, 2, 3, 4, 5, 6, 7), frames.map { it[9].toInt() and 0xFF })  // inner seq byte
+        // R10/R11 command, byte-for-byte: type(0x23) seq(2) cmd(63) payload(0x01 = on).
+        val r = frames[1]
+        assertEquals(0x23, r[8].toInt() and 0xFF)
+        assertEquals(2, r[9].toInt() and 0xFF)
+        assertEquals(63, r[10].toInt() and 0xFF)
+        assertEquals(0x01, r[11].toInt() and 0xFF)
+    }
 }
