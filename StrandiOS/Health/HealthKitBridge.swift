@@ -2,6 +2,7 @@
 import Foundation
 import HealthKit
 import WhoopStore
+import StrandImport
 
 /// Two-way Apple Health bridge for the iOS app.
 ///
@@ -27,6 +28,11 @@ final class HealthKitBridge: ObservableObject {
     private let appleDeviceId: String
     /// NOOP's own strap-derived source id, read back when writing into Health.
     private let noopDeviceId: String
+    /// NOOP's on-device COMPUTED daily scores (recovery/HRV/RHR/SpO₂/resp) live under the sibling
+    /// `deviceId + "-noop"` id — mirrors `Repository.computedDeviceId` / `IntelligenceEngine.computedId`.
+    /// `writeBack` must read this, not the raw import id: a Bluetooth-only WHOOP user has no imported
+    /// `noopDeviceId` daily row, so those metrics exist ONLY here.
+    private var computedDeviceId: String { noopDeviceId + "-noop" }
 
     init(repo: Repository, appleDeviceId: String, noopDeviceId: String) {
         self.repo = repo
@@ -152,6 +158,35 @@ final class HealthKitBridge: ObservableObject {
         try? await store.upsertAppleDaily(appleRows, deviceId: appleDeviceId)
         try? await store.upsertDailyMetrics(dmRows, deviceId: appleDeviceId)
 
+        // Flatten to the generic metricSeries the shared Apple Health screen, the Today apple-health
+        // sparklines, and the Metric Explorer read from — repo.series(key:source:"apple-health")
+        // queries ONLY metricSeries, so without this every tile/chart renders "—" after a successful
+        // sync. Reuse the importer's canonical key mapping so the keys match the macOS path exactly.
+        // iOS doesn't collect weight/body-comp or awake/in-bed minutes, so those stay nil and emit no
+        // points — correct.
+        let aggregates = byDay.map { (day, a) in
+            AppleDailyAggregate(
+                day: day,
+                restingHr: a.restingHr,
+                hrvSDNN: a.hrv,
+                spo2Pct: a.spo2,
+                respRate: a.respRate,
+                avgHr: a.avgHr,
+                maxHr: a.maxHr,
+                steps: a.steps,
+                activeKcal: a.activeKcal,
+                basalKcal: a.basalKcal,
+                vo2max: a.vo2max,
+                asleepMin: a.asleepMin,
+                deepMin: a.deepMin,
+                remMin: a.remMin,
+                coreMin: a.coreMin
+            )
+        }
+        let points = AppleHealthAggregator.metricPoints(aggregates)
+            .map { MetricPoint(day: $0.day, key: $0.key, value: $0.value) }
+        try? await store.upsertMetricSeries(points, deviceId: appleDeviceId)
+
         // Only advance lastSync when the round-trip actually succeeded. A failed write-back used to
         // be swallowed by `try?`, then lastSync moved forward — the next delta sync skipped the window
         // and the data was never written back.
@@ -182,7 +217,16 @@ final class HealthKitBridge: ObservableObject {
         let to = HealthKitBridge.dayString(Date())
         guard let fromDate = cal.date(byAdding: .day, value: -days, to: Date()) else { return }
         let from = HealthKitBridge.dayString(fromDate)
-        guard let rows = try? await whoopStore.dailyMetrics(deviceId: noopDeviceId, from: from, to: to) else { return }
+        // Read NOOP's COMPUTED dailies (deviceId + "-noop"), which is the only place a strap-only
+        // user's recovery/HRV/RHR/SpO₂/resp lives, then union with any imported `noopDeviceId` rows so
+        // a user who ALSO imported a WHOOP export still gets the imported values. Imported overrides
+        // computed per day, matching the dashboard's source precedence.
+        let computed = (try? await whoopStore.dailyMetrics(deviceId: computedDeviceId, from: from, to: to)) ?? []
+        let imported = (try? await whoopStore.dailyMetrics(deviceId: noopDeviceId, from: from, to: to)) ?? []
+        var byDay: [String: DailyMetric] = [:]
+        for r in computed { byDay[r.day] = r }   // computed first
+        for r in imported { byDay[r.day] = r }   // imported overrides
+        let rows = byDay.keys.sorted().map { byDay[$0]! }
 
         struct Candidate { let type: HKQuantityType; let key: String; let sample: HKQuantitySample }
         var candidates: [Candidate] = []
@@ -299,12 +343,17 @@ final class HealthKitBridge: ObservableObject {
 
     // MARK: - Date helpers
 
-    // UTC: the rest of the store keys days by UTC (Repository's compareDayParser, the
-    // dailyMetric primary key). Using .current here would split the same physical day across
-    // two `yyyy-MM-dd` keys when the user crosses a time zone, causing duplicate daily rows.
+    // LOCAL civil day: the rest of the store keys days by the device-local civil day —
+    // AppleHealthAggregator.localDay shifts each sample into its own offset, and
+    // Repository.dayFormatter leaves timeZone at the default (local) zone. The
+    // HKStatisticsCollectionQuery here already buckets in Calendar.current (anchor =
+    // startOfDay, interval = 1 day), so labelling those local-midnight bucket starts with a
+    // matching local formatter is strictly 1:1; using UTC instead mislabelled a full local day
+    // under the previous UTC date for users east of UTC, so apple-health rows never merged with
+    // the strap-computed/imported rows for the same civil day.
     private static let dayFormatter: DateFormatter = {
         let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyy-MM-dd"; f.timeZone = TimeZone(identifier: "UTC")!; return f
+        f.dateFormat = "yyyy-MM-dd"; f.timeZone = TimeZone.current; return f
     }()
     private static func dayString(_ date: Date) -> String { dayFormatter.string(from: date) }
     private static func date(from day: String) -> Date? { dayFormatter.date(from: day) }
