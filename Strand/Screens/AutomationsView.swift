@@ -72,8 +72,14 @@ struct AutomationsView: View {
             }
         }
     }
+    // Lowercase am/pm via explicit symbols since "a" renders uppercase under en_US_POSIX.
     private static let momentFormatter: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "EEE d MMM · HH:mm"; return f
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "EEE d MMM · h:mm a"
+        f.amSymbol = "am"
+        f.pmSymbol = "pm"
+        return f
     }()
 
     // MARK: - Wear & presence
