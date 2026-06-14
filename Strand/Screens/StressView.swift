@@ -219,10 +219,10 @@ struct StressView: View {
         }
     }
 
-    /// "6 am" / "2 pm" style hour-of-day label.
+    /// "6 AM" / "2 PM" style hour-of-day label (uppercase to match the rest of the app).
     private func hourLabel(_ hour: Int) -> String {
         let h = ((hour % 24) + 24) % 24
-        let ampm = h < 12 ? "am" : "pm"
+        let ampm = h < 12 ? "AM" : "PM"
         let h12 = h % 12 == 0 ? 12 : h % 12
         return "\(h12) \(ampm)"
     }

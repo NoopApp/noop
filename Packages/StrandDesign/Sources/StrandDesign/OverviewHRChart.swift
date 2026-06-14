@@ -277,7 +277,10 @@ public struct OverviewHRChart: View {
         .chartXAxis {
             AxisMarks(values: .automatic(desiredCount: 5)) { _ in
                 AxisGridLine().foregroundStyle(StrandPalette.hairline.opacity(0.4))
-                AxisValueLabel().foregroundStyle(StrandPalette.textTertiary)
+                // Pin to en_US_POSIX so the day axis is 12-hour (AM/PM) regardless of device locale,
+                // matching the tooltip's time format.
+                AxisValueLabel(format: .dateTime.hour().minute().locale(Locale(identifier: "en_US_POSIX")))
+                    .foregroundStyle(StrandPalette.textTertiary)
                     .font(StrandFont.footnote)
             }
         }
