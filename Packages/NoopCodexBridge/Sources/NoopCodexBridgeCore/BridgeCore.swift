@@ -15,7 +15,7 @@ public struct BridgeConfiguration: Sendable {
     public let timeoutSeconds: TimeInterval
 
     public init(environment: [String: String] = ProcessInfo.processInfo.environment) {
-        host = environment["NOOP_CODEX_BRIDGE_HOST"].flatMap { $0.isEmpty ? nil : $0 } ?? "127.0.0.1"
+        host = Self.loopbackHost(environment["NOOP_CODEX_BRIDGE_HOST"])
         port = UInt16(environment["NOOP_CODEX_BRIDGE_PORT"] ?? "") ?? 37337
         codexPath = Self.resolveCodexPath(environment: environment)
         modelOverride = environment["NOOP_CODEX_MODEL"].flatMap { $0.isEmpty ? nil : $0 }
@@ -26,6 +26,16 @@ public struct BridgeConfiguration: Sendable {
 
     public var baseURL: String {
         "http://\(host):\(port)/v1"
+    }
+
+    private static func loopbackHost(_ requested: String?) -> String {
+        let host = (requested ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch host {
+        case "127.0.0.1", "localhost":
+            return host
+        default:
+            return "127.0.0.1"
+        }
     }
 
     private static func resolveCodexPath(environment: [String: String]) -> String {
