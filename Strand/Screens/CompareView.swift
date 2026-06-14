@@ -219,6 +219,17 @@ struct CompareView: View {
         }
     }
 
+    /// How the overlay subtitle tells the user to read real (un-normalized) values.
+    /// The chart axis is normalized, so the only readout of real numbers is the
+    /// crosshair tooltip — driven by pointer hover on macOS, by tap/drag on iOS.
+    private var inspectHint: String {
+        #if os(iOS)
+        return "tap or drag for real values"
+        #else
+        return "hover for real values"
+        #endif
+    }
+
     /// "N readings · <range>" caption near the control, flagging any auto-widen.
     private var rangeCaption: String {
         let series = activeSeries
@@ -355,8 +366,8 @@ struct CompareView: View {
             ChartCard(
                 title: "Normalized overlay",
                 subtitle: anyWidened
-                    ? "Min–max normalized · sparse series widened past \(range.phrase) · hover for real values"
-                    : "Each line min–max normalized within \(range.phrase) · hover for real values",
+                    ? "Min–max normalized · sparse series widened past \(range.phrase) · \(inspectHint)"
+                    : "Each line min–max normalized within \(range.phrase) · \(inspectHint)",
                 trailing: "\(nonEmpty.count) series"
             ) {
                 OverlayChart(series: nonEmpty, height: NoopMetrics.chartHeight)
@@ -714,6 +725,22 @@ private struct OverlayChart: View {
                     case .ended: hoverX = nil
                     }
                 }
+                #if os(iOS)
+                // Touch input never fires onContinuousHover (pointer-only), so on iPhone /
+                // iPad-without-pointer the crosshair + value tooltip would be unreachable.
+                // Drive the same hoverX via tap (single touch-down) and drag-to-scrub across
+                // days. minimumDistance:0 keeps the first touch responsive; a clearly vertical
+                // pan is still claimed by the parent ScrollView.
+                .gesture(
+                    SpatialTapGesture(coordinateSpace: .local)
+                        .onEnded { hoverX = $0.location.x }
+                        .exclusively(before:
+                            DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                                .onChanged { hoverX = $0.location.x }
+                                .onEnded { _ in hoverX = nil }
+                        )
+                )
+                #endif
             }
         }
         .frame(height: height)
