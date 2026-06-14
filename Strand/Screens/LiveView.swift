@@ -62,6 +62,12 @@ struct LiveView: View {
                 // also appears in Settings). A 5/MG strap still bonded to the WHOOP app refuses pairing
                 // with "Encryption is insufficient" — this tells the user to free it and re-pair.
                 if let hint = live.pairingHint { pairingHintBanner(hint) }
+                // Primary Connect affordance, surfaced ABOVE the fold whenever there's no link. The real
+                // Scan & Connect control otherwise lives in `controls` (7 blocks down, below the Signal
+                // Trust grid), so an offline user saw only inert copy up top. Gated purely on
+                // `!live.connected`, so it disappears the instant the radio connects. Shared with macOS —
+                // it reuses `scanButton`, which the wide layout already renders in `controls`.
+                if !live.connected { offlineConnectCallout }
                 bodyConsole
                 // Low-bandwidth fallback note (#80): the radio couldn't sustain the WHOOP 4 R10/R11 raw
                 // realtime burst, so live HR is riding the standard BLE Heart-Rate profile instead. Live HR
@@ -109,7 +115,9 @@ struct LiveView: View {
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .center, spacing: 12) {
                     connectionPill
-                    SourceBadge(connectionModeBadge, tint: connectionModeColor)
+                    if showsModeBadge {
+                        SourceBadge(connectionModeBadge, tint: connectionModeColor)
+                    }
                     if live.backfilling {
                         SourceBadge("SYNCING \(live.syncChunksThisSession)", tint: StrandPalette.metricCyan)
                     }
@@ -119,7 +127,9 @@ struct LiveView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(spacing: 12) {
                         connectionPill
-                        SourceBadge(connectionModeBadge, tint: connectionModeColor)
+                        if showsModeBadge {
+                            SourceBadge(connectionModeBadge, tint: connectionModeColor)
+                        }
                         if live.backfilling {
                             SourceBadge("SYNCING \(live.syncChunksThisSession)", tint: StrandPalette.metricCyan)
                         }
@@ -158,6 +168,15 @@ struct LiveView: View {
         if live.connected { return "CONNECTING" }
         if live.encryptedBond { return "PAIRED" }
         return "OFFLINE"
+    }
+
+    /// Whether to render the connection-mode SourceBadge. When fully offline the `connectionPill`
+    /// already reads "● Disconnected" in metricRose, so the duplicate rose "OFFLINE" badge is pure
+    /// redundancy — suppress it. We keep the badge for every informative state (FULL BOND / LIVE HR
+    /// ONLY / CONNECTING / PAIRED), where it adds signal beyond the pill. The gate matches exactly the
+    /// branch where `connectionModeBadge` would return "OFFLINE".
+    private var showsModeBadge: Bool {
+        !(!activeConnection && !live.connected && !live.encryptedBond)
     }
 
     private var connectionModeColor: Color {
@@ -291,9 +310,15 @@ struct LiveView: View {
             }
             rrStrip
             HStack(spacing: NoopMetrics.gap) {
-                liveProofMetric("R-R", rrSummary, StrandPalette.metricCyan)
-                liveProofMetric("Frame", live.lastFrameType ?? "—", StrandPalette.accent)
-                liveProofMetric("Event", live.lastEvent ?? "—", StrandPalette.statusWarning)
+                // Offline: show a muted "Offline" word (dimmed to textTertiary) instead of three bare
+                // accent-coloured em-dashes that read as broken live readouts. Once there's an active
+                // stream the real values (and their cyan/green/amber accents) return.
+                liveProofMetric("R-R", activeConnection ? rrSummary : "Offline",
+                                StrandPalette.metricCyan, offline: !activeConnection)
+                liveProofMetric("Frame", activeConnection ? (live.lastFrameType ?? "—") : "Offline",
+                                StrandPalette.accent, offline: !activeConnection)
+                liveProofMetric("Event", activeConnection ? (live.lastEvent ?? "—") : "Offline",
+                                StrandPalette.statusWarning, offline: !activeConnection)
             }
         }
     }
@@ -327,14 +352,19 @@ struct LiveView: View {
         }
     }
 
-    private func liveProofMetric(_ label: String, _ value: String, _ tint: Color) -> some View {
+    /// One R-R / Frame / Event proof tile. When `offline` is true the value is dimmed to textTertiary
+    /// (regardless of the passed accent) so an idle tile reads as a muted empty state rather than a
+    /// broken live readout in cyan/green/amber — matching the rrStrip's "Waiting for R-R intervals."
+    /// treatment just above. The callers pass a word ("Offline") instead of a bare em-dash in that case.
+    private func liveProofMetric(_ label: String, _ value: String, _ tint: Color,
+                                 offline: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label.uppercased())
                 .font(StrandFont.footnote)
                 .foregroundStyle(StrandPalette.textTertiary)
             Text(value)
                 .font(StrandFont.captionNumber)
-                .foregroundStyle(tint)
+                .foregroundStyle(offline ? StrandPalette.textTertiary : tint)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
         }
@@ -371,7 +401,9 @@ struct LiveView: View {
         if activeConnection && live.encryptedBond { return "Encrypted stream — deep controls and history sync available." }
         if activeConnection { return "Live heart rate is flowing; full strap controls need an encrypted bond." }
         if live.connected { return "Connected, waiting for a streaming state." }
-        return "Scan and connect to start a live stream."
+        // The actionable "Scan and connect…" CTA now lives in `offlineConnectCallout` above the fold, so
+        // this ring caption stays a calm empty-state descriptor rather than a second, competing CTA.
+        return "Live heart rate appears here once a strap is connected."
     }
 
     private var connectionModeDetail: String {
@@ -707,6 +739,36 @@ struct LiveView: View {
                 .font(StrandFont.footnote)
                 .foregroundStyle(StrandPalette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: - Offline connect callout
+
+    /// The above-the-fold primary Connect affordance, shown only while `!live.connected`. Promotes the
+    /// formerly-inert "Scan and connect…" caption into an accent NoopCard with a real, full-width
+    /// `scanButton` (the same one `controls` renders below), so the offline state has an obvious action
+    /// up top instead of burying it past the Signal Trust grid. Shared with macOS — the wide layout
+    /// shows it stacked above the console, and `scanButton` already styles full-width.
+    @ViewBuilder private var offlineConnectCallout: some View {
+        NoopCard(tint: StrandPalette.accent) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    Image(systemName: "antenna.radiowaves.left.and.right")
+                        .foregroundStyle(StrandPalette.accent)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Start a live stream")
+                            .font(StrandFont.headline)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Text("Scan and connect to start a live stream.")
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                }
+                scanButton
+            }
         }
     }
 
