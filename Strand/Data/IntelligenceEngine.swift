@@ -84,7 +84,10 @@ final class IntelligenceEngine: ObservableObject {
 
         for offset in 0..<maxDays {
             let dayStart = now - offset * 86_400
-            let day = AnalyticsEngine.dayString(dayStart)
+            // LOCAL day key (shift by tzOffset), matching Repository/WhoopImporter and analyzeDay's
+            // local session attribution. A UTC key mis-files a non-UTC user's overnight sleep onto
+            // the wrong day and the matched filter then drops it (the sleep/HRV "missing" bug).
+            let day = AnalyticsEngine.dayString(dayStart, tzOffsetSeconds: tzOffset)
             // Read a generous window around the night that ends on `day`; the stager finds the span.
             let from = dayStart - 30 * 3_600
             let to = dayStart + 12 * 3_600
@@ -103,7 +106,10 @@ final class IntelligenceEngine: ObservableObject {
             // undercount. Read exactly [midnightUtc(day), midnightUtc(day)+86400) and hand it to
             // analyzeDay's dayHr/daySteps, which use it ONLY for those totals. (floorMod so the
             // midnight floor is correct for any sign; the store range is inclusive, so end at -1 s.)
-            let dayMid = dayStart - ((dayStart % 86_400) + 86_400) % 86_400
+            // LOCAL midnight (not UTC) so the additive totals align with the local `day` key above.
+            let localStart = dayStart + tzOffset
+            let localMid = localStart - ((localStart % 86_400) + 86_400) % 86_400
+            let dayMid = localMid - tzOffset
             let dayEnd = dayMid + 86_400 - 1
             let dayHr = (try? await store.hrSamples(deviceId: deviceId, from: dayMid, to: dayEnd, limit: 200_000)) ?? []
             let daySteps = (try? await store.stepSamples(deviceId: deviceId, from: dayMid, to: dayEnd, limit: 200_000)) ?? []

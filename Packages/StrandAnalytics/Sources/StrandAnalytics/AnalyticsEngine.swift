@@ -93,6 +93,18 @@ public enum AnalyticsEngine {
         isoDay.string(from: Date(timeIntervalSince1970: TimeInterval(ts)))
     }
 
+    /// Format a unix-seconds timestamp as a LOCAL YYYY-MM-DD day string, where "local" is the
+    /// wall-clock offset `tzOffsetSeconds` east of UTC. isoDay is UTC, so shifting the instant by
+    /// the offset and formatting in UTC yields the local calendar day. This is the attribution the
+    /// rest of the app uses (Repository.dayFormatter = device-local; WhoopImporter = the record's
+    /// own offset), so the on-device engine must match it — a UTC day-key mis-files a non-UTC
+    /// user's overnight sleep onto the wrong day and, combined with the per-day analysis window,
+    /// drops it entirely (a UTC+8 wake at 07:00 local is the PREVIOUS UTC day). tzOffsetSeconds=0
+    /// reproduces the plain UTC `dayString`, so UTC users and pure-function tests are unchanged.
+    public static func dayString(_ ts: Int, tzOffsetSeconds: Int) -> String {
+        dayString(ts + tzOffsetSeconds)
+    }
+
     /// JSON-encode stage segments to the verbatim array shape CachedSleepSession stores.
     static func encodeStages(_ stages: [StageSegment]) -> String? {
         guard let data = try? JSONEncoder().encode(stages) else { return nil }
@@ -153,8 +165,11 @@ public enum AnalyticsEngine {
         // ── Sleep detection + staging ─────────────────────────────────────────
         let allSessions = SleepStager.detectSleep(hr: hr, rr: rr, resp: resp, gravity: gravity,
                                                   tzOffsetSeconds: tzOffsetSeconds)
-        // Sessions attributed to `day` = those whose end falls on `day` (UTC).
-        let matched = allSessions.filter { dayString($0.end) == day }
+        // Sessions attributed to `day` = those whose end falls on `day` in LOCAL time. A night that
+        // ends in the local morning has a UTC end-timestamp on the PREVIOUS calendar day for users
+        // east of UTC, so a UTC compare would never match it against `day` (the local wake-day the
+        // caller iterates). tzOffsetSeconds=0 keeps UTC behaviour for UTC users/tests.
+        let matched = allSessions.filter { dayString($0.end, tzOffsetSeconds: tzOffsetSeconds) == day }
 
         // ── Daily sleep aggregates (AASM, in-bed weighted) ────────────────────
         var deepS = 0.0, remS = 0.0, lightS = 0.0, tstS = 0.0
@@ -266,7 +281,7 @@ public enum AnalyticsEngine {
         let stepsTotal: Int? = {
             // Prefer the full-calendar-day stream for the additive total; fall back to the
             // night-window stream when the caller didn't supply one (pure-function callers/tests).
-            let sorted = (daySteps ?? steps).filter { dayString($0.ts) == day }.sorted { $0.ts < $1.ts }
+            let sorted = (daySteps ?? steps).filter { dayString($0.ts, tzOffsetSeconds: tzOffsetSeconds) == day }.sorted { $0.ts < $1.ts }
             if sorted.count < 2 { return nil }
             // A firmware reboot resets the counter and is byte-indistinguishable from a u16 wrap.
             // A genuine wrap yields a SMALL corrected delta (the steps since the last record); a
@@ -298,7 +313,7 @@ public enum AnalyticsEngine {
         // window — which, anchored to the current time-of-day, would drop a past day's late hours
         // and double-count seconds shared with adjacent days. Fall back to the night-window hr for
         // pure-function callers that don't supply dayHr. Strain keeps the full window (bounded log).
-        let dayHrFiltered = (dayHr ?? hr).filter { dayString($0.ts) == day }
+        let dayHrFiltered = (dayHr ?? hr).filter { dayString($0.ts, tzOffsetSeconds: tzOffsetSeconds) == day }
         let activeKcalEst: Double? = dayHrFiltered.isEmpty ? nil : Calories.estimateDayCalories(
             dayHrFiltered, profile: profile, hrmax: effMaxHR,
             restingHR: restingHRDaily.map(Double.init))
