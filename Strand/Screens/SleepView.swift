@@ -64,7 +64,8 @@ struct SleepView: View {
         // synchronously, so the very first frame already shows content (no empty-state flash).
         let key = dataKey
         let resolved: SleepModel? = (key == modelKey) ? model : buildModel()
-        ScreenScaffold(title: "Sleep", subtitle: "Last night, read in two seconds.") {
+        ScreenScaffold(title: "Sleep", subtitle: "Last night, read in two seconds.",
+                       onRefresh: { await repo.refresh() }) {
             Group {
                 if let resolved {
                     VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {

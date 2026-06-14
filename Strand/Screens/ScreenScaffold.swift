@@ -5,6 +5,10 @@ import StrandDesign
 struct ScreenScaffold<Content: View>: View {
     let title: LocalizedStringKey
     var subtitle: LocalizedStringKey? = nil
+    /// Optional pull-to-refresh hook. When set, the scroll view becomes `.refreshable`
+    /// (the standard iPhone gesture for a data dashboard). Defaults to nil so callers that
+    /// don't opt in are unaffected — and on macOS `.refreshable` surfaces no affordance.
+    var onRefresh: (() async -> Void)? = nil
     @ViewBuilder var content: () -> Content
 
     var body: some View {
@@ -22,6 +26,21 @@ struct ScreenScaffold<Content: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(StrandPalette.surfaceBase)
+        .modifier(RefreshableIfNeeded(onRefresh: onRefresh))
+    }
+}
+
+/// Applies `.refreshable` only when a refresh hook is provided. A ViewModifier (rather than an
+/// inline `if`) keeps the two branches the same opaque type, and means nil callers — every macOS
+/// screen — never attach the modifier at all.
+private struct RefreshableIfNeeded: ViewModifier {
+    let onRefresh: (() async -> Void)?
+    func body(content: Content) -> some View {
+        if let onRefresh {
+            content.refreshable { await onRefresh() }
+        } else {
+            content
+        }
     }
 }
 

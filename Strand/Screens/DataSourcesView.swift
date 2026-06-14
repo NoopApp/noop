@@ -18,7 +18,8 @@ struct DataSourcesView: View {
 
     var body: some View {
         ScreenScaffold(title: "Data Sources",
-                       subtitle: "Everything stays on \(Platform.deviceNounPhrase). Bring your history in once, then it's yours.") {
+                       subtitle: "Everything stays on \(Platform.deviceNounPhrase). Bring your history in once, then it's yours.",
+                       onRefresh: { await repo.refresh() }) {
             whoopCard
             appleHealthCard
             nutritionCard

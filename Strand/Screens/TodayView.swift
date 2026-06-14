@@ -112,7 +112,8 @@ struct TodayView: View {
     }
 
     var body: some View {
-        ScreenScaffold(title: "Control Center", subtitle: "\(dateLine)") {
+        ScreenScaffold(title: "Control Center", subtitle: "\(dateLine)",
+                       onRefresh: { await repo.refresh() }) {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                 HealthAlertBanner()
                 // Browse past days — chevrons + a date jump capped at today (no future days).

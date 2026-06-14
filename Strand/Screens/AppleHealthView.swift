@@ -164,7 +164,8 @@ struct AppleHealthView: View {
     }
 
     var body: some View {
-        ScreenScaffold(title: "Apple Health", subtitle: spanSubtitle.map { "\($0)" }) {
+        ScreenScaffold(title: "Apple Health", subtitle: spanSubtitle.map { "\($0)" },
+                       onRefresh: { await repo.refresh() }) {
             if loaded && !hasAnyData {
                 ComingSoon(what: "Nothing imported yet. On an iPhone: Health app, tap your photo, Export All Health Data, then import the .zip here in Data Sources.")
             } else if !loaded {

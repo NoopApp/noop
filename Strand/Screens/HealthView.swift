@@ -31,7 +31,8 @@ struct HealthView: View {
 
     var body: some View {
         ScreenScaffold(title: "Health Monitor",
-                       subtitle: "Live vitals, streamed from the strap.") {
+                       subtitle: "Live vitals, streamed from the strap.",
+                       onRefresh: { await repo.refresh() }) {
             if repo.days.isEmpty && !hasLiveHR {
                 emptyState
             } else {

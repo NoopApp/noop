@@ -45,7 +45,8 @@ struct WorkoutsView: View {
     }
 
     var body: some View {
-        ScreenScaffold(title: "Workouts", subtitle: "Every session, threaded together.") {
+        ScreenScaffold(title: "Workouts", subtitle: "Every session, threaded together.",
+                       onRefresh: { await repo.refresh() }) {
             if allRows.isEmpty {
                 VStack(alignment: .leading, spacing: 16) {
                     ComingSoon(what: loaded

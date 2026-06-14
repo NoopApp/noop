@@ -160,7 +160,8 @@ struct TrendsView: View {
     }
 
     var body: some View {
-        ScreenScaffold(title: "Trends", subtitle: "The thread of you over time.") {
+        ScreenScaffold(title: "Trends", subtitle: "The thread of you over time.",
+                       onRefresh: { await repo.refresh() }) {
             if repo.days.isEmpty {
                 ComingSoon(what: repo.loaded
                     ? "Trends need history to draw. Import your WHOOP export in Data Sources to see weeks, months and years instantly."
