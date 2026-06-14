@@ -25,7 +25,7 @@ object AppChangelog {
      * Bump this when you add a release below. The "What's New" sheet shows automatically when the
      * stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
      */
-    const val CURRENT_VERSION = "2.15.2"
+    const val CURRENT_VERSION = "2.15.3"
 
     data class Release(
         val version: String,
@@ -36,6 +36,14 @@ object AppChangelog {
 
     /** Newest first. */
     val releases: List<Release> = listOf(
+        Release(
+            version = "2.15.3",
+            title = "Android GPS route distance fix",
+            date = "June 2026",
+            items = listOf(
+                "Fixed (Android): GPS workouts could record a route far shorter than reality — a real run saved as only tens of metres. The route filter was dropping too many legitimate fixes on weaker GPS signal; it now keeps the points it should, so distance and route record properly. Thanks @don86nl (#324).",
+            ),
+        ),
         Release(
             version = "2.15.2",
             title = "Today header date fix (west-of-UTC)",

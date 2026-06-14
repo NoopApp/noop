@@ -20,7 +20,11 @@ data class RawFix(val lat: Double, val lon: Double, val accuracyM: Float, val tM
  * accepted [LatLng] or null. Keeps the last accepted fix to gate the next. Unit-tested.
  */
 class TrackFilter(
-    private val maxAccuracyM: Float = 30f,
+    // 50 m is the realistic consumer-GPS gate during activity (Strava-class apps use ~50 m). The old
+    // 30 m gate dropped most fixes on a weak-signal run, so a real 24-min run banked only 2 points and
+    // ~38 m of distance (#324). The speed gate below still rejects teleports, so the looser accuracy
+    // gate admits legitimate running fixes without letting GPS jumps inflate the track.
+    private val maxAccuracyM: Float = 50f,
     private val maxSpeedMps: Double = 12.0, // ~43 km/h; well above running, below GPS teleports
 ) {
     private var last: RawFix? = null
@@ -47,7 +51,10 @@ class TrackFilter(
  */
 class LocationTracker(private val context: Context) {
     @SuppressLint("MissingPermission")
-    fun stream(minIntervalMs: Long = 2000, minDistanceM: Float = 5f): Flow<LatLng> = callbackFlow {
+    // minDistanceM defaults to 0: let the platform deliver every time-based fix (every minIntervalMs)
+    // so TrackFilter does the gating. A non-zero platform minDistance compounds with the accuracy gate
+    // and suppressed fixes on a weak-signal run, contributing to the under-collected route (#324).
+    fun stream(minIntervalMs: Long = 2000, minDistanceM: Float = 0f): Flow<LatLng> = callbackFlow {
         val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
         val filter = TrackFilter()
         val listener = LocationListener { loc: Location ->

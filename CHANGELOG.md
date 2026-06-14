@@ -17,6 +17,14 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 2.15.3 — Android GPS route distance fix
+
+- **Fixed (Android):** GPS workouts could record a route far shorter than reality (a real run saved as
+  only tens of metres). The route filter was dropping too many legitimate fixes on weaker GPS signal — it
+  now keeps the points it should, so distance and route record properly. Thanks @don86nl (#324).
+
+---
+
 ## 2.15.2 — Today header date fix (west of UTC)
 
 - **Fixed:** the Today header date could read one day behind the day-nav pill (e.g. "Saturday, 13 June"

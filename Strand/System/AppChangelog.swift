@@ -7,7 +7,7 @@ enum AppChangelog {
 
     /// Bump this when you add a release below. The "What's New" sheet shows automatically when the
     /// stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
-    static let currentVersion = "2.15.2"
+    static let currentVersion = "2.15.3"
 
     struct Release: Identifiable {
         let version: String
@@ -19,6 +19,13 @@ enum AppChangelog {
 
     /// Newest first.
     static let releases: [Release] = [
+        Release(
+            version: "2.15.3",
+            title: "Android GPS route distance fix",
+            date: "June 2026",
+            items: [
+                "Fixed (Android): GPS workouts could record a route far shorter than reality — a real run saved as only tens of metres. The route filter was dropping too many legitimate fixes on weaker GPS signal; it now keeps the points it should, so distance and route record properly. Thanks @don86nl (#324).",
+            ]),
         Release(
             version: "2.15.2",
             title: "Today header date fix (west-of-UTC)",
