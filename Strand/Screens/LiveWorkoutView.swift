@@ -44,7 +44,7 @@ struct LiveWorkoutView: View {
                 .ignoresSafeArea()
         }
         // If the workout ended elsewhere (process restart cleared it), close the screen.
-        .onChange(of: model.activeWorkout == nil) { gone in if gone { onClose() } }
+        .onChangeCompat(of: model.activeWorkout == nil) { _, gone in if gone { onClose() } }
     }
 
     private var header: some View {

@@ -118,7 +118,7 @@ struct SmartAlarmView: View {
                     Toggle("", isOn: $windDownOn)
                         .labelsHidden().toggleStyle(.switch).tint(StrandPalette.accent)
                         .accessibilityLabel("Remind me to wind down")
-                        .onChange(of: windDownOn) { on in WindDownNudge.setEnabled(on) }
+                        .onChangeCompat(of: windDownOn) { _, on in WindDownNudge.setEnabled(on) }
                 }
                 .frame(minHeight: 42)
 

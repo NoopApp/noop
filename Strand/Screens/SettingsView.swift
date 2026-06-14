@@ -371,7 +371,7 @@ struct SettingsView: View {
                 }
                 .toggleStyle(.switch)
                 .tint(StrandPalette.accent)
-                .onChange(of: continuousHrvEnabled) { on in model.ble.setKeepRealtimeForData(on) }
+                .onChangeCompat(of: continuousHrvEnabled) { _, on in model.ble.setKeepRealtimeForData(on) }
                 Text("Keeps the detailed beat-to-beat heart-rate stream running all day and night, not just while a live screen is open, so NOOP captures much more for overnight HRV, recovery and sleep. Uses more battery — your strap streams heart rate continuously while connected.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
@@ -488,7 +488,7 @@ struct SettingsView: View {
                 }
                 .toggleStyle(.switch)
                 .tint(StrandPalette.accent)
-                .onChange(of: broadcastHrEnabled) { on in model.ble.setBroadcastHr(on) }
+                .onChangeCompat(of: broadcastHrEnabled) { _, on in model.ble.setBroadcastHr(on) }
                 Text("Makes your WHOOP 5.0/MG advertise its heart rate as a standard Bluetooth HR sensor, so a Garmin (Edge/watch), Zwift or gym equipment can use it during a workout. Applied on the next connection (and immediately if connected); writes the strap's whoop_live_hr_in_adv_ind_pkt flag. Reversible. iPhone-side only — a Mac can't write to a 5/MG.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)

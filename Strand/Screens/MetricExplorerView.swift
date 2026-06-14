@@ -432,7 +432,7 @@ struct MetricDetailView: View {
         .task(id: loadTaskID) { await load() }
         // Range changes the window, hence the correlation inputs — recompute the
         // cached scan rather than letting `correlationCard` run it inside body.
-        .onChange(of: range) { _ in recomputeCorrelations() }
+        .onChangeCompat(of: range) { recomputeCorrelations() }
     }
 
     private func load() async {

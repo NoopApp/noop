@@ -160,7 +160,7 @@ private struct HeartRateSection: View {
                     .clipShape(RoundedRectangle(cornerRadius: NoopMetrics.cardRadius, style: .continuous))
             }
         }
-        .onChange(of: displayHR) { newHR in
+        .onChangeCompat(of: displayHR) { _, newHR in
             // Append each new live HR reading (with its arrival time) so the hero graph grows a
             // continuous, time-stamped series — feeding the time x-axis (#198) and the #105 trace.
             guard let v = newHR else { return }

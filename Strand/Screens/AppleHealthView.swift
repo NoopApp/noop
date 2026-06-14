@@ -202,7 +202,7 @@ struct AppleHealthView: View {
             }
         }
         .task(id: repo.refreshSeq) { await load() }
-        .onChange(of: range) { _ in rebuildWindowCache() }
+        .onChangeCompat(of: range) { rebuildWindowCache() }
     }
 
     /// Rebuild the per-metric resolved-window cache from scratch. Called once after

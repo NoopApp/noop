@@ -306,10 +306,10 @@ struct CoachView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .frame(minHeight: 220, maxHeight: 460)
-                    .onChange(of: coach.messages.count) { _ in
+                    .onChangeCompat(of: coach.messages.count) {
                         scrollToEnd(proxy)
                     }
-                    .onChange(of: coach.sending) { _ in
+                    .onChangeCompat(of: coach.sending) {
                         scrollToEnd(proxy)
                     }
                 }
