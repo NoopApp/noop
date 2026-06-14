@@ -123,7 +123,20 @@ public struct Sparkline: View {
                 case .ended: hoverX = nil
                 }
             }
+            // The line is pointer-hover only (dead on touch); give VoiceOver a
+            // spoken summary of the series so the trend isn't silent on iPhone.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(axSummary))
         }
+    }
+
+    /// A spoken summary of the series for VoiceOver: count + latest/low/high,
+    /// formatted via the same `valueFormat` closure so units match the call site.
+    private var axSummary: String {
+        guard let last = values.last, let lo = values.min(), let hi = values.max() else {
+            return "No data"
+        }
+        return "Trend, \(values.count) points, latest \(valueFormat(last)), low \(valueFormat(lo)), high \(valueFormat(hi))"
     }
 
     /// The gradient colour at a sample's normalized position along the line.

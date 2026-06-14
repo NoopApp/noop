@@ -41,6 +41,7 @@ public struct StrainGauge: View {
 
     /// Cursor location while hovering, in gauge-local coordinates.
     @State private var hoverPoint: CGPoint? = nil
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// A short load word for the strain value, mirroring the recovery state idea.
     private var strainWord: String {
@@ -83,6 +84,10 @@ public struct StrainGauge: View {
             }
         }
         .frame(width: diameter, height: diameter)
+        // Collapse the loose center Text fragments into one coherent VoiceOver element.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(valueFormat(strain)))
+        .accessibilityValue(Text(strainWord))
         .contentShape(Rectangle())
         .onContinuousHover(coordinateSpace: .local) { phase in
             guard showsHover else { return }
@@ -93,7 +98,8 @@ public struct StrainGauge: View {
         }
         .onAppear {
             withAnimation(StrandMotion.drawIn) { animatedFraction = fraction }
-            bloomPulse = true
+            // Reduce Motion: leave the bloom at its resting opacity instead of breathing.
+            if !reduceMotion { bloomPulse = true }
         }
         .onChange(of: strain) { _ in
             withAnimation(StrandMotion.drawIn) { animatedFraction = fraction }
@@ -114,7 +120,7 @@ public struct StrainGauge: View {
                 )
                 .blur(radius: bloomRadius)
                 .opacity(bloomOpacity * (bloomPulse ? 1.0 : 0.8))
-                .animation(StrandMotion.breathe, value: bloomPulse)
+                .animation(StrandMotion.breathe(reduced: reduceMotion), value: bloomPulse)
                 .blendMode(.plusLighter)
 
             arc(to: 1.0)

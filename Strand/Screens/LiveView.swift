@@ -24,6 +24,7 @@ struct LiveView: View {
 
     /// Drives the focal HR ring's gentle pulse — toggled on every new HR value so the ring "beats".
     @State private var heartPulse = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ScreenScaffold(title: "Live Body Console",
@@ -61,6 +62,10 @@ struct LiveView: View {
         .onChange(of: live.bonded) { _ in refreshLiveSession() }
         .onChange(of: live.connected) { _ in refreshLiveSession() }
         .onChange(of: displayHR) { _ in
+            // Reduce Motion: keep the ring at its resting scale — the HR number still
+            // updates via its own .contentTransition(.numericText()), so live HR is
+            // fully functional; only the cosmetic per-beat pulse is suppressed.
+            guard !reduceMotion else { return }
             withAnimation(StrandMotion.pulse) { heartPulse.toggle() }
         }
     }

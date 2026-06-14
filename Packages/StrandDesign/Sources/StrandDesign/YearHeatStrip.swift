@@ -163,6 +163,20 @@ public struct YearHeatStrip: View {
                 hoverCell = nil
             }
         }
+        // VoiceOver floor: the 365 colored cells are pure shapes (hover is dead on
+        // touch), so summarise the whole calendar as one element. Per-day detail is
+        // exposed on each scored cell below (see `cell(_:isHovered:)`).
+        .accessibilityLabel(Text(axSummary))
+    }
+
+    /// A spoken one-line summary of the whole strip for VoiceOver.
+    private var axSummary: String {
+        let scored = days.compactMap { $0.score }
+        guard let lo = scored.min(), let hi = scored.max() else {
+            return "Recovery calendar, no data"
+        }
+        let avg = scored.reduce(0, +) / Double(scored.count)
+        return "Recovery calendar, \(scored.count) days, average \(Int(avg.rounded())), low \(Int(lo.rounded())), high \(Int(hi.rounded()))"
     }
 
     // MARK: Grid geometry
@@ -241,6 +255,10 @@ public struct YearHeatStrip: View {
                 .frame(width: cellSize, height: cellSize)
                 .opacity(isHovered ? 1.0 : (hoverCell == nil ? 1.0 : 0.78))
                 .help("\(DateFormatterCache.day.string(from: day.date)) · recovery \(Int(score.rounded()))")
+                // Make each scored day swipe-navigable under VoiceOver (the .help
+                // above is a macOS pointer tooltip and never reaches the a11y tree).
+                .accessibilityElement()
+                .accessibilityLabel(Text("\(DateFormatterCache.day.string(from: day.date)), recovery \(Int(score.rounded()))"))
         } else if day != nil {
             shape
                 .fill(StrandPalette.surfaceInset)

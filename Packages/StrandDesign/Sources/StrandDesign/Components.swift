@@ -108,6 +108,7 @@ public struct StatTile: View {
                 Text(value).font(StrandFont.number(26)).foregroundStyle(accent).lineLimit(1).minimumScaleFactor(0.6)
                 if let sparkline, sparkline.count > 1 {
                     Sparkline(values: sparkline).frame(height: 22).padding(.top, 4)
+                        .accessibilityHidden(true)
                 }
                 HStack(spacing: 6) {
                     if let caption { Text(caption).font(StrandFont.footnote).foregroundStyle(StrandPalette.textTertiary).lineLimit(1) }
@@ -118,6 +119,9 @@ public struct StatTile: View {
             }
         }
         .frame(height: NoopMetrics.tileHeight)
+        // One VoiceOver stop per tile (label, value, caption, delta) instead of up
+        // to four fragmented stops; the decorative sparkline is hidden above.
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -218,8 +222,17 @@ public struct SegmentedPillControl<T: Hashable>: View {
                         .frame(minWidth: 32)
                         .padding(.vertical, 6).padding(.horizontal, 11)
                         .background(Capsule(style: .continuous).fill(sel ? StrandPalette.accent : Color.clear))
+                        // On iOS guarantee the ≥44pt touch target (height only — width is
+                        // already ≥54pt) without bloating the denser Mac control, then make
+                        // the whole area tappable so the transparent margin counts as a hit.
+                        #if os(iOS)
+                        .frame(minHeight: 44)
+                        #endif
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                // Announce the active range to VoiceOver and give a non-colour cue.
+                .accessibilityAddTraits(sel ? .isSelected : [])
             }
         }
         .padding(3)

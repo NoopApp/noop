@@ -45,6 +45,7 @@ public struct OnboardingWizard: View {
 
     @State private var step: Step = .welcome
     @State private var glow = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public var body: some View {
         ZStack {
@@ -88,7 +89,8 @@ public struct OnboardingWizard: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(StrandPalette.surfaceBase.ignoresSafeArea())
         .preferredColorScheme(.dark)
-        .onAppear { glow = true }
+        // Reduce Motion: leave the ambient bloom at its resting frame (no breathing).
+        .onAppear { if !reduceMotion { glow = true } }
         // Isolated live observation — a hidden watcher slides Scan → celebration on bond
         // without subscribing the whole wizard to per-tick updates.
         .background(BondWatcher(onBonded: handleBond))
@@ -112,7 +114,7 @@ public struct OnboardingWizard: View {
             )
             .blendMode(.plusLighter)
             .opacity(glow ? 0.9 : 0.6)
-            .animation(StrandMotion.breathe, value: glow)
+            .animation(StrandMotion.breathe(reduced: reduceMotion), value: glow)
             .ignoresSafeArea()
 
             // A faint indigo wash from the top — instrument-grade depth.
@@ -427,6 +429,7 @@ private struct ExpectationsStep: View {
 
 private struct BluetoothStep: View {
     @State private var pulse = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         StepShell(title: "A quick word before we connect",
                   subtitle: "macOS will ask for Bluetooth in a moment.") {
@@ -460,7 +463,7 @@ private struct BluetoothStep: View {
                     .frame(maxWidth: 460)
             }
         }
-        .onAppear { withAnimation(StrandMotion.breathe) { pulse = true } }
+        .onAppear { if !reduceMotion { withAnimation(StrandMotion.breathe) { pulse = true } } }
     }
 }
 
@@ -886,6 +889,7 @@ private struct ImportStep: View {
 
 private struct NotificationsStep: View {
     @State private var pulse = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         StepShell(title: "Stay in the loop",
                   subtitle: "NOOP can tap your wrist when your \(Platform.deviceNoun) needs you — no glance at the screen required.") {
@@ -919,7 +923,7 @@ private struct NotificationsStep: View {
                 .frame(maxWidth: 460)
             }
         }
-        .onAppear { withAnimation(StrandMotion.breathe) { pulse = true } }
+        .onAppear { if !reduceMotion { withAnimation(StrandMotion.breathe) { pulse = true } } }
     }
 }
 
@@ -1009,6 +1013,7 @@ private struct RadarSweep: View {
     var bonded: Bool
     @State private var angle: Double = 0
     @State private var ping = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         GeometryReader { geo in
@@ -1059,7 +1064,7 @@ private struct RadarSweep: View {
         .onChange(of: active) { isActive in
             if isActive { startSweep() }
         }
-        .animation(StrandMotion.breathe, value: ping)
+        .animation(StrandMotion.breathe(reduced: reduceMotion), value: ping)
     }
 
     private func sweepWedge(size: CGFloat) -> some View {
@@ -1085,6 +1090,9 @@ private struct RadarSweep: View {
     }
 
     private func startSweep() {
+        // Reduce Motion: keep the wedge still (the static rings/crosshairs/blip
+        // still convey "searching" / "found") instead of spinning forever.
+        guard !reduceMotion else { return }
         angle = 0
         withAnimation(.linear(duration: 2.4).repeatForever(autoreverses: false)) {
             angle = 360

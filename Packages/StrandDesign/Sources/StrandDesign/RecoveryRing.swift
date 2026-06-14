@@ -46,6 +46,7 @@ public struct RecoveryRing: View {
 
     /// Cursor location while hovering, in ring-local coordinates.
     @State private var hoverPoint: CGPoint? = nil
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     // 240° open gauge: gap centered at the bottom.
     // Sweep from 150° to 390° (== 30°), i.e. start lower-left, end lower-right.
@@ -82,6 +83,11 @@ public struct RecoveryRing: View {
             }
         }
         .frame(width: diameter, height: diameter)
+        // Collapse the loose center Text fragments (and the otherwise-unlabeled
+        // standalone ring) into one coherent VoiceOver element.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(valueFormat(score)))
+        .accessibilityValue(Text(stateWord))
         .contentShape(Rectangle())
         .onContinuousHover(coordinateSpace: .local) { phase in
             guard showsHover else { return }
@@ -92,7 +98,8 @@ public struct RecoveryRing: View {
         }
         .onAppear {
             withAnimation(StrandMotion.drawIn) { animatedFraction = fraction }
-            bloomPulse = true
+            // Reduce Motion: leave the bloom at its resting opacity instead of breathing.
+            if !reduceMotion { bloomPulse = true }
         }
         .onChange(of: score) { _ in
             withAnimation(StrandMotion.drawIn) { animatedFraction = fraction }
@@ -117,7 +124,7 @@ public struct RecoveryRing: View {
                 )
                 .blur(radius: bloomRadius)
                 .opacity(bloomOpacity * (bloomPulse ? 1.0 : 0.78))
-                .animation(StrandMotion.breathe, value: bloomPulse)
+                .animation(StrandMotion.breathe(reduced: reduceMotion), value: bloomPulse)
                 .blendMode(.plusLighter)
 
             // Faint full-span track (remainder).

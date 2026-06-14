@@ -43,6 +43,13 @@ public enum StrandMotion {
         .easeInOut(duration: breathPeriod).repeatForever(autoreverses: true)
     }
 
+    /// Looping breathe animation, suppressed when Reduce Motion is on. Returns
+    /// `nil` (no animation) when reduced so call sites collapse to the resting
+    /// frame instead of an indefinite loop. Honours Apple's Reduce Motion HIG.
+    public static func breathe(reduced: Bool) -> Animation? {
+        reduced ? nil : breathe
+    }
+
     /// A single heartbeat ripple pulse.
     public static let pulse = Animation.easeOut(duration: 0.6)
 

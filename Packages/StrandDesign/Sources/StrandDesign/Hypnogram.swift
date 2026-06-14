@@ -98,6 +98,7 @@ public struct Hypnogram: View {
 
                     // connecting risers
                     risers(in: geo.size)
+                        .accessibilityHidden(true)
 
                     // stage bands
                     ForEach(Array(intervals.enumerated()), id: \.element.id) { idx, interval in
@@ -113,12 +114,17 @@ public struct Hypnogram: View {
                                 .opacity(dimmed ? 0.35 : 0.7)
                                 .blendMode(.plusLighter)
                                 .position(x: rect.midX, y: rect.midY)
+                                .accessibilityHidden(true)
                         }
                         RoundedRectangle(cornerRadius: rect.height / 2)
                             .fill(color)
                             .frame(width: rect.width, height: rect.height)
                             .opacity(dimmed ? 0.45 : 1.0)
                             .position(x: rect.midX, y: rect.midY)
+                            // Per-band detail for VoiceOver (the parent card footer only
+                            // voices aggregate stage totals; hover is dead on touch).
+                            .accessibilityElement()
+                            .accessibilityLabel(Text("\(interval.stage.label), \(timeLabel(interval.start)) to \(timeLabel(interval.end)), \(Int((interval.duration / 60).rounded())) minutes"))
                     }
 
                     // Hover affordance: crosshair, band highlight ring, tooltip.
