@@ -15,7 +15,7 @@ enum MacActionKind: String, Codable, CaseIterable, Identifiable {
     var label: String {
         switch self {
         case .none:        return "Nothing"
-        case .lockScreen:  return "Lock the Mac"
+        case .lockScreen:  return "Lock \(Platform.deviceNounPhrase)"
         case .buzzBack:    return "Buzz back (confirm)"
         case .markMoment:  return "Mark a moment"
         case .runShortcut: return "Run a Shortcut…"

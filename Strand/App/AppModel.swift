@@ -358,7 +358,13 @@ final class AppModel: ObservableObject {
     func runMacAction(_ kind: MacActionKind, shortcut: String) {
         switch kind {
         case .none: break
-        case .lockScreen: if !MacActions.lockScreen() { MacActions.runShortcut("Lock Screen") }
+        case .lockScreen:
+            if !MacActions.lockScreen() {
+                #if os(macOS)
+                MacActions.runShortcut("Lock Screen")   // login.framework unavailable — fall back to a Shortcut
+                #endif
+                // iOS can't lock the device and .lockScreen isn't selectable there, so no stray Shortcut launch.
+            }
         case .buzzBack: buzz(loops: 1)
         case .markMoment: markMoment()
         case .runShortcut: MacActions.runShortcut(shortcut)
@@ -378,7 +384,12 @@ final class AppModel: ObservableObject {
         if worn {
             if !behavior.wristOnShortcut.isEmpty { MacActions.runShortcut(behavior.wristOnShortcut) }
         } else {
+            #if os(macOS)
+            // Auto-lock on wrist-off is a macOS-only affordance (the toggle is hidden on iOS, where a
+            // third-party app can't lock the device). Guarding it here also stops a stray "Lock Screen"
+            // Shortcut launch for any iOS user who toggled this on before it was gated off iPhone.
             if behavior.autoLockOnWristOff, !MacActions.lockScreen() { MacActions.runShortcut("Lock Screen") }
+            #endif
             if !behavior.wristOffShortcut.isEmpty { MacActions.runShortcut(behavior.wristOffShortcut) }
         }
     }

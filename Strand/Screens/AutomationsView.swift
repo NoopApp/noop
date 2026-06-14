@@ -2,7 +2,7 @@ import SwiftUI
 import StrandDesign
 
 /// Automations — turn the strap's physical inputs (double-tap, wrist on/off) and live biometrics
-/// into Mac actions and haptic coaching. All on-device.
+/// into actions (Shortcuts, and Mac-only screen lock) and haptic coaching. All on-device.
 struct AutomationsView: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var behavior: BehaviorStore
@@ -23,13 +23,13 @@ struct AutomationsView: View {
 
     private var doubleTapCard: some View {
         Section2(icon: "hand.tap.fill", title: "Double-tap",
-                 blurb: "Double-tap the strap to trigger an action on this Mac. (The strap exposes a single double-tap gesture.)") {
+                 blurb: "Double-tap the strap to trigger an action on \(Platform.deviceNounPhrase). (The strap exposes a single double-tap gesture.)") {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
                     Text("When I double-tap").font(StrandFont.body).foregroundStyle(StrandPalette.textPrimary)
                     Spacer()
                     Picker("", selection: $behavior.doubleTapAction) {
-                        ForEach(MacActionKind.allCases) { Text($0.label).tag($0) }
+                        ForEach(doubleTapOptions) { Text($0.label).tag($0) }
                     }
                     .labelsHidden().fixedSize()
                 }
@@ -79,12 +79,14 @@ struct AutomationsView: View {
 
     private var wearCard: some View {
         Section2(icon: "figure.walk.motion", title: "Wear & presence",
-                 blurb: "React when the strap comes off or goes on. Note: macOS reserves true auto-UNLOCK for Apple Watch — this can lock, not unlock.") {
+                 blurb: wearBlurb) {
             VStack(spacing: 0) {
+                #if os(macOS)
                 ToggleRow(label: "Lock the Mac when I take the strap off",
                           help: "Fires the moment the strap leaves your wrist.",
                           isOn: $behavior.autoLockOnWristOff)
                 rowDivider
+                #endif
                 shortcutFieldRow("Run a Shortcut when taken off",
                                  help: "Presence automation — set a Focus, pause media, set away…",
                                  text: $behavior.wristOffShortcut)
@@ -117,7 +119,7 @@ struct AutomationsView: View {
 
     private var alarmCard: some View {
         Section2(icon: "alarm.fill", title: "Smart alarm",
-                 blurb: "Wake to a wrist buzz. This arms the strap's own firmware alarm, so it still fires if the Mac is asleep or NOOP is closed.") {
+                 blurb: "Wake to a wrist buzz. This arms the strap's own firmware alarm, so it still fires if \(Platform.deviceNounPhrase) is asleep or NOOP is closed.") {
             VStack(spacing: 0) {
                 ToggleRow(label: "Enable smart alarm", help: "Arms the strap to buzz at your wake time.",
                           isOn: $behavior.smartAlarmEnabled)
@@ -150,7 +152,7 @@ struct AutomationsView: View {
         Section2(icon: "waveform.path.ecg", title: "Illness early-warning",
                  blurb: "Watches your resting HR, HRV, skin temperature and respiration against your own 28-day baseline. On-device and approximate — informational only, not a diagnosis.") {
             ToggleRow(label: "Watch for early-illness signs",
-                      help: "Needs at least 14 days of history. When two or more signals drift together you get a banner on Control Center and a notification — at most once a day.",
+                      help: "Needs at least 14 days of history. When two or more signals drift together you get a banner on the dashboard and a notification — at most once a day.",
                       isOn: $behavior.illnessWatch)
                 .onChange(of: behavior.illnessWatch) { _ in
                     model.reevaluateIllness()
@@ -160,6 +162,26 @@ struct AutomationsView: View {
     }
 
     // MARK: - Helpers
+
+    /// Double-tap actions offered in the picker. The "Lock the Mac" action can't work on iPhone
+    /// (a third-party app can't lock iOS), so it's dropped there.
+    private var doubleTapOptions: [MacActionKind] {
+        #if os(iOS)
+        MacActionKind.allCases.filter { $0 != .lockScreen }
+        #else
+        MacActionKind.allCases
+        #endif
+    }
+
+    /// Wear & presence blurb. macOS mentions the auto-lock affordance (and the Apple-Watch unlock
+    /// caveat); iOS, where that toggle is hidden, describes the Shortcut-driven presence reactions.
+    private var wearBlurb: String {
+        #if os(macOS)
+        "React when the strap comes off or goes on. Note: macOS reserves true auto-UNLOCK for Apple Watch — this can lock, not unlock."
+        #else
+        "React when the strap comes off or goes on — run a Shortcut to set a Focus, pause media, mark yourself away."
+        #endif
+    }
 
     private var alarmTimeBinding: Binding<Date> {
         Binding(get: { Self.date(fromMinutes: behavior.smartAlarmMinutes) },
