@@ -312,21 +312,21 @@ final class IntelligenceEngine: ObservableObject {
 
     /// Floor a unix-seconds timestamp to 00:00:00 of its UTC calendar day. Mirrors the Android
     /// IntelligenceEngine.midnightUtc; the floorMod form is correct for any sign.
-    static func midnightUtc(_ ts: Int) -> Int { ts - floorMod(ts, 86_400) }
+    nonisolated static func midnightUtc(_ ts: Int) -> Int { ts - floorMod(ts, 86_400) }
 
     /// Floor a unix-seconds timestamp to 00:00:00 of its LOCAL calendar day (#277). `offsetSec` is
     /// seconds EAST of UTC. Shift into local time, floor to the local day, shift back:
     /// `ts - floorMod(ts + offsetSec, 86400)`. floorMod keeps the floor correct for negative offsets
     /// and negative timestamps. `offsetSec == 0` reduces exactly to `midnightUtc`. Mirrors the
     /// Android IntelligenceEngine.midnightLocal byte-for-byte.
-    static func midnightLocal(_ ts: Int, offsetSec: Int) -> Int {
+    nonisolated static func midnightLocal(_ ts: Int, offsetSec: Int) -> Int {
         ts - floorMod(ts + offsetSec, 86_400)
     }
 
     /// Euclidean modulo (result has the sign of the divisor) — matches Kotlin/Java Math.floorMod, so
     /// the LOCAL-midnight floor is identical across platforms for any sign of ts/offset. Swift's `%`
     /// is a remainder (sign of the dividend), which would mis-floor negative inputs.
-    private static func floorMod(_ a: Int, _ b: Int) -> Int {
+    nonisolated private static func floorMod(_ a: Int, _ b: Int) -> Int {
         let r = a % b
         return (r != 0 && (r < 0) != (b < 0)) ? r + b : r
     }

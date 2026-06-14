@@ -88,6 +88,7 @@ targets:
         PRODUCT_MODULE_NAME: Strand
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: NO
+        ENABLE_DEBUG_DYLIB: NO
         # Hardened Runtime closes the DYLD_INSERT_LIBRARIES injection vector for the
         # distributed (ad-hoc) build. The app uses no JIT / unsigned-exec memory, so it's safe.
         ENABLE_HARDENED_RUNTIME: YES
@@ -253,6 +254,8 @@ schemes:
       config: Debug
     test:
       config: Debug
+      debugEnabled: false
+      disableMainThreadChecker: true
       targets:
         - StrandTests
   NOOPiOS:
