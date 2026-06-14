@@ -264,7 +264,8 @@ struct SleepView: View {
                     Hypnogram(intervals: intervals,
                               height: NoopMetrics.chartHeight,
                               showsStageAxis: true,
-                              nightStart: night.onsetDate)
+                              nightStart: night.onsetDate,
+                              showsTimeAxis: true)
                 } else {
                     stageBar(s)
                 }

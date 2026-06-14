@@ -13,6 +13,7 @@ public enum NoopMetrics {
     public static let screenPadding: CGFloat = 24
     public static let tileHeight: CGFloat = 108  // every metric tile is this tall
     public static let chartHeight: CGFloat = 220
+    public static let hypnogramBandMinThickness: CGFloat = 14  // floor so short stages (Awake) read as bars, not ticks
 }
 
 // MARK: - Surface

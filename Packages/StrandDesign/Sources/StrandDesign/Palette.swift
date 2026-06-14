@@ -108,7 +108,7 @@ public enum StrandPalette {
     // MARK: Sleep stages — the indigo / periwinkle "Rest" colour world.
     public static let sleepAwake = Color(hex: "#FF6F8B") // rose (out of bed)
     public static let sleepLight = Color(hex: "#8E97E0") // periwinkle
-    public static let sleepDeep  = Color(hex: "#5A63C7") // indigo
+    public static let sleepDeep  = Color(hex: "#6E79D8") // indigo (lightened for legibility on the frosted card; still clearly darker than Light)
     public static let sleepREM   = Color(hex: "#B4BDFF") // pale periwinkle (glows)
 
     // MARK: HR zones — cool→warm ramp tuned to the Bevel worlds.
