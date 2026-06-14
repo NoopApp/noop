@@ -5,6 +5,7 @@ import StrandAnalytics
 /// #277 — IntelligenceEngine's LOCAL-midnight floor used to re-bucket daily metrics by the device's
 /// local calendar day (the bucket the dashboard reads). Mirrors the Android
 /// LocalDayBucketingTest.midnightLocal_* cases byte-for-byte in logic/constants.
+@MainActor
 final class LocalDayMidnightTests: XCTestCase {
 
     func testMidnightLocalFloorsToLocalMidnightWestOfUTC() {
