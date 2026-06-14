@@ -78,6 +78,18 @@ final class HealthKitBridge: ObservableObject {
         }
     }
 
+    /// Resume a prior grant on launch without re-prompting. `auth` is a fresh `.unknown` every
+    /// process (the bridge isn't persisted), so a user who already enabled Apple Health would
+    /// otherwise have to re-tap "Enable" each session before the scenePhase sync runs. HealthKit
+    /// never reveals *read* status, but *write*/share status is observable — if the user already
+    /// authorized all of our write types, treat the bridge as `.authorized`. This only reads
+    /// status, so no system permission sheet is shown.
+    func refreshAuthIfPreviouslyGranted() {
+        guard auth == .unknown, HKHealthStore.isHealthDataAvailable() else { return }
+        let granted = writeTypes.allSatisfy { store.authorizationStatus(for: $0) == .sharingAuthorized }
+        if granted { auth = .authorized }
+    }
+
     // MARK: - Read → store
 
     /// Pull the last `days` of Apple Health into the on-device store under the `apple-health` source,

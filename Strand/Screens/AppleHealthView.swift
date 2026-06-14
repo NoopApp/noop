@@ -20,6 +20,13 @@ import Foundation
 struct AppleHealthView: View {
     @EnvironmentObject var repo: Repository
 
+    // iOS-only: the live two-way HealthKit bridge, injected at StrandiOSApp. macOS has no HealthKit
+    // (HealthKitBridge is `#if os(iOS)` in its own file and isn't in the macOS environment), so this
+    // property and every `health.*` use below MUST stay inside `#if os(iOS)`.
+    #if os(iOS)
+    @EnvironmentObject private var health: HealthKitBridge
+    #endif
+
     // Imperial/Metric display preference (D#103). Weight and lean mass (stored kg) re-label to lb here;
     // every other Apple Health metric is unit-agnostic. Display-only.
     @AppStorage(UnitPrefs.systemKey) private var unitSystemRaw = UnitSystem.metric.rawValue
@@ -166,11 +173,24 @@ struct AppleHealthView: View {
     var body: some View {
         ScreenScaffold(title: "Apple Health", subtitle: spanSubtitle.map { "\($0)" }) {
             if loaded && !hasAnyData {
+                #if os(iOS)
+                // No data yet, but iOS can grant live access right here — keep the Enable card above
+                // the (now live-aware) empty-state copy so the richer path isn't hidden behind a
+                // manual .zip export.
+                VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
+                    liveSyncCard
+                    ComingSoon(what: "Nothing here yet. Tap Enable Apple Health above to read your data live, or import a Health export .zip in Data Sources.")
+                }
+                #else
                 ComingSoon(what: "Nothing imported yet. On an iPhone: Health app, tap your photo, Export All Health Data, then import the .zip here in Data Sources.")
+                #endif
             } else if !loaded {
                 loadingState
             } else {
                 VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
+                    #if os(iOS)
+                    liveSyncCard
+                    #endif
                     rangeControl
                     tileGrid
                     heartSection
@@ -303,6 +323,96 @@ struct AppleHealthView: View {
             }
         }
     }
+
+    // MARK: - Live Apple Health (iOS only)
+    //
+    // The opt-in entry point for the two-way HealthKitBridge. macOS has no HealthKit, so this whole
+    // card — and every `health.*` reference — is `#if os(iOS)`-gated. Tapping "Enable Apple Health"
+    // shows the system permission sheet (rationale strings ship in the iOS target's Info.plist), then
+    // runs the first read + write-back and refreshes this screen. Once authorized, a "Sync now"
+    // control and last-synced/status line take its place.
+    #if os(iOS)
+    @ViewBuilder
+    private var liveSyncCard: some View {
+        StrandCard(padding: 20) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    Image(systemName: "heart.text.square.fill")
+                        .foregroundStyle(StrandPalette.accent)
+                        .accessibilityHidden(true)
+                    Text("Apple Health (Live)")
+                        .font(StrandFont.headline)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                    Spacer()
+                    if health.auth == .authorized {
+                        StatePill(health.syncing ? "Syncing" : "Connected",
+                                  tone: .positive, pulsing: health.syncing)
+                    }
+                }
+
+                switch health.auth {
+                case .unavailable:
+                    Text("Apple Health isn't available on \(Platform.deviceNounPhrase).")
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                case .unknown, .denied:
+                    Text("Read your heart rate, HRV, blood oxygen, respiratory rate, sleep, steps and energy straight from Apple Health, and write NOOP's strap-derived metrics back. Everything stays on \(Platform.deviceNounPhrase).")
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button {
+                        Task {
+                            await health.requestAuthorization()
+                            await health.sync()
+                            await load()
+                        }
+                    } label: {
+                        Label("Enable Apple Health", systemImage: "heart.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(StrandPalette.accent)
+                    if health.auth == .denied {
+                        Text("If you don't see the prompt, enable NOOP under Settings › Health › Data Access & Devices.")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                case .authorized:
+                    if let last = health.lastSync {
+                        Text("Last synced \(relativeAgo(last.timeIntervalSince1970)).")
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                    } else {
+                        Text("Connected. Reading on launch and when you return to NOOP.")
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                    }
+                    Button {
+                        Task {
+                            await health.sync()
+                            await load()
+                        }
+                    } label: {
+                        Label("Sync now", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(StrandPalette.accent)
+                    .disabled(health.syncing)
+                }
+
+                if let err = health.lastError {
+                    Text(err)
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.statusCritical)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+    #endif
 
     // MARK: - Metric tiles (uniform 104pt StatTiles in an adaptive grid)
 
