@@ -72,9 +72,9 @@ public struct StrainGauge: View {
     @State private var bloomPulse = false
 
     private var fraction: Double { min(max(strain / outOf, 0), 1) }
-    /// The strain ramp colour expects a 0–21 value; map the fraction onto that span so the tint
-    /// is identical whether the gauge is showing 0–100 or 0–21.
-    private var tipColor: Color { StrandPalette.strainColor(fraction * 21.0) }
+    /// Tip/state tint sampled by the fill FRACTION so it spans the full ember→amber ramp identically
+    /// on the 0–100 and 0–21 display scales (a maxed gauge reaches the bright-amber peak).
+    private var tipColor: Color { StrandPalette.effortTint(fraction: fraction) }
 
     public var body: some View {
         ZStack {

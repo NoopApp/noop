@@ -657,7 +657,7 @@ struct TodayView: View {
         guard let strain = displayDay?.strain, let date = hrPoints.last?.date else { return nil }
         return .init(date: date,
                      label: "\(UnitFormatter.effortDisplay(strain, scale: effortScale)) Effort",
-                     color: StrandPalette.strainColor(strain), alignment: .trailing)
+                     color: StrandPalette.effortTint(fraction: strain / StrainScorer.maxStrain), alignment: .trailing)
     }
 
     // MARK: (b) METRICS — one uniform grid of 104pt StatTiles, every cell filled.
@@ -716,7 +716,7 @@ struct TodayView: View {
                 label: "Effort",
                 value: d?.strain.map { UnitFormatter.effortDisplay($0, scale: effortScale) } ?? "—",
                 caption: "of \(UnitFormatter.effortScaleMax(effortScale))",
-                accent: d?.strain.map { StrandPalette.strainColor($0) } ?? StrandPalette.textPrimary,
+                accent: d?.strain.map { StrandPalette.effortTint(fraction: $0 / StrainScorer.maxStrain) } ?? StrandPalette.textPrimary,
                 sparkline: sparks["strain"],
                 sparkColor: StrandPalette.strain066
             )
@@ -811,7 +811,7 @@ struct TodayView: View {
                             label: "\(WorkoutSource.displaySport(w.sport))",
                             value: workoutDuration(w),
                             caption: workoutCaption(w),
-                            accent: StrandPalette.strainColor(w.strain ?? 0),
+                            accent: StrandPalette.effortTint(fraction: (w.strain ?? 0) / StrainScorer.maxStrain),
                             delta: w.energyKcal.map { "\(Int($0.rounded())) kcal" },
                             deltaColor: StrandPalette.metricAmber
                         )

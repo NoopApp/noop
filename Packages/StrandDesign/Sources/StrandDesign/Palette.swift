@@ -191,6 +191,13 @@ public enum StrandPalette {
         sample(stops: strainStops, at: strain / 100.0)
     }
 
+    /// Effort tint sampled by a 0...1 fraction (e.g. value/scaleMax), spreading the full ember→amber
+    /// ramp. Prefer this for gauge tips / value-tinted accents so a high Effort reads as bright amber
+    /// rather than ember. `strainColor(_:)` stays for callers that already hold a 0...100 value.
+    public static func effortTint(fraction: Double) -> Color {
+        sample(stops: strainStops, at: min(max(fraction, 0), 1))
+    }
+
     /// The state word for a recovery score, per spec §9.3.
     /// DEPLETED · LOW · MODERATE · PRIMED · PEAK
     public static func recoveryState(_ score: Double) -> String {
