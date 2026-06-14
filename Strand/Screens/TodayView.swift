@@ -54,6 +54,15 @@ struct TodayView: View {
     // Today's heart rate as 5-minute bucket means (midnight → now), for the 24h trend chart.
     @State private var hrPoints: [TrendPoint] = []
 
+    // The night's sleep session overlapping the HR window — shaded as a band on the HR chart and
+    // used to anchor the recovery marker at wake time (WHOOP-style Overview HR annotations).
+    @State private var sleepToday: CachedSleepSession?
+
+    // The HR chart's x-axis window. Today → midnight…now; a navigated PAST day → the full calendar
+    // day (midnight…next midnight) so a morning with no banked data reads as empty space rather than
+    // the axis silently starting at the first sample (#overview-hr gap clarity).
+    @State private var hrAxis: ClosedRange<Date>?
+
     // Day navigation — 0 = today (the logical day), 1 = yesterday, … The DayNavBar chevrons and date
     // jump drive this, and every day-scoped read-out (hero synthesis, the Key-Metrics tiles, the HR
     // trend and Rest score) resolves to the selected day instead of always showing today. Mirrors the
@@ -393,11 +402,15 @@ struct TodayView: View {
                     subtitle: selectedDayOffset == 0 ? "5-minute average · since midnight" : "5-minute average · selected day",
                     trailing: v.last.map { "\(Int($0.rounded())) bpm" }
                 ) {
-                    TrendChart(
+                    OverviewHRChart(
                         points: hrPoints,
+                        sleep: sleepSpan,
+                        workouts: workoutSpans,
+                        recovery: recoveryMarker,
+                        effort: effortMarker,
                         gradient: Gradient(colors: [StrandPalette.metricRose.opacity(0.55), StrandPalette.metricRose]),
                         valueRange: hrRange(v),
-                        showsArea: true,
+                        xRange: hrAxis,
                         height: NoopMetrics.chartHeight,
                         valueFormat: { "\(Int($0.rounded())) bpm" },
                         dateFormat: { Self.hrTimeFmt.string(from: $0) }
@@ -419,6 +432,63 @@ struct TodayView: View {
         if hi <= lo { return (lo - 5)...(hi + 5) }
         let span = hi - lo
         return (lo - span * 0.12)...(hi + span * 0.12)
+    }
+
+    // MARK: Overview HR markers (sleep band · workout glyphs · Charge / Effort)
+
+    /// The HR chart's x-window, derived from the loaded points (used to scope workout glyphs).
+    private var hrWindow: ClosedRange<Date>? {
+        guard let lo = hrPoints.first?.date, let hi = hrPoints.last?.date, lo < hi else { return nil }
+        return lo...hi
+    }
+
+    /// "H:MM" for a duration in seconds (e.g. a 6h06m night → "6:06").
+    private func hoursMinutes(_ seconds: Int) -> String {
+        let h = max(0, seconds) / 3600, m = (max(0, seconds) % 3600) / 60
+        return "\(h):\(String(format: "%02d", m))"
+    }
+
+    /// Last night's sleep as a shaded band, labelled with its duration.
+    private var sleepSpan: OverviewHRChart.SleepSpan? {
+        guard let s = sleepToday else { return nil }
+        return .init(
+            start: Date(timeIntervalSince1970: TimeInterval(s.startTs)),
+            end: Date(timeIntervalSince1970: TimeInterval(s.endTs)),
+            label: hoursMinutes(s.endTs - s.startTs)
+        )
+    }
+
+    /// Each workout overlapping the HR window, as a sport glyph anchored at its HR peak.
+    private var workoutSpans: [OverviewHRChart.WorkoutSpan] {
+        guard let win = hrWindow else { return [] }
+        return workouts.compactMap { w in
+            let start = Date(timeIntervalSince1970: TimeInterval(w.startTs))
+            let end = Date(timeIntervalSince1970: TimeInterval(w.endTs))
+            guard end >= win.lowerBound, start <= win.upperBound else { return nil }
+            return .init(start: start, end: end, symbol: sportSymbol(w.sport))
+        }
+    }
+
+    /// "Charge" marker (NOOP's name for recovery) at wake time (sleep end), else at the window start.
+    /// Hidden while calibrating.
+    private var recoveryMarker: OverviewHRChart.EdgeMarker? {
+        guard let rec = displayDay?.recovery else { return nil }
+        let at = sleepToday.map { Date(timeIntervalSince1970: TimeInterval($0.endTs)) }
+            ?? hrPoints.first?.date
+        guard let date = at else { return nil }
+        return .init(date: date, label: "\(Int(rec.rounded()))% Charge",
+                     color: StrandPalette.recoveryColor(rec), alignment: .leading)
+    }
+
+    /// "Effort" marker pinned to the right edge (latest HR sample). Routed through the SAME formatter
+    /// as the Effort tile (`UnitFormatter.effortDisplay`) so it honours the 0–100 / WHOOP-0–21 scale
+    /// preference (#268) and reads identically — the stored strain is on the 0–100 axis, so a morning
+    /// "21.2" is 21.2-of-100, not WHOOP's near-max 21-of-21.
+    private var effortMarker: OverviewHRChart.EdgeMarker? {
+        guard let strain = displayDay?.strain, let date = hrPoints.last?.date else { return nil }
+        return .init(date: date,
+                     label: "\(UnitFormatter.effortDisplay(strain, scale: effortScale)) Effort",
+                     color: StrandPalette.strainColor(strain), alignment: .trailing)
     }
 
     // MARK: (b) METRICS — one uniform grid of 104pt StatTiles, every cell filled.
@@ -762,6 +832,19 @@ struct TodayView: View {
             : Int((Calendar.current.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart).timeIntervalSince1970)
         hrPoints = await repo.hrBuckets(from: windowStart, to: windowEnd, bucketSeconds: 300)
             .map { TrendPoint(date: Date(timeIntervalSince1970: TimeInterval($0.ts)), value: $0.bpm) }
+        // Pin the chart axis to the loaded window — today midnight→now, a past day the full 24h — so
+        // a gap (e.g. a morning the strap wasn't banking) shows as empty space, not a late start.
+        hrAxis = Date(timeIntervalSince1970: TimeInterval(windowStart))
+            ... Date(timeIntervalSince1970: TimeInterval(windowEnd))
+
+        // Sleep session overlapping the window. Uses `allSleepSessions` (BOTH the imported and the
+        // on-device COMPUTED source) — a Bluetooth-only user's sleep lives under the computed source,
+        // so the imported-only `sleepSessions` returns nothing. Keep blocks that actually overlap the
+        // displayed window, then pick the LONGEST — the main night, not an afternoon nap. Drives the
+        // HR sleep band + the recovery marker's wake anchor.
+        sleepToday = await repo.allSleepSessions(days: selectedDayOffset + 2)
+            .filter { $0.endTs > windowStart && $0.startTs < windowEnd }
+            .max(by: { ($0.endTs - $0.startTs) < ($1.endTs - $1.startTs) })
     }
 
     /// Trailing-window values for a metric — NO fall back to all history. The section is labelled a

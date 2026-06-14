@@ -657,35 +657,9 @@ struct WorkoutsView: View {
 
     // MARK: - Sport icons
 
-    private func sportIcon(_ sport: String) -> String {
-        let s = sport.lowercased()
-        switch true {
-        case s.contains("run"):                         return "figure.run"
-        case s.contains("walk") || s.contains("hike"):  return "figure.walk"
-        case s.contains("cycl") || s.contains("bike") || s.contains("ride"):
-                                                         return "figure.outdoor.cycle"
-        case s.contains("swim"):                        return "figure.pool.swim"
-        case s.contains("row"):                         return "figure.rower"
-        case s.contains("yoga"):                        return "figure.yoga"
-        case s.contains("strength") || s.contains("weight") || s.contains("lift"):
-                                                         return "dumbbell.fill"
-        case s.contains("box"):                         return "figure.boxing"
-        case s.contains("hiit") || s.contains("functional"):
-                                                         return "figure.highintensity.intervaltraining"
-        case s.contains("elliptical"):                  return "figure.elliptical"
-        case s.contains("ski"):                         return "figure.skiing.downhill"
-        case s.contains("tennis"):                      return "figure.tennis"
-        case s.contains("golf"):                        return "figure.golf"
-        case s.contains("soccer") || s.contains("football"):
-                                                         return "figure.soccer"
-        case s.contains("basketball"):                  return "figure.basketball"
-        case s.contains("dance"):                       return "figure.dance"
-        case s.contains("climb"):                       return "figure.climbing"
-        case s.contains("pilates"):                     return "figure.pilates"
-        case s.contains("meditat"):                     return "figure.mind.and.body"
-        default:                                        return "figure.mixed.cardio"
-        }
-    }
+    // Sport → SF Symbol now lives in StrandDesign (`sportSymbol`) so the Today HR
+    // overview annotates workouts with the same icons. Thin forwarder keeps call sites.
+    private func sportIcon(_ sport: String) -> String { sportSymbol(sport) }
 
     // MARK: - Row + column metrics (uniform)
 
