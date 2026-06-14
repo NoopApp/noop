@@ -759,14 +759,11 @@ struct WorkoutsView: View {
         return f
     }()
 
-    // 12-hour clock ("h:mm am") for the workout time range. Lowercase am/pm via explicit
-    // symbols since "a" renders uppercase under en_US_POSIX.
+    // 12-hour clock ("h:mm a", e.g. "7:10 PM") for the workout time range.
     private static let timeFmt: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "h:mm a"
-        f.amSymbol = "am"
-        f.pmSymbol = "pm"
         return f
     }()
 

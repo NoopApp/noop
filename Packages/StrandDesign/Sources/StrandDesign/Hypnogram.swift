@@ -61,14 +61,11 @@ public struct Hypnogram: View {
     /// Index of the hovered interval, or nil.
     @State private var hoverIndex: Int? = nil
 
-    // 12-hour wall-clock ("h:mm am") for the hover tooltip, time axis and a11y labels.
-    // Lowercase am/pm via explicit symbols since "a" renders uppercase under en_US_POSIX.
+    // 12-hour wall-clock ("h:mm a", e.g. "11:30 PM") for the hover tooltip, time axis and a11y labels.
     private static let clockFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "h:mm a"
-        f.amSymbol = "am"
-        f.pmSymbol = "pm"
         return f
     }()
 

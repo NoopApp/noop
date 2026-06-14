@@ -1271,14 +1271,11 @@ private struct Night {
         return "\(Night.spanFmt.string(from: onsetDay)) → \(Night.dateFmt.string(from: wakeDay))"
     }
 
-    // 12-hour clock for the Asleep/Woke row (e.g. "11:42 pm") — the times people read at a glance.
-    // Lowercase am/pm via explicit symbols since "a" renders uppercase under en_US_POSIX.
+    // 12-hour clock for the Asleep/Woke row (e.g. "11:42 PM") — the times people read at a glance.
     private static let timeFmt: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "h:mm a"
-        f.amSymbol = "am"
-        f.pmSymbol = "pm"
         return f
     }()
     private static let dateFmt: DateFormatter = {

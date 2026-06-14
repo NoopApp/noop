@@ -1216,16 +1216,13 @@ struct TodayView: View {
         return f
     }()
 
-    /// Local wall-clock time ("h:mm am") for the HR trend's x-axis / tooltip — the chart spans one day,
-    /// so it must show times, not the day-granularity default ("EEE d MMM"). Also formats the
-    /// workout-tile caption's time range (#157). Lowercase am/pm via explicit symbols since
-    /// the "a" token renders uppercase under en_US_POSIX.
+    /// Local wall-clock time ("h:mm a", e.g. "7:10 AM") for the HR trend's x-axis / tooltip — the
+    /// chart spans one day, so it must show times, not the day-granularity default ("EEE d MMM").
+    /// Also formats the workout-tile caption's time range (#157).
     static let hrTimeFmt: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "h:mm a"
-        f.amSymbol = "am"
-        f.pmSymbol = "pm"
         return f
     }()
 }
