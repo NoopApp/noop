@@ -42,6 +42,19 @@ object WorkoutDetector {
     const val alignToleranceS: Double = 5.0
     const val restingPercentile: Double = 10.0
 
+    /**
+     * Second-pass bridge window (#303). Two adjacent active runs separated by a
+     * below-motion-threshold gap no longer than this are stitched into one workout —
+     * BUT ONLY while HR stays elevated across the gap (see [bridgeRuns]). A sustained
+     * endurance effort (e.g. a long bike ride) routinely dips below the motion gate
+     * for a few minutes — coasting a descent, a junction, a brief sensor dropout —
+     * without the athlete actually resting; [mergeGapS] (150 s) is too tight to ride
+     * through those, so the bout used to shatter into many sub-bouts, most of which
+     * then fell under [minExerciseMin] and vanished. A genuine rest between two
+     * separate workouts is gated out by the HR check, not by this window.
+     */
+    const val bridgeGapS: Double = 300.0
+
     // ---- Activity series (activity.py) ----
 
     /**
@@ -167,6 +180,54 @@ object WorkoutDetector {
     /** Round to one decimal place. All inputs here are non-negative (matches Swift `.rounded()`). */
     private fun round1(v: Double): Double = (v * 10).roundToLong() / 10.0
 
+    /**
+     * Second-pass merge over raw active runs (#303).
+     *
+     * Stitch run `i+1` onto the current span when the inter-run gap (start of the
+     * next minus end of the current) is ≤ [bridgeGapS] AND HR stays elevated across
+     * that gap — i.e. the athlete kept working through a brief motion lull rather than
+     * resting. "Elevated" = the mean of the HR samples strictly inside the gap is
+     * still above [hrFloor] (resting + HR_MARGIN_BPM). If the gap carries NO HR
+     * samples it is treated as a same-effort sensor dropout and bridged; a real rest
+     * always lands HR samples in the gap (the strap streams 1 Hz), so it fails the
+     * elevation test and the two workouts stay separate. Runs must arrive sorted by
+     * start (they do — built from a sorted timeline).
+     */
+    internal fun bridgeRuns(
+        runs: List<Pair<Long, Long>>,
+        hrSeg: List<HrSample>,
+        hrFloor: Double,
+    ): List<Pair<Long, Long>> {
+        if (runs.size <= 1) return runs
+        val merged = ArrayList<Pair<Long, Long>>()
+        var curStart = runs[0].first
+        var curEnd = runs[0].second
+        for (k in 1 until runs.size) {
+            val next = runs[k]
+            val gap = (next.first - curEnd).toDouble()
+            var bridge = false
+            if (gap <= bridgeGapS) {
+                // HR samples strictly between the two runs (the lull itself).
+                val gapHR = hrSeg.filter { it.ts > curEnd && it.ts < next.first }.map { it.bpm.toDouble() }
+                bridge = if (gapHR.isEmpty()) {
+                    true // sensor dropout mid-effort → same workout
+                } else {
+                    val meanGapHR = gapHR.sum() / gapHR.size.toDouble()
+                    meanGapHR > hrFloor // still working → same workout
+                }
+            }
+            if (bridge) {
+                curEnd = maxOf(curEnd, next.second)
+            } else {
+                merged.add(curStart to curEnd)
+                curStart = next.first
+                curEnd = next.second
+            }
+        }
+        merged.add(curStart to curEnd)
+        return merged
+    }
+
     // ---- Public API ----
 
     /**
@@ -223,18 +284,23 @@ object WorkoutDetector {
         if (activeTs.isEmpty()) return emptyList()
 
         // Group contiguous active samples into runs, merging gaps < MERGE_GAP_S.
-        val runs = ArrayList<Pair<Long, Long>>()
+        val rawRuns = ArrayList<Pair<Long, Long>>()
         var runStart = activeTs[0]
         var prev = activeTs[0]
         for (k in 1 until activeTs.size) {
             val ts = activeTs[k]
             if ((ts - prev).toDouble() > mergeGapS) {
-                runs.add(runStart to prev)
+                rawRuns.add(runStart to prev)
                 runStart = ts
             }
             prev = ts
         }
-        runs.add(runStart to prev)
+        rawRuns.add(runStart to prev)
+
+        // Second pass (#303): bridge adjacent runs across a brief, still-elevated-HR
+        // lull so a sustained effort isn't shattered by coasting / junctions / sensor
+        // gaps. Runs over a genuine rest (HR falls to resting) are NOT bridged.
+        val runs = bridgeRuns(rawRuns, hrSeg, hrFloor)
 
         val minDurS = minExerciseMin * 60.0
         val sessions = ArrayList<ExerciseSession>()

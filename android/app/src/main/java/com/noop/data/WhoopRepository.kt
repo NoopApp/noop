@@ -174,6 +174,12 @@ class WhoopRepository(private val dao: WhoopDao) {
         dao.deleteSleepSession(session.deviceId, session.startTs)
         dao.upsertSleepSessions(listOf(session.copy(startTs = newStartTs, endTs = newEndTs)))
     }
+
+    /** Remove a sleep session entirely — the delete half of [updateSleepSessionTimes] with no
+     *  re-insert. (deviceId, startTs) is the primary key, so it uniquely identifies the row, letting
+     *  the user clear a misread or spurious night so the day recomputes without it (#281). */
+    suspend fun deleteSleepSession(session: SleepSession) =
+        dao.deleteSleepSession(session.deviceId, session.startTs)
     suspend fun upsertMetricSeries(rows: List<MetricSeriesRow>) = dao.upsertMetricSeries(rows)
     suspend fun upsertJournal(rows: List<JournalEntry>) = dao.upsertJournal(rows)
     suspend fun upsertWorkouts(rows: List<WorkoutRow>) = dao.upsertWorkouts(rows)

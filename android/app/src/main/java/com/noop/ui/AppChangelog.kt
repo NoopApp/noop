@@ -25,7 +25,7 @@ object AppChangelog {
      * Bump this when you add a release below. The "What's New" sheet shows automatically when the
      * stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
      */
-    const val CURRENT_VERSION = "2.14.0"
+    const val CURRENT_VERSION = "2.14.1"
 
     data class Release(
         val version: String,
@@ -36,6 +36,15 @@ object AppChangelog {
 
     /** Newest first. */
     val releases: List<Release> = listOf(
+        Release(
+            version = "2.14.1",
+            title = "Continuous workouts no longer split, plus delete a sleep session",
+            date = "June 2026",
+            items = listOf(
+                "Fixed: a long, continuous workout — like a 4-hour ride — no longer fragments into several tiny separate workouts. The auto-detector now stitches a sustained effort back into one session across brief dips and short signal drops, while a genuine rest still ends the workout. Thanks @ck090 (#303).",
+                "New: you can now **delete a sleep session** — tap the trash icon on the Sleep screen to remove a mis-detected night. Thanks @ryanbr (#281).",
+            ),
+        ),
         Release(
             version = "2.14.0",
             title = "A beautiful new look",

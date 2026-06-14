@@ -7,7 +7,7 @@ enum AppChangelog {
 
     /// Bump this when you add a release below. The "What's New" sheet shows automatically when the
     /// stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
-    static let currentVersion = "2.14.0"
+    static let currentVersion = "2.14.1"
 
     struct Release: Identifiable {
         let version: String
@@ -19,6 +19,13 @@ enum AppChangelog {
 
     /// Newest first.
     static let releases: [Release] = [
+        Release(
+            version: "2.14.1",
+            title: "Continuous workouts no longer split",
+            date: "June 2026",
+            items: [
+                "Fixed: a long, continuous workout — like a 4-hour ride — no longer fragments into several tiny separate workouts. The auto-detector now stitches a sustained effort back into one session across brief dips and short signal drops, while a genuine rest still ends the workout. Thanks @ck090 (#303).",
+            ]),
         Release(
             version: "2.14.0",
             title: "A beautiful new look",

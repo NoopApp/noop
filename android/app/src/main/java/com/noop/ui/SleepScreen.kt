@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.Button
@@ -267,6 +268,14 @@ fun SleepScreen(
                     }
                     scope.launch { vm.updateSleepSessionTimes(s, start, end) }
                 },
+                onDeleteSession = { s ->
+                    // Delete = the edit path minus the re-insert: drop this session from `sleeps`
+                    // so every metric recomputes immediately as if the night were never recorded,
+                    // then persist the removal off the UI thread. Lets the user clear a misread or
+                    // spurious night. (#281)
+                    sleeps = sleeps.filterNot { it.deviceId == s.deviceId && it.startTs == s.startTs }
+                    scope.launch { vm.deleteSleepSession(s) }
+                },
                 onPickNightDate = onPickNightDate,
             )
             if (model != null) {
@@ -299,10 +308,11 @@ private fun Hero(
     onNavigate: (Int) -> Unit,
     session: SleepSession? = null,
     onUpdateTimes: (SleepSession, Long, Long) -> Unit = { _, _, _ -> },
+    onDeleteSession: (SleepSession) -> Unit = {},
     onPickNightDate: ((LocalDate) -> Unit)? = null,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        NightNavHeader(nightOffset, lastIndex, clock, onNavigate, session, onUpdateTimes, onPickNightDate)
+        NightNavHeader(nightOffset, lastIndex, clock, onNavigate, session, onUpdateTimes, onDeleteSession, onPickNightDate)
         // The night's clock window — when you fell asleep and when you woke — as its own clearly
         // labelled row. These were only ever in the nav-header's trailing caption, which truncates
         // between the two chevrons on a phone, so in practice the two times people look for first
@@ -439,12 +449,14 @@ private fun NightNavHeader(
     onNavigate: (Int) -> Unit,
     session: SleepSession? = null,
     onUpdateTimes: (SleepSession, Long, Long) -> Unit = { _, _, _ -> },
+    onDeleteSession: (SleepSession) -> Unit = {},
     onPickNightDate: ((LocalDate) -> Unit)? = null,
 ) {
     val canGoOlder = offset < lastIndex
     val canGoNewer = offset > 0
     val context = LocalContext.current
     var showTimeChoice by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
     var editingBed by remember { mutableStateOf(false) }
     var editingWake by remember { mutableStateOf(false) }
     var showDatePicker by remember { mutableStateOf(false) }
@@ -630,8 +642,46 @@ private fun NightNavHeader(
                     tint = Palette.textTertiary,
                     modifier = Modifier.size(14.dp).clickable { showTimeChoice = true },
                 )
+                Spacer(Modifier.width(Metrics.space12))
+                Icon(
+                    Icons.Filled.DeleteOutline,
+                    contentDescription = "Delete this sleep session",
+                    tint = Palette.textTertiary,
+                    modifier = Modifier.size(14.dp).clickable { showDeleteConfirm = true },
+                )
             }
         }
+    }
+
+    // Confirm before removing the night — the same on-brand AlertDialog the time-edit chooser
+    // uses (surfaceRaised, Noop type tokens), not a bare Material default. (#281)
+    if (showDeleteConfirm && session != null) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            containerColor = Palette.surfaceRaised,
+            titleContentColor = Palette.textPrimary,
+            textContentColor = Palette.textSecondary,
+            title = { Text("Delete this sleep session?", style = NoopType.headline) },
+            text = {
+                Text(
+                    "Removes this recorded sleep and recomputes the day without it. This can't be undone.",
+                    style = NoopType.subhead,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteConfirm = false
+                    onDeleteSession(session)
+                }) {
+                    Text("Delete", style = NoopType.headline, color = Palette.statusCritical)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("Cancel", style = NoopType.subhead, color = Palette.textTertiary)
+                }
+            },
+        )
     }
 }
 

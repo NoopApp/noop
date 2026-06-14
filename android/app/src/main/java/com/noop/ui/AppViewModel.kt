@@ -471,6 +471,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         runCatching { repository.updateSleepSessionTimes(session, newStartTs, newEndTs) }
     }
 
+    /** Delete one sleep session. Swallows failures — the Sleep screen already removed it
+     *  optimistically, so the day recomputes without the misread night either way. (#281) */
+    suspend fun deleteSleepSession(session: com.noop.data.SleepSession) {
+        runCatching { repository.deleteSleepSession(session) }
+    }
+
     /** Re-read every source + the dismissed markers and republish [workouts]. */
     fun loadWorkouts() {
         viewModelScope.launch {

@@ -138,4 +138,83 @@ final class WorkoutDetectorTests: XCTestCase {
         // age 30 → hrmax 187, zone math available → z2+ fraction ≈ 0 < 0.50 → rejected.
         XCTAssertTrue(WorkoutDetector.detect(hr: hr, gravity: grav, age: 30).isEmpty)
     }
+
+    // MARK: - Sustained-effort fragmentation (#303)
+
+    /// A long endurance bout (e.g. a road bike ride) that dips momentarily every few
+    /// minutes — coasting downhill, a junction, a brief sensor gap — so that motion
+    /// falls below threshold for a `dipS`-long stretch on a `cadenceS` cadence. HR
+    /// stays elevated throughout (you don't actually rest). Helper returns a full day
+    /// with the ride embedded in rest, plus the true ride span for assertions.
+    private func longRideWithDips(
+        rideStart: Int, rideDur: Int, cadenceS: Int, dipS: Int
+    ) -> (hr: [HRSample], grav: [GravitySample]) {
+        var hr: [HRSample] = []
+        var grav: [GravitySample] = []
+        let dayStart = rideStart - 30 * 60
+        let dayEnd = rideStart + rideDur + 30 * 60
+        for t in dayStart..<dayEnd {
+            let inRide = t >= rideStart && t < rideStart + rideDur
+            // Coasting dip: the last `dipS` seconds of every `cadenceS`-second cycle.
+            let phaseInCycle = (t - rideStart) % cadenceS
+            let coasting = inRide && phaseInCycle >= cadenceS - dipS
+            // HR stays high the whole ride (a real dip in cadence ≠ a dip in HR).
+            hr.append(HRSample(ts: t, bpm: inRide ? 150 : 52))
+            if inRide && !coasting {
+                let osc = Double((t - rideStart) % 2) * 0.5  // pedalling → moving
+                grav.append(GravitySample(ts: t, x: osc, y: 0, z: 1))
+            } else {
+                grav.append(GravitySample(ts: t, x: 0, y: 0, z: 1))  // still / coasting
+            }
+        }
+        return (hr, grav)
+    }
+
+    func testLongRideWithBriefDipsIsOneWorkout() {
+        // ~4 h ride (matches the issue: 13:00–16:52) with a ~2-min coasting dip every
+        // ~8 min. Each dip exceeds the OLD 150 s merge gap, so it used to shatter the
+        // ride into ~30 sub-5-min slivers, most of which were then dropped by the
+        // minimum-duration filter — surfacing as a handful of tiny "workouts".
+        let start = 9_000_000
+        let rideDur = 232 * 60      // 3 h 52 m
+        let (hr, grav) = longRideWithDips(
+            rideStart: start, rideDur: rideDur, cadenceS: 8 * 60, dipS: 180)
+        let sessions = WorkoutDetector.detect(hr: hr, gravity: grav, age: 30)
+
+        // One ride → one workout, spanning ~the whole ride (not a pile of fragments).
+        XCTAssertEqual(sessions.count, 1, "sustained ride fragmented into \(sessions.count) workouts")
+        let w = sessions[0]
+        XCTAssertGreaterThan(w.durationS, Double(rideDur) * 0.9,
+                             "merged ride too short: \(Int(w.durationS))s of \(rideDur)s")
+        XCTAssertEqual(w.avgHR, 150, accuracy: 2.0)
+    }
+
+    func testGenuinelySeparateWorkoutsStaySeparate() {
+        // Two real workouts separated by a long genuine rest (HR drops to resting and
+        // motion stops for ~25 min) must NOT be merged by the bridge. Guards against
+        // the fix over-merging unrelated sessions.
+        let startA = 10_000_000
+        let durA = 20 * 60
+        let restGap = 25 * 60               // 25 min true rest, well beyond the bridge
+        let startB = startA + durA + restGap
+        let durB = 20 * 60
+        var hr: [HRSample] = []
+        var grav: [GravitySample] = []
+        let dayStart = startA - 30 * 60
+        let dayEnd = startB + durB + 30 * 60
+        for t in dayStart..<dayEnd {
+            let inA = t >= startA && t < startA + durA
+            let inB = t >= startB && t < startB + durB
+            let active = inA || inB
+            hr.append(HRSample(ts: t, bpm: active ? 160 : 52))
+            if active {
+                let osc = Double(t % 2) * 0.5
+                grav.append(GravitySample(ts: t, x: osc, y: 0, z: 1))
+            } else {
+                grav.append(GravitySample(ts: t, x: 0, y: 0, z: 1))
+            }
+        }
+        let sessions = WorkoutDetector.detect(hr: hr, gravity: grav, age: 30)
+        XCTAssertEqual(sessions.count, 2, "separate workouts were over-merged")
+    }
 }

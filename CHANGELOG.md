@@ -17,6 +17,16 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 2.14.1 — Continuous workouts no longer split, plus delete a sleep session
+
+- **Fixed:** a long, continuous workout — like a 4-hour ride — no longer fragments into several tiny
+  separate workouts. The auto-detector now stitches a sustained effort back into one session across brief
+  dips and short signal drops, while a genuine rest still ends the workout. Thanks @ck090 (#303).
+- **New (Android):** you can now **delete a sleep session** — tap the trash icon on the Sleep screen to
+  remove a mis-detected night. Thanks @ryanbr (#281).
+
+---
+
 ## 2.14.0 — A beautiful new look
 
 - **New design.** NOOP has a gorgeous new look — deeper, calmer, more premium. A dark blue-black canvas,
