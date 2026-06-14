@@ -128,15 +128,18 @@ struct SleepView: View {
         // latest night silently rendered under a navigated label. (#160)
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
             if nightOffset == 0 {
-                nightNavHeader(trailing: headerLine(model.night))
+                nightNavHeader(trailing: model.night.spanLabel)
+                sleepWindowRow(model.night)
                 stageCard(model.night, intervals: model.intervals)
             } else if let night = navNight {
-                nightNavHeader(trailing: headerLine(night))
+                nightNavHeader(trailing: night.spanLabel)
+                sleepWindowRow(night)
                 stageCard(night, intervals: night.intervals)
             } else if let session = sessionRow(at: nightOffset) {
                 // Stage-less stub purely to reuse Night's date/time formatting.
                 let stub = Night(session: session, stages: Stages(awake: 0, light: 0, deep: 0, rem: 0))
-                nightNavHeader(trailing: headerLine(stub))
+                nightNavHeader(trailing: stub.spanLabel)
+                sleepWindowRow(stub)
                 ChartCard(
                     title: "Stage breakdown",
                     subtitle: "\(durationText(Double(session.endTs - session.startTs) / 60.0)) in bed",
@@ -181,10 +184,37 @@ struct SleepView: View {
         )
     }
 
-    /// "date · onset–wake" — the nav header's trailing line. A day whose sleep crosses midnight
-    /// (onset and wake on different calendar dates) shows the span, e.g. "Fri 13 → Sat 14 Jun".
-    private func headerLine(_ night: Night) -> String {
-        "\(night.spanLabel) · \(night.onsetText)–\(night.wakeText)"
+    /// The night's clock window — when you fell asleep and when you woke — as its own clearly
+    /// labelled row. These were previously only in the nav-header's trailing caption, which
+    /// truncates between the two chevrons on a phone, so in practice the two times people look for
+    /// first were effectively hidden. The header now carries just the date span.
+    @ViewBuilder
+    private func sleepWindowRow(_ night: Night) -> some View {
+        HStack(spacing: 0) {
+            sleepTime(icon: "moon.zzz.fill", label: "Asleep", value: night.onsetText)
+            Spacer(minLength: 12)
+            Rectangle().fill(StrandPalette.hairline).frame(width: 1, height: 30)
+            Spacer(minLength: 12)
+            sleepTime(icon: "sun.max.fill", label: "Woke", value: night.wakeText)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .frame(maxWidth: .infinity)
+        .background(StrandPalette.surfaceRaised, in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func sleepTime(icon: String, label: LocalizedStringKey, value: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(StrandFont.headline)
+                .foregroundStyle(StrandPalette.accent)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label).strandOverline()
+                Text(value).font(StrandFont.number(22)).foregroundStyle(StrandPalette.textPrimary)
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 
     /// Full-width proportional stacked stage bar (fallback when no intervals).
@@ -1140,8 +1170,9 @@ private struct Night {
         return "\(Night.spanFmt.string(from: onsetDay)) → \(Night.dateFmt.string(from: wakeDay))"
     }
 
+    // 12-hour clock for the Asleep/Woke row (e.g. "11:42 PM") — the times people read at a glance.
     private static let timeFmt: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "HH:mm"; return f
+        let f = DateFormatter(); f.dateFormat = "h:mm a"; return f
     }()
     private static let dateFmt: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "EEE d MMM"; return f
