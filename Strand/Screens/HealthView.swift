@@ -278,7 +278,8 @@ private struct LiveTimeChart: View {
         .chartXAxis {
             AxisMarks(values: .automatic(desiredCount: 4)) { _ in
                 AxisGridLine().foregroundStyle(StrandPalette.hairline.opacity(0.4))
-                AxisValueLabel(format: .dateTime.hour().minute().second())
+                // Pin to en_US_POSIX so the live axis is 12-hour (AM/PM) regardless of device locale.
+                AxisValueLabel(format: .dateTime.hour().minute().second().locale(Locale(identifier: "en_US_POSIX")))
                     .foregroundStyle(StrandPalette.textTertiary)
                     .font(StrandFont.footnote)
             }

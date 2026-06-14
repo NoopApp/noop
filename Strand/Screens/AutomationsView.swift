@@ -73,7 +73,10 @@ struct AutomationsView: View {
         }
     }
     private static let momentFormatter: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "EEE d MMM · HH:mm"; return f
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "EEE d MMM · h:mm a"
+        return f
     }()
 
     // MARK: - Wear & presence

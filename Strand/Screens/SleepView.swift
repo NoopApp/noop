@@ -1273,7 +1273,10 @@ private struct Night {
 
     // 12-hour clock for the Asleep/Woke row (e.g. "11:42 PM") — the times people read at a glance.
     private static let timeFmt: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "h:mm a"; return f
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "h:mm a"
+        return f
     }()
     private static let dateFmt: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "EEE d MMM"; return f
