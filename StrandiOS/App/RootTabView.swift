@@ -53,6 +53,7 @@ struct RootTabView: View {
                 }
                 Section("App") {
                     link("Automations", "wand.and.stars") { AutomationsView() }
+                    link("Siri & Shortcuts", "mic.fill") { SiriShortcutsSettingsView() }
                     link("Settings", "gearshape.fill") { SettingsView() }
                     link("Support", "hands.clap.fill") { SupportView() }
                 }
