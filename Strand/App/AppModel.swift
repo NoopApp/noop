@@ -366,8 +366,12 @@ final class AppModel: ObservableObject {
     }
 
     /// Record a "moment" (double-tap marker) with a confirming buzz.
-    func markMoment() {
-        moments.append(Date())
+    func markMoment() { markMoment(at: Date()) }
+
+    /// Record a "moment" at a specific time (used by the Siri/Shortcuts path, which captures the
+    /// invocation time even though the app only drains the queue later when it becomes active).
+    func markMoment(at date: Date) {
+        moments.append(date)
         if moments.count > 500 { moments.removeFirst(moments.count - 500) }
         UserDefaults.standard.set(moments.map(\.timeIntervalSince1970), forKey: "moments")
         buzz(loops: 1)

@@ -11,18 +11,27 @@ enum PendingIntents {
     private static let key = "noop.pendingIntents"
     private static var defaults: UserDefaults? { UserDefaults(suiteName: WidgetSnapshot.suiteName) }
 
-    static func append(_ action: Action) {
+    /// Optional `at` is the invocation time, captured now and consumed on drain. Encoded into the
+    /// stored string as "rawValue:epochSeconds" so the array stays a plain [String] (no schema
+    /// migration; a legacy bare "markMoment" still decodes with a nil date).
+    static func append(_ action: Action, at date: Date? = nil) {
         guard let d = defaults else { return }
         var list = d.stringArray(forKey: key) ?? []
-        list.append(action.rawValue)
+        if let date { list.append("\(action.rawValue):\(date.timeIntervalSince1970)") }
+        else { list.append(action.rawValue) }
         d.set(list, forKey: key)
     }
 
-    static func drain() -> [Action] {
+    static func drain() -> [(action: Action, date: Date?)] {
         guard let d = defaults else { return [] }
         let raw = d.stringArray(forKey: key) ?? []
         d.removeObject(forKey: key)
-        return raw.compactMap(Action.init)
+        return raw.compactMap { entry in
+            let parts = entry.split(separator: ":", maxSplits: 1)
+            guard let action = Action(rawValue: String(parts[0])) else { return nil }
+            let date = parts.count == 2 ? Double(parts[1]).map { Date(timeIntervalSince1970: $0) } : nil
+            return (action, date)
+        }
     }
 }
 
@@ -32,7 +41,7 @@ struct MarkMomentIntent: AppIntent {
     static var description = IntentDescription("Record a timestamped moment in NOOP.")
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        PendingIntents.append(.markMoment)
+        PendingIntents.append(.markMoment, at: Date())
         return .result(dialog: "Moment marked.")
     }
 }
