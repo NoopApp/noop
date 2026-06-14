@@ -328,10 +328,13 @@ struct WeeklyDigestContent: View {
 
     private func deltaText(_ s: WeeklyMetricSummary) -> String {
         guard s.weekOverWeek.current.n > 0, s.weekOverWeek.previous.n > 0 else { return "new" }
-        if let pct = s.weekOverWeek.pctChange, abs(pct) >= 1 {
-            return "\(Int(abs(pct).rounded()))%"
+        // Always speak in percent so the chip's ↑/↓ + sign reads as a delta. A sub-1%
+        // mover used to fall back to a bare "0.1" which, once the card prepended "−",
+        // rendered as "−0.1" and looked like a truncated number rather than a change.
+        if let pct = s.weekOverWeek.pctChange {
+            return abs(pct) >= 1 ? "\(Int(abs(pct).rounded()))%" : "<1%"
         }
-        return fmt1(abs(s.wowDelta))
+        return "<1%"
     }
 
     /// Tone: good moves green, bad moves rose, flat/uncomparable grey — folding in
