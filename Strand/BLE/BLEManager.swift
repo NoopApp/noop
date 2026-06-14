@@ -1343,7 +1343,7 @@ public final class BLEManager: NSObject, ObservableObject {
 }
 
 // MARK: - CBCentralManagerDelegate
-extension BLEManager: CBCentralManagerDelegate {
+extension BLEManager: @preconcurrency CBCentralManagerDelegate {
     public func centralManagerDidUpdateState(_ central: CBCentralManager) {
         log("Central state: \(central.state.rawValue) (5 = poweredOn)")
         guard central.state == .poweredOn else { return }
@@ -1516,7 +1516,7 @@ extension BLEManager: CBCentralManagerDelegate {
 }
 
 // MARK: - CBPeripheralDelegate
-extension BLEManager: CBPeripheralDelegate {
+extension BLEManager: @preconcurrency CBPeripheralDelegate {
     public func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         if let error {
             log("Service discovery failed: \(error.localizedDescription)")
