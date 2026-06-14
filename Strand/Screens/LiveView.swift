@@ -650,35 +650,56 @@ struct LiveView: View {
     // MARK: - Controls
 
     private var controls: some View {
-        // Three buttons share the row's width equally, so on a narrow iPhone each label must shrink to
-        // fit rather than wrap mid-word ("Dis-/con-/nect"). lineLimit(1)+minimumScaleFactor keeps them
-        // on one line; the icon stays. (#175)
-        HStack(spacing: 12) {
-            Button { model.scan(model: selectedModel) } label: {
-                Label(live.connected ? "Re-scan" : "Scan & Connect",
-                      systemImage: "antenna.radiowaves.left.and.right")
-                    .lineLimit(1).minimumScaleFactor(0.7)
-                    .frame(maxWidth: .infinity).padding(.vertical, 8)
+        // Three equal thirds can't hold all three labels at a legible size on a phone — the longest
+        // ("Scan & Connect") truncates to "Scan &…" even after shrink-to-fit (#175). So on iOS the
+        // primary action takes a full-width row and the two secondary actions share the row beneath;
+        // macOS keeps the single three-up row, where the window is always wide enough. (#175)
+        #if os(iOS)
+        VStack(spacing: 12) {
+            scanButton
+            HStack(spacing: 12) {
+                buzzButton
+                disconnectButton
             }
-            .buttonStyle(.borderedProminent).tint(StrandPalette.accent)
-
-            Button { model.buzz() } label: {
-                Label("Buzz strap", systemImage: "waveform.path")
-                    .lineLimit(1).minimumScaleFactor(0.7)
-                    .frame(maxWidth: .infinity).padding(.vertical, 8)
-            }
-            .buttonStyle(.bordered).tint(StrandPalette.accent)
-            .disabled(!activeConnection)
-            .help("Fire a test haptic buzz on the strap (requires an active strap connection)")
-
-            Button(role: .destructive) { model.disconnect() } label: {
-                Label("Disconnect", systemImage: "xmark.circle")
-                    .lineLimit(1).minimumScaleFactor(0.7)
-                    .frame(maxWidth: .infinity).padding(.vertical, 8)
-            }
-            .buttonStyle(.bordered)
-            .disabled(!live.connected)
         }
+        #else
+        HStack(spacing: 12) {
+            scanButton
+            buzzButton
+            disconnectButton
+        }
+        #endif
+    }
+
+    private var scanButton: some View {
+        Button { model.scan(model: selectedModel) } label: {
+            Label(live.connected ? "Re-scan" : "Scan & Connect",
+                  systemImage: "antenna.radiowaves.left.and.right")
+                .lineLimit(1).minimumScaleFactor(0.7)
+                .frame(maxWidth: .infinity).padding(.vertical, 8)
+        }
+        .buttonStyle(.borderedProminent).tint(StrandPalette.accent)
+    }
+
+    private var buzzButton: some View {
+        Button { model.buzz() } label: {
+            Label("Buzz strap", systemImage: "waveform.path")
+                .lineLimit(1).minimumScaleFactor(0.7)
+                .frame(maxWidth: .infinity).padding(.vertical, 8)
+        }
+        .buttonStyle(.bordered).tint(StrandPalette.accent)
+        .disabled(!activeConnection)
+        .help("Fire a test haptic buzz on the strap (requires an active strap connection)")
+    }
+
+    private var disconnectButton: some View {
+        Button(role: .destructive) { model.disconnect() } label: {
+            Label("Disconnect", systemImage: "xmark.circle")
+                .lineLimit(1).minimumScaleFactor(0.7)
+                .frame(maxWidth: .infinity).padding(.vertical, 8)
+        }
+        .buttonStyle(.bordered)
+        .disabled(!live.connected)
     }
 
     private func refreshLiveSession() {

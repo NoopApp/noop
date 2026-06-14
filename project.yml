@@ -226,6 +226,10 @@ targets:
       path: StrandiOSWidgets/Info.plist
       properties:
         CFBundleDisplayName: NOOP
+        # Match the host app's version/build, else Xcode warns the embedded extension's
+        # CFBundleVersion must equal the containing app's. Resolved from the build settings below.
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     entitlements:
@@ -235,6 +239,9 @@ targets:
           - group.com.noopapp.noop
     settings:
       base:
+        # Keep in lockstep with the NOOPiOS app target's CURRENT_PROJECT_VERSION so the
+        # embedded extension's build number matches its host.
+        CURRENT_PROJECT_VERSION: "54"
         PRODUCT_BUNDLE_IDENTIFIER: com.noopapp.noop.widgets
         PRODUCT_NAME: NOOPWidgets
         GENERATE_INFOPLIST_FILE: NO

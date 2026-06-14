@@ -25,15 +25,24 @@ struct ScreenScaffold<Content: View>: View {
     }
 }
 
-/// Placeholder body for screens the design agents are still building.
+/// Empty / pending-data placeholder for screens still gathering history. Mirrors `DataPendingNote`'s
+/// icon-anchored card so an empty screen reads as an intentional state rather than a stray text box.
 struct ComingSoon: View {
     let what: LocalizedStringKey
+    var symbol: String = "sparkles"
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Coming together")
-                .font(StrandFont.headline).foregroundStyle(StrandPalette.textPrimary)
-            Text(what)
-                .font(StrandFont.body).foregroundStyle(StrandPalette.textSecondary)
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: symbol)
+                .font(StrandFont.headline)
+                .foregroundStyle(StrandPalette.accent)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Coming together")
+                    .font(StrandFont.headline).foregroundStyle(StrandPalette.textPrimary)
+                Text(what)
+                    .font(StrandFont.body).foregroundStyle(StrandPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(20).frame(maxWidth: .infinity, alignment: .leading)
         .background(StrandPalette.surfaceRaised, in: RoundedRectangle(cornerRadius: 14))

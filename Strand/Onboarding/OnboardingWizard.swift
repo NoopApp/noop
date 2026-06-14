@@ -429,7 +429,7 @@ private struct BluetoothStep: View {
     @State private var pulse = false
     var body: some View {
         StepShell(title: "A quick word before we connect",
-                  subtitle: "macOS will ask for Bluetooth in a moment.") {
+                  subtitle: "\(Platform.deviceNoun) will ask for Bluetooth in a moment.") {
             VStack(spacing: 24) {
                 ZStack {
                     Circle()
@@ -603,7 +603,7 @@ private struct ScanStep: View {
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
 
-                Text("WHOOP straps don't appear in macOS System Settings → Bluetooth. They advertise on a custom profile that only apps like NOOP can find — so there's nothing to pair there, and you shouldn't try.")
+                Text("WHOOP straps don't appear in your \(Platform.deviceNoun)'s Bluetooth settings. They advertise on a custom profile that only apps like NOOP can find — so there's nothing to pair there, and you shouldn't try.")
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -905,6 +905,24 @@ private struct NotificationsStep: View {
                 }
                 .frame(height: 130)
 
+                #if os(iOS)
+                // iOS gives an app no way to observe *other* apps' notifications, and the per-app picker
+                // behind it is NSWorkspace-based (macOS-only). So drop the cross-app relay claim here and
+                // keep only what iOS genuinely does: NOOP's own strain nudges + smart alarm buzz the strap
+                // directly over BLE.
+                InfoCard(
+                    icon: "applewatch.radiowaves.left.and.right",
+                    tint: StrandPalette.statusPositive,
+                    title: "A buzz, not a banner",
+                    message: "NOOP taps your strap so an alert lands on your wrist instead of your screen — no need to reach for it. Everything stays on \(Platform.deviceNounPhrase)."
+                )
+
+                VStack(spacing: 12) {
+                    Checkline(text: "Strain nudges and your smart alarm tap your wrist the moment they fire.")
+                    Checkline(text: "It all stays on your strap and \(Platform.deviceNounPhrase) — no account, no cloud.")
+                }
+                .frame(maxWidth: 460)
+                #else
                 InfoCard(
                     icon: "applewatch.radiowaves.left.and.right",
                     tint: StrandPalette.statusPositive,
@@ -917,6 +935,7 @@ private struct NotificationsStep: View {
                     Checkline(text: "Strain nudges and your smart alarm tap your wrist the same way.")
                 }
                 .frame(maxWidth: 460)
+                #endif
             }
         }
         .onAppear { withAnimation(StrandMotion.breathe) { pulse = true } }

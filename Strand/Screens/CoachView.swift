@@ -109,7 +109,7 @@ struct CoachView: View {
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
 
-                Text("Coach uses your own API key. Pick a provider, paste a key, and choose a model. Your key is stored securely in the macOS Keychain and never leaves your Mac except as the request you make.")
+                Text("Coach uses your own API key. Pick a provider, paste a key, and choose a model. Your key is stored securely in the Keychain and never leaves \(Platform.deviceNounPhrase) except as the request you make.")
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -142,7 +142,7 @@ struct CoachView: View {
                                 .strokeBorder(StrandPalette.hairline, lineWidth: 1))
                             .disableAutocorrection(true)
                             .accessibilityLabel("Server URL")
-                        Text("Any OpenAI-compatible server — Ollama, LM Studio, llama.cpp, or your own gateway. Stays on your network; nothing leaves your Mac.")
+                        Text("Any OpenAI-compatible server — Ollama, LM Studio, llama.cpp, or your own gateway. Stays on your network; nothing leaves \(Platform.deviceNounPhrase).")
                             .font(StrandFont.footnote)
                             .foregroundStyle(StrandPalette.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -466,7 +466,7 @@ struct CoachView: View {
         Label {
             Text(coach.provider == .custom
                  ? "Coach talks only to the server URL you set — point it at a local model (Ollama, LM Studio, llama.cpp) to keep everything on your own machine. Nothing is sent until you ask."
-                 : "This is the only feature that leaves your Mac — it sends a summary of your metrics to \(coach.provider.displayName) using your own key. Nothing is sent until you ask.")
+                 : "This is the only feature that leaves \(Platform.deviceNounPhrase) — it sends a summary of your metrics to \(coach.provider.displayName) using your own key. Nothing is sent until you ask.")
                 .font(StrandFont.footnote)
                 .foregroundStyle(StrandPalette.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)

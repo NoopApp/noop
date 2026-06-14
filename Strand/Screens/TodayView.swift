@@ -111,8 +111,18 @@ struct TodayView: View {
         return "Learning your baseline — \(n) of \(Baselines.minNightsSeed) nights."
     }
 
+    /// The iOS tab is already labelled "Today", and "Control Center" collides with the OS feature of
+    /// that name (on both platforms). Match the tab on iOS; keep the established name on macOS.
+    private var screenTitle: LocalizedStringKey {
+        #if os(iOS)
+        "Today"
+        #else
+        "Control Center"
+        #endif
+    }
+
     var body: some View {
-        ScreenScaffold(title: "Control Center", subtitle: "\(dateLine)") {
+        ScreenScaffold(title: screenTitle, subtitle: "\(dateLine)") {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                 HealthAlertBanner()
                 // Browse past days — chevrons + a date jump capped at today (no future days).
