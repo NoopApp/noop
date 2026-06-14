@@ -108,6 +108,15 @@ interface WhoopDao {
     )
     suspend fun hrSamples(deviceId: String, from: Long, to: Long, limit: Int): List<HrSample>
 
+    /** RAW measured HR only — the `hrSample` table with NO v26 PPG-derived union (cf. [hrSamples]).
+     *  Backs the raw-sensor diagnostic export, which emits measured HR and PPG-derived HR as two
+     *  distinct streams so they're never conflated. Range read, ts asc, row-limited. */
+    @Query(
+        "SELECT * FROM hrSample WHERE deviceId = :deviceId AND ts >= :from AND ts <= :to " +
+            "ORDER BY ts ASC LIMIT :limit"
+    )
+    suspend fun rawHrSamples(deviceId: String, from: Long, to: Long, limit: Int): List<HrSample>
+
     /** Downsampled HR for charting: mean bpm per [bucketSeconds]-wide bucket over [from, to],
      *  keyed by the bucket start (floor(ts/bucket)*bucket). Aggregated in SQL so a 24h window
      *  returns ~(to-from)/bucketSeconds rows, not every ~1 Hz sample. Mirrors macOS hrBuckets.

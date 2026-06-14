@@ -66,6 +66,7 @@ import com.noop.BuildConfig
 import com.noop.analytics.Zones
 import com.noop.ble.PuffinExperiment
 import com.noop.data.DataBackup
+import com.noop.ingest.RawSensorExport
 import com.noop.ingest.WhoopCsvExporter
 import com.noop.update.UpdateCheck
 import kotlinx.coroutines.Dispatchers
@@ -841,6 +842,20 @@ fun SettingsScreen(vm: AppViewModel) {
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = Palette.textSecondary),
                 ) { Text("Share 5/MG capture (for the decode effort)", style = NoopType.captionNumber) }
+
+                // Diagnostics: dump the decoded per-sample sensor streams (last 24h) to one long-format
+                // CSV so power users / external devs can prototype sleep/activity/VBT algorithms on real
+                // data without a BLE stream (#308/#276/#322). On-device only; plain text, no BLE hex.
+                OutlinedButton(
+                    onClick = { scope.launch { RawSensorExport.export(context, vm.repo) } },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Palette.textSecondary),
+                ) { Text("Export raw sensor data (CSV)", style = NoopType.captionNumber) }
+                Text(
+                    "Saves the last 24h of decoded sensor samples (heart rate, R-R, motion, steps and any 5/MG deep streams you've unlocked) as one CSV you can share — for tinkering with your own data. Nothing leaves the phone unless you share it.",
+                    style = NoopType.caption,
+                    color = Palette.textTertiary,
+                )
             }
         }
 

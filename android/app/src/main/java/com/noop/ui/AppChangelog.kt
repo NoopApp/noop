@@ -25,7 +25,7 @@ object AppChangelog {
      * Bump this when you add a release below. The "What's New" sheet shows automatically when the
      * stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
      */
-    const val CURRENT_VERSION = "2.17.1"
+    const val CURRENT_VERSION = "2.18.0"
 
     data class Release(
         val version: String,
@@ -36,6 +36,14 @@ object AppChangelog {
 
     /** Newest first. */
     val releases: List<Release> = listOf(
+        Release(
+            version = "2.18.0",
+            title = "Export your raw sensor data (CSV)",
+            date = "June 2026",
+            items = listOf(
+                "New (experimental): Settings now has an Export raw sensor data (CSV) button — it dumps the decoded per-sample streams NOOP already stores (heart rate, R-R, accelerometer, the motion/step counter, SpO2/PPG and events) for the last 24h as a plain CSV. It's for tinkerers: prototype your own sleep / activity / VBT algorithms on real data, no BLE coding needed. On-device only, nothing leaves your phone unless you share it. Thanks @maddognik / @alacore (#322/#276).",
+            ),
+        ),
         Release(
             version = "2.17.1",
             title = "Charge shows \"Calibrating\" instead of \"No data\" for new straps",

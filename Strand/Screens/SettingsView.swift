@@ -51,6 +51,11 @@ struct SettingsView: View {
         UnitPrefs.resolveTemperature(system: unitSystem, override: temperatureRaw)
     }
 
+    /// Raw-sensor CSV export (experimental diagnostic, #308/#276/#322). Holds the last-written file so
+    /// macOS can "Reveal in Finder" after a share, mirroring the puffin-capture export.
+    @State private var rawCsvBusy = false
+    @State private var lastRawCsvURL: URL?
+
     /// "What's New" changelog sheet, reachable any time from About.
     @State private var showWhatsNew = false
 
@@ -532,6 +537,97 @@ struct SettingsView: View {
                         #endif
                         Spacer(minLength: 0)
                     }
+                }
+
+                Divider().overlay(StrandPalette.hairline)
+
+                // MARK: Export raw sensor data (CSV) — a read-only diagnostic over the decoded streams
+                // NOOP already stores (HR, R-R, motion, steps, PPG-HR, SpO₂, skin temp, resp, events).
+                Button {
+                    exportRawSensorCSV()
+                } label: {
+                    if rawCsvBusy {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            Text("Exporting…")
+                        }
+                        .padding(.horizontal, 6)
+                    } else {
+                        Label("Export raw sensor data (CSV)", systemImage: "square.and.arrow.up")
+                            .padding(.horizontal, 6)
+                    }
+                }
+                .buttonStyle(.bordered)
+                .tint(StrandPalette.accent)
+                .disabled(rawCsvBusy)
+
+                #if os(macOS)
+                if let url = lastRawCsvURL {
+                    Button {
+                        NSWorkspace.shared.activateFileViewerSelecting([url])
+                    } label: {
+                        Label("Reveal in Finder", systemImage: "folder")
+                            .padding(.horizontal, 6)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(StrandPalette.accent)
+                }
+                #endif
+
+                Text("Dumps the last 24 hours of decoded per-sample sensor streams (heart rate, R-R, motion, steps, SpO₂, skin temperature, respiration, events) to a single CSV — all on \(Platform.deviceNounPhrase), nothing uploaded. Share it to help prototype and test sleep, activity and strength algorithms.")
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// Export the last 24h of decoded sensor streams for the connected strap to a CSV, then save (macOS
+    /// NSSavePanel) or share (iOS share sheet) — the same pattern as exportPuffinCaptures(). The store
+    /// handle and the strap deviceId both come from the app's single "my-whoop" id.
+    private func exportRawSensorCSV() {
+        rawCsvBusy = true
+        Task {
+            let since = Date().timeIntervalSince1970 - 24 * 60 * 60
+            guard let store = await model.repo.storeHandle() else {
+                await MainActor.run {
+                    rawCsvBusy = false
+                    backupAlertTitle = "Export failed"
+                    backupAlertMessage = "Couldn't open the local store."
+                    showBackupAlert = true
+                }
+                return
+            }
+            do {
+                let url = try await store.exportRawCSV(deviceId: model.deviceId, since: since)
+                await MainActor.run {
+                    rawCsvBusy = false
+                    lastRawCsvURL = url
+                    #if os(macOS)
+                    let panel = NSSavePanel()
+                    panel.allowedContentTypes = [.commaSeparatedText]
+                    panel.nameFieldStringValue = url.lastPathComponent
+                    panel.canCreateDirectories = true
+                    guard panel.runModal() == .OK, let dest = panel.url else { return }
+                    let fm = FileManager.default
+                    do {
+                        if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: dest) }
+                        try fm.copyItem(at: url, to: dest)
+                    } catch {
+                        backupAlertTitle = "Export failed"
+                        backupAlertMessage = error.localizedDescription
+                        showBackupAlert = true
+                    }
+                    #else
+                    FileExport.exportFile(at: url)
+                    #endif
+                }
+            } catch {
+                await MainActor.run {
+                    rawCsvBusy = false
+                    backupAlertTitle = "Export failed"
+                    backupAlertMessage = error.localizedDescription
+                    showBackupAlert = true
                 }
             }
         }

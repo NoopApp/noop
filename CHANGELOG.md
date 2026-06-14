@@ -17,6 +17,12 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 2.18.0 — Export your raw sensor data (CSV)
+
+- **New (experimental):** a Settings **Export raw sensor data (CSV)** button dumps the decoded per-sample streams NOOP stores (heart rate, R-R, accelerometer, motion/step counter, SpO2/PPG, events) for the last 24h as a plain CSV — for prototyping your own sleep / activity / VBT algorithms on real data, no BLE coding. On-device only. Thanks @maddognik / @alacore (#322/#276).
+
+---
+
 ## 2.17.1 — Charge shows "Calibrating" instead of "No data" for new straps
 
 - **Fixed:** a brand-new strap showed a bare "No data" on Charge while it was still learning your baseline. It now reads "Calibrating — 0 of 4 nights" so it's clearly building, not broken. (Charge needs a few nights of wear; Effort and Rest show right away.) Thanks @umarXBT (#335).
