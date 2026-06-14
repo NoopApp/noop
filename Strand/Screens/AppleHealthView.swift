@@ -225,7 +225,7 @@ struct AppleHealthView: View {
         }
 
         let loadedRows = await rows
-        let appleWorkouts = await workouts.filter { $0.source == "apple_health" || $0.source == "apple-health" }
+        let appleWorkouts = await workouts.filter { WorkoutSource.isAppleHealth($0.source) }
 
         await MainActor.run {
             appleRows = loadedRows.sorted { $0.day < $1.day }

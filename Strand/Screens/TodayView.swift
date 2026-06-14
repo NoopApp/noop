@@ -601,7 +601,7 @@ struct TodayView: View {
                         badge: "Apple Health",
                         tint: StrandPalette.metricCyan,
                         present: !appleDays.isEmpty,
-                        detail: "\(appleDays.count) days · \(workouts.filter { $0.source == "apple-health" }.count) workouts"
+                        detail: "\(appleDays.count) days · \(workouts.filter { WorkoutSource.isAppleHealth($0.source) }.count) workouts"
                     )
                     strapBatteryRow
                     Divider().overlay(StrandPalette.hairline)

@@ -15,13 +15,22 @@ import WhoopStore
 enum WorkoutSource: Equatable {
     case whoop, apple, detected, manual, lifting
 
+    static let appleHealthSource = "apple-health"
+    private static let legacyAppleHealthSource = "apple_health"
+
     static func classify(_ source: String) -> WorkoutSource {
         let s = source.lowercased()
         if s.hasSuffix("-noop") { return .detected }   // BEFORE whoop: "my-whoop-noop" contains "whoop"
         if s == "manual" { return .manual }
         if s == "lifting" { return .lifting }          // imported Hevy / Liftosaur strength session
+        if isAppleHealth(s) { return .apple }
         if s.contains("whoop") { return .whoop }
         return .apple
+    }
+
+    static func isAppleHealth(_ source: String) -> Bool {
+        let s = source.lowercased()
+        return s == appleHealthSource || s == legacyAppleHealthSource
     }
 
     /// Sport-cell text. The detector stores the machine token "detected"; show it as a neutral
