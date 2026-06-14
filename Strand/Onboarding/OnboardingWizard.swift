@@ -235,7 +235,7 @@ private struct BondWatcher: View {
     @EnvironmentObject private var live: LiveState
     let onBonded: () -> Void
     var body: some View {
-        Color.clear.onChange(of: live.bonded) { newValue in if newValue { onBonded() } }
+        Color.clear.onChangeCompat(of: live.bonded) { _, newValue in if newValue { onBonded() } }
     }
 }
 
@@ -1080,7 +1080,7 @@ private struct RadarSweep: View {
             if active { startSweep() }
             ping = true
         }
-        .onChange(of: active) { isActive in
+        .onChangeCompat(of: active) { _, isActive in
             if isActive { startSweep() }
         }
         .animation(StrandMotion.breathe(reduced: reduceMotion), value: ping)

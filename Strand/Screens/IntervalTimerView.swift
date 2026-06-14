@@ -125,9 +125,9 @@ struct IntervalTimerView: View {
             }
         }
         .onReceive(ticker) { _ in tick() }
-        .onChange(of: workSeconds) { _ in if !running { resetToStart() } }
-        .onChange(of: restSeconds) { _ in if !running { resetToStart() } }
-        .onChange(of: rounds) { _ in
+        .onChangeCompat(of: workSeconds) { if !running { resetToStart() } }
+        .onChangeCompat(of: restSeconds) { if !running { resetToStart() } }
+        .onChangeCompat(of: rounds) {
             if currentRound > rounds { currentRound = rounds }
             if !running { resetToStart() }
         }
@@ -136,7 +136,7 @@ struct IntervalTimerView: View {
         // every running→false transition — manual pause, auto-finish, and reset — and the
         // onDisappear is a safety net so navigating away mid-run never leaves the idle timer
         // disabled app-wide.
-        .onChange(of: running) { ScreenIdle.keepAwake($0) }
+        .onChangeCompat(of: running) { _, isRunning in ScreenIdle.keepAwake(isRunning) }
         .onDisappear { ScreenIdle.keepAwake(false) }
         #if os(iOS)
         // iPhone haptics: one modifier emits a different feel per cue, re-firing on every
@@ -219,7 +219,7 @@ struct IntervalTimerView: View {
             }
         }
         // Drive the gauge's draw-in toward the live interval progress, eased per tick.
-        .onChange(of: intervalProgress) { newValue in
+        .onChangeCompat(of: intervalProgress) { _, newValue in
             withAnimation(.linear(duration: 0.9)) { animatedProgress = newValue }
         }
         .onAppear { animatedProgress = intervalProgress }

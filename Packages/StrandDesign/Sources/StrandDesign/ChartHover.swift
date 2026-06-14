@@ -194,7 +194,7 @@ struct PositionedTooltip: View {
                 GeometryReader { g in
                     Color.clear
                         .onAppear { measured = g.size }
-                        .onChange(of: g.size) { measured = $0 }
+                        .onChangeCompat(of: g.size) { _, newValue in measured = newValue }
                 }
             )
             .position(

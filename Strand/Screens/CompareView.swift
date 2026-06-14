@@ -173,7 +173,7 @@ struct CompareView: View {
         }
         // Recompute the pairwise scan only when the windowed series content changes,
         // never on hover/animation/HR-tick re-renders that don't touch these inputs.
-        .onChange(of: correlationKey(activeSeries)) { _ in
+        .onChangeCompat(of: correlationKey(activeSeries)) {
             refreshPairCache(activeSeries)
         }
     }
@@ -696,7 +696,7 @@ private struct OverlayChart: View {
         // Bevel "now" end-caps — a soft halo + bright core on each series' latest point, drawn on top.
         .chartOverlay { proxy in
             GeometryReader { geo in
-                let plot = geo[proxy.plotAreaFrame]
+                let plot = proxy.plotRect(in: geo)
                 ForEach(endCaps) { cap in
                     if let px = proxy.position(forX: cap.date),
                        let py = proxy.position(forY: cap.norm),
@@ -738,7 +738,7 @@ private struct OverlayChart: View {
         .chartLegend(.hidden) // legend rendered separately with real min/max
         .chartOverlay { proxy in
             GeometryReader { geo in
-                let plot = geo[proxy.plotAreaFrame]
+                let plot = proxy.plotRect(in: geo)
                 ZStack(alignment: .topLeading) {
                     if let hx = hoverX,
                        let day = nearestDay(toX: hx, proxy: proxy, plot: plot),

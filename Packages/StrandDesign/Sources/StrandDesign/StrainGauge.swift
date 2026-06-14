@@ -123,7 +123,7 @@ public struct StrainGauge: View {
             // Reduce Motion: leave the bloom at its resting opacity instead of breathing.
             if !reduceMotion { bloomPulse = true }
         }
-        .onChange(of: strain) { _ in
+        .onChangeCompat(of: strain) {
             withAnimation(StrandMotion.drawIn) { animatedFraction = fraction }
         }
     }

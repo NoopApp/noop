@@ -88,9 +88,9 @@ struct LiveView: View {
         }
         .onAppear { refreshLiveSession() }
         .onDisappear { model.stopRealtimeHR() }
-        .onChange(of: live.bonded) { _ in refreshLiveSession() }
-        .onChange(of: live.connected) { _ in refreshLiveSession() }
-        .onChange(of: displayHR) { _ in
+        .onChangeCompat(of: live.bonded) { refreshLiveSession() }
+        .onChangeCompat(of: live.connected) { refreshLiveSession() }
+        .onChangeCompat(of: displayHR) {
             // Reduce Motion: keep the ring at its resting scale — the HR number still
             // updates via its own .contentTransition(.numericText()), so live HR is
             // fully functional; only the cosmetic per-beat pulse is suppressed.
@@ -98,7 +98,7 @@ struct LiveView: View {
             withAnimation(StrandMotion.pulse) { heartPulse.toggle() }
         }
         // Live workout mode (#238): open the in-exercise screen the moment a workout starts.
-        .onChange(of: model.activeWorkout != nil) { active in if active { showLiveWorkout = true } }
+        .onChangeCompat(of: model.activeWorkout != nil) { _, active in if active { showLiveWorkout = true } }
         .sheet(isPresented: $showLiveWorkout) {
             LiveWorkoutView(onClose: { showLiveWorkout = false })
                 .environmentObject(model)
@@ -861,7 +861,7 @@ struct LiveView: View {
                         }
                     }
                     .frame(height: 200)
-                    .onChange(of: live.log.count) { _ in
+                    .onChangeCompat(of: live.log.count) {
                         if let last = live.log.indices.last { proxy.scrollTo(last, anchor: .bottom) }
                     }
                 }

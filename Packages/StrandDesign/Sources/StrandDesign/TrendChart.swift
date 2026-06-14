@@ -170,7 +170,7 @@ public struct TrendChart: View {
         }
         .chartOverlay { proxy in
             GeometryReader { geo in
-                let plot = geo[proxy.plotAreaFrame]
+                let plot = proxy.plotRect(in: geo)
                 ZStack(alignment: .topLeading) {
                     if showsHover,
                        let hx = hoverX,
