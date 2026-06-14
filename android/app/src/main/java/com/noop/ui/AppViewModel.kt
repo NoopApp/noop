@@ -163,8 +163,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 // Resolve via the LOGICAL day (rolls at 04:00 local), so between midnight and 4am we keep
                 // showing the prior logical day's row instead of an empty new-calendar-day row (#144).
                 // Presentation-only: stored row keys are untouched.
-                val todayKey = logicalDayKeyNow()   // ISO yyyy-MM-dd, local logical day
-                _today.value = days.lastOrNull { it.day == todayKey }
+                //
+                // One refinement (#304): if you fall asleep before midnight and WAKE in the small hours
+                // (before the 04:00 rollover), that night just ended and is banked under the real
+                // calendar day — but the logical day still points at YESTERDAY, so Today would show last
+                // night-but-one. So when a row exists for the true calendar day AND it already carries a
+                // night's sleep, prefer it; else fall back to the logical-day row. The sleep gate keeps
+                // #144 intact — a not-yet-slept new calendar day still defers to yesterday, not a blank.
+                val logicalKey = logicalDayKeyNow()              // ISO yyyy-MM-dd, local logical day
+                val calendarKey = java.time.LocalDate.now().toString()  // true local calendar day
+                val logicalRow = days.lastOrNull { it.day == logicalKey }
+                val calendarRow = days.lastOrNull { it.day == calendarKey && it.totalSleepMin != null }
+                _today.value = if (calendarKey != logicalKey && calendarRow != null) calendarRow else logicalRow
                 val previousAlert = _healthAlert.value
                 _healthAlert.value =
                     if (_illnessWatchEnabled.value) IllnessWatch.evaluate(days) else null

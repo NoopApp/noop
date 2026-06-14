@@ -102,6 +102,76 @@ final class AnalyticsEngineTests: XCTestCase {
         XCTAssertEqual(result.daily.exerciseCount, 0)
     }
 
+    /// Build a still, low-HR night that STARTS and ENDS at given LOCAL wall-clock times on a day,
+    /// for a device `offsetSeconds` east of UTC. Returns the raw streams plus the local end-day key.
+    private func localNight(onsetLocal: String, wakeLocal: String,
+                            offsetSeconds: Int) -> (start: Int, end: Int, localEndDay: String,
+                                                    hr: [HRSample], rr: [RRInterval],
+                                                    gravity: [GravitySample]) {
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.timeZone = TimeZone(identifier: "UTC")
+        fmt.dateFormat = "yyyy-MM-dd HH:mm"
+        // The strings are LOCAL wall clock; converting "as if UTC" then subtracting the offset gives
+        // the true UTC epoch of that local instant.
+        let start = Int(fmt.date(from: onsetLocal)!.timeIntervalSince1970) - offsetSeconds
+        let end = Int(fmt.date(from: wakeLocal)!.timeIntervalSince1970) - offsetSeconds
+        let localEndDay = AnalyticsEngine.dayString(end, offsetSeconds: offsetSeconds)
+
+        var hr: [HRSample] = []
+        var grav: [GravitySample] = []
+        for t in start..<end {
+            hr.append(HRSample(ts: t, bpm: 50))
+            grav.append(GravitySample(ts: t, x: 0, y: 0, z: 1))  // still
+        }
+        var rr: [RRInterval] = []
+        var toggle = false
+        for t in stride(from: start, to: end, by: 2) {
+            rr.append(RRInterval(ts: t, rrMs: toggle ? 1205 : 1195))
+            toggle.toggle()
+        }
+        return (start, end, localEndDay, hr, rr, grav)
+    }
+
+    /// Regression for #304: a night that falls asleep before midnight and wakes in the small hours
+    /// must attribute to the LOCAL day its wake falls on — even when that wake crosses UTC midnight,
+    /// so the UTC end-day is a different calendar date. With the device offset supplied, the night is
+    /// counted ONCE on the local day (the day the dashboard's logical day surfaces), with its real
+    /// duration — not dropped onto the adjacent UTC day where it bled into / was hidden behind the
+    /// previous night.
+    func testAnalyzeDayAttributesPreMidnightNightToLocalWakeDay() {
+        // Sydney (UTC+10). Onset 23:30 on the 14th LOCAL, wake 03:30 on the 15th LOCAL (before the
+        // 04:00 logical-day rollover). In UTC the wake is 17:30 on the 14th, so the UTC end-day (14th)
+        // differs from the LOCAL end-day (15th) — the exact split that misfiled the night pre-fix.
+        let offset = 10 * 3_600
+        let n = localNight(onsetLocal: "2021-06-14 23:30", wakeLocal: "2021-06-15 03:30",
+                           offsetSeconds: offset)
+        XCTAssertEqual(n.localEndDay, "2021-06-15")
+        // Sanity: the UTC end-day really is a different calendar date (otherwise the test is vacuous).
+        XCTAssertEqual(AnalyticsEngine.dayString(n.end), "2021-06-14")
+        XCTAssertNotEqual(AnalyticsEngine.dayString(n.end), n.localEndDay)
+
+        let profile = UserProfile(weightKg: 75, heightCm: 178, age: 30, sex: "male")
+
+        // Attributed to the LOCAL wake-day (15th) when the offset is supplied: ONE session, ~4 h.
+        let onLocalDay = AnalyticsEngine.analyzeDay(
+            day: "2021-06-15", hr: n.hr, rr: n.rr, gravity: n.gravity,
+            profile: profile, tzOffsetSeconds: offset)
+        XCTAssertEqual(onLocalDay.daily.day, "2021-06-15")
+        XCTAssertEqual(onLocalDay.sleepSessions.count, 1)
+        XCTAssertNotNil(onLocalDay.daily.totalSleepMin)
+        // ~4 h in bed; allow slack for onset-trimming / staging.
+        XCTAssertEqual(onLocalDay.daily.totalSleepMin!, 4 * 60, accuracy: 60)
+
+        // And NOT onto the UTC end-day (14th): asking for the 14th with the same offset finds nothing,
+        // so the night can no longer surface on the wrong day / behind the previous night (#304).
+        let onUtcDay = AnalyticsEngine.analyzeDay(
+            day: "2021-06-14", hr: n.hr, rr: n.rr, gravity: n.gravity,
+            profile: profile, tzOffsetSeconds: offset)
+        XCTAssertEqual(onUtcDay.sleepSessions.count, 0)
+        XCTAssertNil(onUtcDay.daily.totalSleepMin)
+    }
+
     func testAnalyzeDayDailyMetricRoundTripsThroughCodable() throws {
         // The produced DailyMetric must encode/decode (it's the WhoopStore cache shape).
         let day = "2021-06-20"

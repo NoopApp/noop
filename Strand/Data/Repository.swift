@@ -133,9 +133,26 @@ final class Repository: ObservableObject {
     /// day's row instead of an empty new-calendar-day row that blanks the dashboard (#144). nil if no row
     /// for that day yet (the dashboard then shows its empty/pending state). Presentation-only — stored
     /// row keys are untouched.
+    ///
+    /// One refinement over a bare logical-day lookup: if you fall asleep before midnight and WAKE in the
+    /// small hours (before the 04:00 rollover), that night just ended and is banked under the actual
+    /// calendar day — but the logical day still points at YESTERDAY, so the dashboard would show last
+    /// night-but-one instead of the night you just finished (#304). So when a row exists for the true
+    /// calendar day AND it already carries a night's sleep, prefer it; otherwise fall back to the
+    /// logical-day row. The sleep gate keeps #144 intact — a not-yet-slept new calendar day (a 1am
+    /// glance with no banked night) has no qualifying row, so we still hold yesterday rather than blank.
     var today: DailyMetric? {
-        let key = Repository.logicalDayKey(Date())
-        return days.last(where: { $0.day == key })
+        let now = Date()
+        let logicalRow = days.last(where: { $0.day == Repository.logicalDayKey(now) })
+        let calendarKey = Repository.localDayKey(now)
+        // Only let the true calendar day pre-empt the logical day once it has a real night banked, so a
+        // just-finished pre-dawn wake surfaces while an empty/partial new day still defers to yesterday.
+        if calendarKey != Repository.logicalDayKey(now),
+           let calendarRow = days.last(where: { $0.day == calendarKey }),
+           calendarRow.totalSleepMin != nil {
+            return calendarRow
+        }
+        return logicalRow
     }
     /// The trailing 7 CALENDAR days ending today (for the week strip), oldest→newest — not the last 7
     /// stored rows, which on a stale import were old data. ISO yyyy-MM-dd compares chronologically.

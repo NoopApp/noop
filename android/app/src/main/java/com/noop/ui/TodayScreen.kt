@@ -168,12 +168,16 @@ fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
     // merges imported + computed sleep_performance (imported-wins), so an importer sees the export's
     // figure and a Bluetooth-only user sees the on-device composite. Null until loaded / no night yet.
     var restScoreForDay by remember { mutableStateOf<Double?>(null) }
-    LaunchedEffect(days, selectedDayKey) {
+    // For today, key off the row the dashboard actually shows (`displayMetric`, which surfaces a
+    // just-finished pre-dawn night under the real calendar day, #304) so the Rest score matches the
+    // hours/stages on screen rather than the logical (previous) day's night. Past days use their key.
+    val restScoreKey = if (selectedDayOffset == 0) (displayMetric?.day ?: selectedDayKey) else selectedDayKey
+    LaunchedEffect(days, restScoreKey) {
         val byDay = runCatching {
             viewModel.repo.resolvedSeries("sleep_performance", "my-whoop", "0000-00-00", "9999-99-99")
                 .values.associate { it.first to it.second }
         }.getOrDefault(emptyMap())
-        restScoreForDay = byDay[selectedDayKey] ?: byDay.entries.maxByOrNull { it.key }?.value
+        restScoreForDay = byDay[restScoreKey] ?: byDay.entries.maxByOrNull { it.key }?.value
     }
 
     // Recovery cold-start: recovery is null until the HRV baseline crosses the seed gate

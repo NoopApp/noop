@@ -142,7 +142,14 @@ object IntelligenceEngine {
 
         for (offset in 0 until maxDays) {
             val dayStart = nowSeconds - offset * SECONDS_PER_DAY
-            val day = AnalyticsEngine.dayString(dayStart)
+            // Attribute this scored day on the device-LOCAL wall clock, matching how the dashboard
+            // (logical day), SleepScreen's per-night grouping, and the WHOOP-import path all key their
+            // rows. The strap path previously keyed on the UTC day, so for a user not on UTC a night
+            // ending in the small hours (crossing UTC midnight) was stored one calendar day off from
+            // the day the app shows as Today — surfacing the PREVIOUS night on Today and corrupting the
+            // per-day Intelligence list (#304). tzOffsetSeconds is folded into both the day key and
+            // analyzeDay's session/total matching so they stay on the same basis.
+            val day = AnalyticsEngine.dayString(dayStart, tzOffsetSeconds)
             // Read a generous window around the night that ends on `day`; the stager finds
             // the span. (30 h before, 12 h after — matches the Swift window.)
             val from = dayStart - 30 * 3_600L
@@ -157,13 +164,14 @@ object IntelligenceEngine {
             val skin = repo.skinTempSamples(importedDeviceId, from, to, STREAM_LIMIT)
 
             // Calendar-day window for the ADDITIVE daily totals (steps + calories). The night window
-            // above is anchored to the current UTC time-of-day and ends at dayStart+12h, so for a PAST
-            // day whose late hours sit after that bound those hours are never read and the totals
-            // undercount. Read exactly [midnightUtc(day), midnightUtc(day)+86400) and hand it to
-            // analyzeDay's dayHr/daySteps, which use it ONLY for those totals. Same STREAM_LIMIT; the
-            // MIN_HR_SAMPLES gate above stays on the night window so empty days are still skipped.
-            // (the DAO range is inclusive, so end at +86400-1s; analyzeDay also filters to the day.)
-            val dayMidnight = midnightUtc(dayStart)
+            // above is anchored to the current time-of-day and ends at dayStart+12h, so for a PAST day
+            // whose late hours sit after that bound those hours are never read and the totals
+            // undercount. Read exactly [localMidnight(day), localMidnight(day)+86400) and hand it to
+            // analyzeDay's dayHr/daySteps, which use it ONLY for those totals. LOCAL midnight (not UTC)
+            // so the window lines up with the now-local `day` key and analyzeDay's offset-aware total
+            // filters (#304). Same STREAM_LIMIT; the MIN_HR_SAMPLES gate above stays on the night
+            // window so empty days are still skipped. (DAO range inclusive, so end at +86400-1s.)
+            val dayMidnight = midnightUtc(dayStart + tzOffsetSeconds) - tzOffsetSeconds
             val dayEnd = dayMidnight + SECONDS_PER_DAY - 1
             val dayHr = repo.hrSamples(importedDeviceId, dayMidnight, dayEnd, STREAM_LIMIT)
             val daySteps = repo.stepSamples(importedDeviceId, dayMidnight, dayEnd, STREAM_LIMIT)

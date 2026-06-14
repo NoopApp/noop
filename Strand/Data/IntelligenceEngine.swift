@@ -84,7 +84,14 @@ final class IntelligenceEngine: ObservableObject {
 
         for offset in 0..<maxDays {
             let dayStart = now - offset * 86_400
-            let day = AnalyticsEngine.dayString(dayStart)
+            // Attribute this scored day on the device-LOCAL wall clock, matching how the dashboard
+            // (logical day), the SleepView per-night grouping, and the WHOOP-import path all key
+            // their rows. The strap path previously keyed on the UTC day, so for a user not on UTC a
+            // night ending in the small hours (crossing UTC midnight) was stored one calendar day off
+            // from the day the app shows as Today — surfacing the PREVIOUS night on Today and
+            // corrupting the per-day Intelligence list (#304). `tzOffset` is folded into both the day
+            // key and analyzeDay's session/total matching so they stay on the same basis.
+            let day = AnalyticsEngine.dayString(dayStart, offsetSeconds: tzOffset)
             // Read a generous window around the night that ends on `day`; the stager finds the span.
             let from = dayStart - 30 * 3_600
             let to = dayStart + 12 * 3_600
@@ -98,12 +105,15 @@ final class IntelligenceEngine: ObservableObject {
             let skin = (try? await store.skinTempSamples(deviceId: deviceId, from: from, to: to, limit: 200_000)) ?? []
 
             // Calendar-day window for the ADDITIVE daily totals (steps + calories). The night window
-            // above is anchored to the current UTC time-of-day and ends at dayStart+12h, so for a PAST
+            // above is anchored to the current time-of-day and ends at dayStart+12h, so for a PAST
             // day whose late hours sit after that bound those hours are never read and the totals
-            // undercount. Read exactly [midnightUtc(day), midnightUtc(day)+86400) and hand it to
-            // analyzeDay's dayHr/daySteps, which use it ONLY for those totals. (floorMod so the
-            // midnight floor is correct for any sign; the store range is inclusive, so end at -1 s.)
-            let dayMid = dayStart - ((dayStart % 86_400) + 86_400) % 86_400
+            // undercount. Read exactly [localMidnight(day), localMidnight(day)+86400) and hand it to
+            // analyzeDay's dayHr/daySteps, which use it ONLY for those totals. LOCAL midnight (not
+            // UTC) so the window lines up with the now-local `day` key and analyzeDay's offset-aware
+            // total filters. (floorMod on the LOCAL clock so the floor is correct for any sign, then
+            // shift back to a UTC epoch; the store range is inclusive, so end at -1 s.)
+            let local = dayStart + tzOffset
+            let dayMid = local - ((local % 86_400) + 86_400) % 86_400 - tzOffset
             let dayEnd = dayMid + 86_400 - 1
             let dayHr = (try? await store.hrSamples(deviceId: deviceId, from: dayMid, to: dayEnd, limit: 200_000)) ?? []
             let daySteps = (try? await store.stepSamples(deviceId: deviceId, from: dayMid, to: dayEnd, limit: 200_000)) ?? []

@@ -47,6 +47,20 @@ object AnalyticsEngine {
     fun dayString(ts: Long): String = isoDay.format(Instant.ofEpochSecond(ts))
 
     /**
+     * Format a unix-seconds timestamp as a YYYY-MM-DD day string in the LOCAL wall clock
+     * [offsetSeconds] east of UTC. With the default `offsetSeconds == 0L` this is identical to
+     * [dayString] (UTC), so pure-function callers and tests are unaffected. Shifting the timestamp by
+     * the offset and then formatting in UTC yields the local calendar date without pulling in a
+     * ZoneId (keeps the engine deterministic + DB-free). This is how a sleep session is attributed to
+     * the day its wake falls on for a user NOT on UTC: a night ending 03:30 local crosses UTC midnight
+     * for many offsets, so the UTC end-day was a calendar day off from the LOCAL day the dashboard
+     * (logical day), the importer, and SleepScreen all key on (#304). Mirrors Swift
+     * `AnalyticsEngine.dayString(_:offsetSeconds:)`.
+     */
+    fun dayString(ts: Long, offsetSeconds: Long): String =
+        isoDay.format(Instant.ofEpochSecond(ts + offsetSeconds))
+
+    /**
      * JSON-encode stage segments to the verbatim array shape the sleepSession cache
      * stores. Mirrors Swift `encodeStages` (JSONEncoder on [StageSegment]); the field
      * order/names (start, end, stage) match the Codable wire shape and the Android
@@ -71,8 +85,11 @@ object AnalyticsEngine {
     /**
      * Analyze one day's streams into a [DayResult].
      *
-     * @param day the calendar day (UTC) this metric is for; a sleep session is
-     *   attributed to the day its `end` falls on (a night ending that morning).
+     * @param day the calendar day this metric is for, on the SAME wall-clock basis as
+     *   [tzOffsetSeconds] (UTC when that is 0, the device-local day otherwise); a sleep session is
+     *   attributed to the day its `end` falls on (a night ending that morning). The caller MUST
+     *   derive `day` with the same offset (see [dayString] (ts, offsetSeconds)) so the session→day
+     *   match and the additive-total day windows agree (#304).
      * @param hr/rr/resp/gravity the day's raw streams (the wider window around the
      *   night may be passed; sleep detection finds the in-bed span itself).
      * @param profile user profile (age/sex/weight/height) for HRmax + calories.
@@ -122,8 +139,11 @@ object AnalyticsEngine {
         val allSessions = SleepStager.detectSleep(
             hr = hr, rr = rr, resp = resp, gravity = gravity, tzOffsetSeconds = tzOffsetSeconds,
         )
-        // Sessions attributed to `day` = those whose end falls on `day` (UTC).
-        val matched = allSessions.filter { dayString(it.end) == day }
+        // Sessions attributed to `day` = those whose end falls on `day`. `day` and the end-day are
+        // compared on the SAME basis: the device-local wall clock ([tzOffsetSeconds]), so a night that
+        // ends in the small hours and crosses UTC midnight still lands on the local day the rest of the
+        // app keys on. With the default offset 0 this is the original UTC behaviour (#304).
+        val matched = allSessions.filter { dayString(it.end, tzOffsetSeconds) == day }
 
         // ── Daily sleep aggregates (AASM, in-bed weighted) ────────────────────
         var deepS = 0.0
@@ -247,12 +267,12 @@ object AnalyticsEngine {
         // step_motion_counter@57 is a CUMULATIVE u16 running counter. The daily total is the SUM of
         // positive consecutive deltas across the day's samples (already ts-ASC from the DAO). u16
         // wraparound: a negative delta means the counter rolled past 65535, so add 65536. The day's
-        // ~42h read window may include adjacent-day samples, so filter to dayString(ts)==day first.
-        // ESTIMATE only — not cloud/clinical parity.
+        // ~42h read window may include adjacent-day samples, so filter to the day first (local-day
+        // basis, like the sleep match above; UTC when offset 0). ESTIMATE only — not cloud/clinical.
         val stepsTotal: Int? = run {
             // Prefer the full-calendar-day stream for the additive total; fall back to the
             // night-window stream when the caller didn't supply one (pure-function callers/tests).
-            val sorted = (daySteps ?: steps).filter { dayString(it.ts) == day }.sortedBy { it.ts }
+            val sorted = (daySteps ?: steps).filter { dayString(it.ts, tzOffsetSeconds) == day }.sortedBy { it.ts }
             if (sorted.size < 2) return@run null
             // A firmware reboot resets the counter and is byte-indistinguishable from a u16 wrap.
             // A genuine wrap yields a SMALL corrected delta (the steps since the last record); a
@@ -287,7 +307,7 @@ object AnalyticsEngine {
         // window — which, anchored to the current time-of-day, would drop a past day's late hours
         // and double-count seconds shared with adjacent days. Fall back to the night-window hr for
         // pure-function callers that don't supply dayHr. Strain keeps the full window (bounded log).
-        val dayHrFiltered = (dayHr ?: hr).filter { dayString(it.ts) == day }
+        val dayHrFiltered = (dayHr ?: hr).filter { dayString(it.ts, tzOffsetSeconds) == day }
         val activeKcalEst: Double? = if (dayHrFiltered.isEmpty()) {
             null
         } else {

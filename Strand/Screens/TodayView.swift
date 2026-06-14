@@ -695,8 +695,12 @@ struct TodayView: View {
         let restSeries = await repo.exploreSeries(key: "sleep_performance", source: "my-whoop")
         let restByDay = Dictionary(restSeries.map { ($0.day, $0.value) }, uniquingKeysWith: { _, last in last })
         // The selected day's Rest, falling back to the series tail only when today itself is selected —
-        // a navigated past day with no Rest row shows "—" rather than borrowing the newest value.
-        restScore = restByDay[selectedDayKey] ?? (selectedDayOffset == 0 ? restSeries.last?.value : nil)
+        // a navigated past day with no Rest row shows "—" rather than borrowing the newest value. For
+        // today, key off the row the dashboard actually shows (`repo.today`, which surfaces a
+        // just-finished pre-dawn night under the real calendar day, #304) so the Rest score matches the
+        // hours/stages on screen rather than the logical (previous) day's night.
+        let todayRestKey = selectedDayOffset == 0 ? (repo.today?.day ?? selectedDayKey) : selectedDayKey
+        restScore = restByDay[todayRestKey] ?? (selectedDayOffset == 0 ? restSeries.last?.value : nil)
 
         workouts = await repo.workoutRows()
         appleDays = await repo.appleDailyRows()

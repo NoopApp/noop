@@ -1,6 +1,8 @@
 package com.noop.analytics
 
 import com.noop.data.DailyMetric
+import com.noop.data.GravitySample
+import com.noop.data.HrSample
 import com.noop.data.RrInterval
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -219,5 +221,65 @@ class AnalyticsTest {
         val hrv = SleepStager.sessionAvgHRV(start, end, rr)
         assertNotNull(hrv)
         assertTrue("ectopic spikes must be rejected before rMSSD", hrv!! < 50.0)
+    }
+
+    // --- #304 sleep day-boundary attribution --------------------------------
+
+    /**
+     * Regression for #304: a night that falls asleep before midnight and wakes in the small hours
+     * must attribute to the LOCAL day its wake falls on — even when that wake crosses UTC midnight,
+     * so the UTC end-day is a different calendar date. With the device offset supplied, the night is
+     * counted ONCE on the local day (the day the dashboard's logical day surfaces) with its real
+     * duration — not dropped onto the adjacent UTC day where it bled into / was hidden behind the
+     * previous night. Mirrors AnalyticsEngineTests.testAnalyzeDayAttributesPreMidnightNightToLocalWakeDay.
+     */
+    @Test
+    fun analyzeDay_attributesPreMidnightNightToLocalWakeDay() {
+        // Sydney (UTC+10). Onset 23:30 on the 14th LOCAL, wake 03:30 on the 15th LOCAL (before the
+        // 04:00 logical-day rollover). In UTC the wake is 17:30 on the 14th, so the UTC end-day (14th)
+        // differs from the LOCAL end-day (15th) — the exact split that misfiled the night pre-fix.
+        val offset = 10 * 3_600L
+        // 2026-06-14 00:00:00 UTC. Anchor the night off this fixed midnight so the wake (17:30 UTC on
+        // the 14th) is a deterministic epoch, independent of the host timezone. The session center then
+        // sits at ~01:30 LOCAL — outside the [11,20) daytime band — so the overnight path is taken.
+        val utc20260614 = 1_781_395_200L
+        val wakeUtc = utc20260614 + 17 * 3_600L + 30 * 60L     // 17:30 UTC on the 14th
+        val onsetUtc = wakeUtc - 4 * 3_600L                     // 4 h earlier (23:30 local on the 14th)
+
+        // Sanity: the UTC end-day and the LOCAL end-day really are different calendar dates.
+        assertEquals("2026-06-14", AnalyticsEngine.dayString(wakeUtc))
+        assertEquals("2026-06-15", AnalyticsEngine.dayString(wakeUtc, offset))
+
+        // Still, low-HR night with oscillating RR (avoids ectopic rejection), 1 Hz streams.
+        val hr = (onsetUtc until wakeUtc).map { HrSample(deviceId = "d", ts = it, bpm = 50) }
+        val grav = (onsetUtc until wakeUtc).map { GravitySample(deviceId = "d", ts = it, x = 0.0, y = 0.0, z = 1.0) }
+        val rr = ArrayList<RrInterval>()
+        var t = onsetUtc
+        var toggle = false
+        while (t < wakeUtc) {
+            rr.add(RrInterval(deviceId = "d", ts = t, rrMs = if (toggle) 1205 else 1195))
+            toggle = !toggle
+            t += 2
+        }
+        val profile = UserProfile(weightKg = 75.0, heightCm = 178.0, age = 30.0, sex = "male")
+
+        // Attributed to the LOCAL wake-day (15th) when the offset is supplied: ONE session, ~4 h.
+        val onLocalDay = AnalyticsEngine.analyzeDay(
+            day = "2026-06-15", hr = hr, rr = rr, gravity = grav,
+            profile = profile, tzOffsetSeconds = offset,
+        )
+        assertEquals("2026-06-15", onLocalDay.daily.day)
+        assertEquals(1, onLocalDay.sleepSessions.size)
+        assertNotNull(onLocalDay.daily.totalSleepMin)
+        assertEquals(4.0 * 60, onLocalDay.daily.totalSleepMin!!, 60.0)  // ~4 h in bed, slack for trimming
+
+        // And NOT onto the UTC end-day (14th): asking for the 14th with the same offset finds nothing,
+        // so the night can no longer surface on the wrong day / behind the previous night (#304).
+        val onUtcDay = AnalyticsEngine.analyzeDay(
+            day = "2026-06-14", hr = hr, rr = rr, gravity = grav,
+            profile = profile, tzOffsetSeconds = offset,
+        )
+        assertEquals(0, onUtcDay.sleepSessions.size)
+        assertNull(onUtcDay.daily.totalSleepMin)
     }
 }
