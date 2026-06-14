@@ -63,7 +63,7 @@ struct StressView: View {
         }
         .onAppear { rebuildModelIfNeeded() }
         .onChange(of: repo.days) { _ in rebuildModelIfNeeded() }
-        .task { await load() }
+        .task(id: repo.refreshSeq) { await load() }
     }
 
     private func load() async {

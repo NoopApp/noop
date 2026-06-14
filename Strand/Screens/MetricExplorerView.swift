@@ -109,6 +109,7 @@ struct MetricExplorerView: View {
     /// metric.id → whether its series is empty. Filled INCREMENTALLY by `probeEmptiness()`; a metric
     /// absent from the map simply has no empty-dot yet (rows never wait on it — see `MetricRow`).
     @State private var emptyByID: [String: Bool] = [:]
+    @State private var probedRefreshSeq: Int?
     /// True while the empty-dot probe is still running its first pass. Drives a small inline progress
     /// hint in the header, never gating the rows: the catalog is static, so every row's label/icon/unit
     /// must paint immediately even before any series read returns (#199).
@@ -118,13 +119,13 @@ struct MetricExplorerView: View {
         #if os(macOS)
         // macOS: Explore is a standalone detail pane, so it owns its NavigationStack.
         NavigationStack { exploreScaffold }
-            .task { await probeEmptiness() }
+            .task(id: repo.refreshSeq) { await probeEmptiness(refreshSeq: repo.refreshSeq) }
         #else
         // iOS: Explore is pushed INSIDE the More tab's NavigationStack. A nested NavigationStack made
         // tapping a metric bounce straight back to the More list (#199) — so use the ambient stack and
         // let the navigationDestination below resolve against it.
         exploreScaffold
-            .task { await probeEmptiness() }
+            .task(id: repo.refreshSeq) { await probeEmptiness(refreshSeq: repo.refreshSeq) }
         #endif
     }
 
@@ -183,10 +184,15 @@ struct MetricExplorerView: View {
     /// between reads so the run loop can lay the rows out) lets the catalog rows render immediately and
     /// the dots fill in as the probe lands. Rows already render their label/icon/unit without waiting on
     /// this — the map only ever ADDS a trailing dot.
-    private func probeEmptiness() async {
-        guard emptyByID.isEmpty else { probing = false; return }
+    private func probeEmptiness(refreshSeq: Int) async {
+        guard probedRefreshSeq != refreshSeq || emptyByID.isEmpty else { probing = false; return }
+        probedRefreshSeq = refreshSeq
+        emptyByID = [:]
+        probing = true
         for metric in MetricCatalog.all {
+            guard !Task.isCancelled else { return }
             let s = await repo.exploreSeries(key: metric.key, source: metric.source)
+            guard !Task.isCancelled else { return }
             emptyByID[metric.id] = s.isEmpty
             await Task.yield()
         }
@@ -298,6 +304,7 @@ struct MetricDetailView: View {
     @State private var correlationCache: [CorrRow] = []
     /// The (metricID, range) the cache was built for; nil means "not yet computed".
     @State private var correlationKey: String? = nil
+    private var loadTaskID: String { "\(metric.id)|\(repo.refreshSeq)" }
 
     // MARK: Derived
 
@@ -382,7 +389,7 @@ struct MetricDetailView: View {
         }
         .background(StrandPalette.surfaceBase)
         .navigationTitle(metric.title)
-        .task(id: metric.id) { await load() }
+        .task(id: loadTaskID) { await load() }
         // Range changes the window, hence the correlation inputs — recompute the
         // cached scan rather than letting `correlationCard` run it inside body.
         .onChange(of: range) { _ in recomputeCorrelations() }

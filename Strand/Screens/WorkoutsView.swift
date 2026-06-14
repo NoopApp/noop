@@ -27,7 +27,9 @@ struct WorkoutsView: View {
     /// All loaded sessions, newest first. Seedable for previews.
     @State private var allRows: [WorkoutRow]
     @State private var loaded: Bool
+    @State private var seededInitialRange = false
     @State private var range: Range = .all
+    private let usesPreviewRows: Bool
 
     /// The add/edit sheet target: `.some(nil)` = add a new workout, `.some(row)` = edit `row`,
     /// `nil` = sheet closed. Wrapped in Identifiable so `.sheet(item:)` can drive presentation.
@@ -42,6 +44,7 @@ struct WorkoutsView: View {
     init(previewRows: [WorkoutRow]? = nil) {
         _allRows = State(initialValue: previewRows ?? [])
         _loaded = State(initialValue: previewRows != nil)
+        usesPreviewRows = previewRows != nil
     }
 
     var body: some View {
@@ -74,16 +77,23 @@ struct WorkoutsView: View {
                 sessionsSection(rows: windowRows)
             }
         }
-        .task {
-            guard !loaded else { return }
+        .task(id: repo.refreshSeq) {
+            guard !usesPreviewRows else { return }
             let r = await repo.workoutRows()
             allRows = r
+            let wasLoaded = loaded
             loaded = true
-            range = defaultRange(for: r)
+            if !wasLoaded {
+                range = defaultRange(for: r)
+                seededInitialRange = true
+            }
         }
         .onAppear {
             // Preview-seeded rows skip `.task`; still choose a range that has data.
-            if loaded { range = defaultRange(for: allRows) }
+            if loaded && !seededInitialRange {
+                range = defaultRange(for: allRows)
+                seededInitialRange = true
+            }
         }
         .sheet(item: $sheet) { target in
             ManualWorkoutSheet(editing: target.editing) { row, replacing in

@@ -171,7 +171,7 @@ struct InsightsView: View {
                 }
             }
         }
-        .task(id: repo.loaded) { await load() }
+        .task(id: repo.refreshSeq) { await load() }
         // Recompute the cached ranking only when the outcome selection changes.
         // (behaviours / outcomeByKey change only at load, which calls
         //  recomputeRanked() directly, so keying on `outcome` is sufficient.)

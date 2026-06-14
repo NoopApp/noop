@@ -144,6 +144,7 @@ struct CompareView: View {
 
     private let maxSelection = 4
     private let minSelection = 2
+    private var loadTaskID: String { "\(selectionKey)|\(repo.refreshSeq)" }
 
     var body: some View {
         ScreenScaffold(title: "Compare", subtitle: "Overlay signals, draw conclusions.") {
@@ -166,7 +167,7 @@ struct CompareView: View {
             }
         }
         .task { await loadIfNeeded() }
-        .task(id: selectionKey) {
+        .task(id: loadTaskID) {
             await loadSelected()
             refreshPairCache(activeSeries)
         }
@@ -247,9 +248,11 @@ struct CompareView: View {
         selected = Array(picks.prefix(maxSelection))
     }
 
-    /// Load (and cache) the full history for any selected metric not yet fetched.
+    /// Load the full history for the selected metrics. Selection is capped at four,
+    /// so a repository refresh can safely replace cached rows instead of leaving
+    /// Compare on a stale pre-sync snapshot.
     private func loadSelected() async {
-        for metric in selected where fullSeries[metric.id] == nil {
+        for metric in selected {
             let s = await repo.resolvedSeries(key: metric.key, source: metric.source).values
             fullSeries[metric.id] = s
         }

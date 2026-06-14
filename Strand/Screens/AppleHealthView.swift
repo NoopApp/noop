@@ -180,7 +180,7 @@ struct AppleHealthView: View {
                 }
             }
         }
-        .task { await load() }
+        .task(id: repo.refreshSeq) { await load() }
         .onChange(of: range) { _ in rebuildWindowCache() }
     }
 
