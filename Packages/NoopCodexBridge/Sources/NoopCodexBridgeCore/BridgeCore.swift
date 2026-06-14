@@ -13,6 +13,7 @@ public struct BridgeConfiguration: Sendable {
     public let modelOverride: String?
     public let workdir: String
     public let timeoutSeconds: TimeInterval
+    public let accessToken: String?
 
     public init(environment: [String: String] = ProcessInfo.processInfo.environment) {
         host = Self.loopbackHost(environment["NOOP_CODEX_BRIDGE_HOST"])
@@ -22,6 +23,8 @@ public struct BridgeConfiguration: Sendable {
         workdir = environment["NOOP_CODEX_WORKDIR"].flatMap { $0.isEmpty ? nil : $0 }
             ?? "/tmp/noop-codex-bridge"
         timeoutSeconds = TimeInterval(environment["NOOP_CODEX_TIMEOUT_SECONDS"] ?? "") ?? 120
+        accessToken = environment["NOOP_CODEX_BRIDGE_TOKEN"]
+            .flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty }
     }
 
     public var baseURL: String {
@@ -352,6 +355,10 @@ public final class BridgeHTTPServer: @unchecked Sendable {
             return HTTPResponse(status: 204, body: Data())
         }
 
+        if let authorizationError = authorizationError(for: request) {
+            return authorizationError
+        }
+
         switch (request.method, request.path) {
         case ("GET", "/health"), ("GET", "/v1/health"):
             return json([
@@ -429,6 +436,32 @@ public final class BridgeHTTPServer: @unchecked Sendable {
             return 504
         case .codexFailed, .emptyCodexReply:
             return 502
+        }
+    }
+
+    private func authorizationError(for request: HTTPRequest) -> HTTPResponse? {
+        guard routeRequiresToken(request),
+              let token = configuration.accessToken,
+              !token.isEmpty else {
+            return nil
+        }
+
+        let expected = "Bearer \(token)"
+        guard request.headers["authorization"] == expected else {
+            return jsonError("Local Codex bridge authorization failed.", status: 401)
+        }
+        return nil
+    }
+
+    private func routeRequiresToken(_ request: HTTPRequest) -> Bool {
+        switch (request.method, request.path) {
+        case ("GET", "/models"),
+             ("GET", "/v1/models"),
+             ("POST", "/chat/completions"),
+             ("POST", "/v1/chat/completions"):
+            return true
+        default:
+            return false
         }
     }
 
@@ -533,6 +566,7 @@ struct HTTPResponse {
         case 200: return "OK"
         case 204: return "No Content"
         case 400: return "Bad Request"
+        case 401: return "Unauthorized"
         case 403: return "Forbidden"
         case 404: return "Not Found"
         case 413: return "Payload Too Large"

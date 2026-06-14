@@ -272,7 +272,11 @@ struct CoachView: View {
     private var codexBridgeActions: some View {
         HStack(spacing: 8) {
             Button {
-                Task { await coach.startCodexLocalBridge() }
+                if coach.codexBridgeState.isReady {
+                    coach.stopCodexLocalBridge()
+                } else {
+                    Task { await coach.startCodexLocalBridge() }
+                }
             } label: {
                 Label {
                     Text(codexPrimaryActionTitle)
@@ -283,7 +287,7 @@ struct CoachView: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(StrandPalette.accent)
-            .disabled(codexBridgePulsing || coach.codexBridgeState.isReady)
+            .disabled(codexBridgePulsing)
 
             Button {
                 Task { await coach.refreshCodexLocalStatus() }
@@ -338,7 +342,7 @@ struct CoachView: View {
         case .starting:
             return "Starting"
         case .ready:
-            return "Ready"
+            return "Stop bridge"
         default:
             return "Start bridge"
         }
@@ -349,7 +353,7 @@ struct CoachView: View {
         case .starting:
             return "clock"
         case .ready:
-            return "checkmark"
+            return "stop.fill"
         default:
             return "play.fill"
         }
@@ -362,7 +366,7 @@ struct CoachView: View {
     }
 
     private var codexBridgeHealthLine: String {
-        guard let health = coach.codexBridgeState.health else { return "127.0.0.1:37337" }
+        guard let health = coach.codexBridgeState.health else { return AIProvider.codexLocalAuthority }
         if let pid = health.pid {
             return "pid \(pid)"
         }

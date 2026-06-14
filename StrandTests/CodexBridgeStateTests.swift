@@ -3,6 +3,14 @@ import XCTest
 
 final class CodexBridgeStateTests: XCTestCase {
 
+    func testCodexLocalUsesCanonicalAppManagedEndpoint() {
+        UserDefaults.standard.set("http://example.invalid:9999/v1", forKey: "ai.codexLocalBaseURL")
+        defer { UserDefaults.standard.removeObject(forKey: "ai.codexLocalBaseURL") }
+
+        XCTAssertEqual(AIProvider.codexLocalBaseURL, "http://127.0.0.1:37337/v1")
+        XCTAssertEqual(AIProvider.codexLocalHealthURL.absoluteString, "http://127.0.0.1:37337/health")
+    }
+
     func testHealthDecodesBridgeMetadata() throws {
         let data = Data("""
         {

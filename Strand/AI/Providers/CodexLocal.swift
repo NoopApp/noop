@@ -22,7 +22,9 @@ struct CodexLocalClient: AIProviderClient {
 
         var req = URLRequest(url: AIProvider.codexLocal.endpoint)
         req.httpMethod = "POST"
+        req.timeoutInterval = 150
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        CodexBridgeAccess.authorize(&req)
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let json = try await performRequest(req, session: session)
@@ -38,6 +40,8 @@ struct CodexLocalClient: AIProviderClient {
     func fetchModels(key: String, session: URLSession) async throws -> [String] {
         var req = URLRequest(url: AIProvider.codexLocal.modelsEndpoint)
         req.httpMethod = "GET"
+        req.timeoutInterval = 5
+        CodexBridgeAccess.authorize(&req)
 
         let json = try await performRequest(req, session: session)
         guard let list = json["data"] as? [[String: Any]] else {

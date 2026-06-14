@@ -114,30 +114,39 @@ enum AIProvider: String, CaseIterable, Identifiable {
 
     // MARK: - Codex Local bridge
 
-    /// UserDefaults key for the local NOOP Codex bridge base URL. The bridge speaks a minimal
-    /// OpenAI-compatible surface on loopback and invokes the logged-in Codex CLI outside the app
-    /// sandbox.
-    static let codexLocalBaseURLKey = "ai.codexLocalBaseURL"
-
-    static var codexLocalBaseURL: String {
-        let stored = UserDefaults.standard.string(forKey: codexLocalBaseURLKey) ?? ""
-        let trimmed = stored.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "http://127.0.0.1:37337/v1" : trimmed
-    }
+    /// Canonical app-managed local bridge endpoint. Custom user-controlled OpenAI-compatible
+    /// servers belong under the Custom provider; Codex Local always points at the bundled helper.
+    static let codexLocalHost = "127.0.0.1"
+    static let codexLocalPort: UInt16 = 37337
+    static let codexLocalAuthority = "\(codexLocalHost):\(codexLocalPort)"
+    static let codexLocalRootURL = "http://\(codexLocalAuthority)"
+    static let codexLocalBaseURL = "\(codexLocalRootURL)/v1"
 
     static func codexLocalURL(path: String) -> URL {
-        var base = codexLocalBaseURL
-        while base.hasSuffix("/") { base.removeLast() }
-        return URL(string: base + path) ?? URL(string: "http://127.0.0.1:37337/v1" + path)!
+        URL(string: codexLocalBaseURL + path)!
     }
 
     static var codexLocalHealthURL: URL {
-        var base = codexLocalBaseURL
-        while base.hasSuffix("/") { base.removeLast() }
-        if base.hasSuffix("/v1") {
-            base.removeLast(3)
+        URL(string: codexLocalRootURL + "/health")!
+    }
+}
+
+enum CodexBridgeAccess {
+    private static let tokenKey = "ai.codexLocalBridgeToken"
+
+    static var token: String {
+        if let stored = UserDefaults.standard.string(forKey: tokenKey),
+           !stored.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return stored
         }
-        return URL(string: base + "/health") ?? URL(string: "http://127.0.0.1:37337/health")!
+
+        let generated = "\(UUID().uuidString)-\(UUID().uuidString)"
+        UserDefaults.standard.set(generated, forKey: tokenKey)
+        return generated
+    }
+
+    static func authorize(_ request: inout URLRequest) {
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
 }
 

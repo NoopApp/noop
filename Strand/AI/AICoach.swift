@@ -309,6 +309,11 @@ final class AICoachEngine: ObservableObject {
         }
     }
 
+    func stopCodexLocalBridge() {
+        errorText = nil
+        codexBridgeState = codexBridge.stop()
+    }
+
     func connectCodexLocal() {
         errorText = nil
         Task {
@@ -326,6 +331,7 @@ final class AICoachEngine: ObservableObject {
     /// kept so reconnecting pre-fills it.
     func disconnect() {
         if provider == .codexLocal {
+            stopCodexLocalBridge()
             provider = .openAI
             return
         }

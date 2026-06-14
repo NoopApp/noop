@@ -6,11 +6,13 @@ final class PromptBuilderTests: XCTestCase {
         let configuration = BridgeConfiguration(environment: [
             "NOOP_CODEX_BRIDGE_HOST": "0.0.0.0",
             "NOOP_CODEX_BRIDGE_PORT": "8080",
+            "NOOP_CODEX_BRIDGE_TOKEN": " local-secret ",
         ])
 
         XCTAssertEqual(configuration.host, "127.0.0.1")
         XCTAssertEqual(configuration.port, 8080)
         XCTAssertEqual(configuration.baseURL, "http://127.0.0.1:8080/v1")
+        XCTAssertEqual(configuration.accessToken, "local-secret")
     }
 
     func testPromptIncludesCoachInstructionsAndConversation() throws {

@@ -147,7 +147,7 @@ final class CodexBridgeSupervisor {
             }
         }
 
-        return .failed("The bundled bridge started, but NOOP could not reach it on 127.0.0.1:37337.")
+        return .failed("The bundled bridge started, but NOOP could not reach it on \(AIProvider.codexLocalAuthority).")
     }
 
     func restart() async -> CodexBridgeRuntimeState {
@@ -157,6 +157,14 @@ final class CodexBridgeSupervisor {
         }
         process = nil
         return await start()
+    }
+
+    func stop() -> CodexBridgeRuntimeState {
+        if let process, process.isRunning {
+            process.terminate()
+        }
+        process = nil
+        return .stopped
     }
 
     private func fetchHealth() async throws -> CodexBridgeHealth {
@@ -183,8 +191,9 @@ final class CodexBridgeSupervisor {
 
     private func bridgeEnvironment() -> [String: String] {
         var env = ProcessInfo.processInfo.environment
-        env["NOOP_CODEX_BRIDGE_HOST"] = "127.0.0.1"
-        env["NOOP_CODEX_BRIDGE_PORT"] = "37337"
+        env["NOOP_CODEX_BRIDGE_HOST"] = AIProvider.codexLocalHost
+        env["NOOP_CODEX_BRIDGE_PORT"] = "\(AIProvider.codexLocalPort)"
+        env["NOOP_CODEX_BRIDGE_TOKEN"] = CodexBridgeAccess.token
         if env["NOOP_CODEX_WORKDIR"] == nil {
             env["NOOP_CODEX_WORKDIR"] = NSTemporaryDirectory() + "noop-codex-bridge"
         }
