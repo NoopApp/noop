@@ -28,6 +28,11 @@ struct ManualWorkoutSheet: View {
     @State private var avgHrText: String
     @State private var kcalText: String
 
+    /// Focus for the numeric (Avg HR / Calories) fields so the keyboard Done button can resign them
+    /// (the decimal pad has no return key). iOS-only effect; the enum keeps both platforms compiling.
+    private enum NumberField: Hashable { case avgHr, calories }
+    @FocusState private var focusedField: NumberField?
+
     init(editing: WorkoutRow? = nil,
          onSave: @escaping (_ row: WorkoutRow, _ replacing: WorkoutRow?) -> Void) {
         self.editing = editing
@@ -73,11 +78,11 @@ struct ManualWorkoutSheet: View {
                 }
                 HStack(spacing: 14) {
                     field("Avg HR") {
-                        numberInput("optional", text: $avgHrText, unit: "bpm")
+                        numberInput("optional", text: $avgHrText, unit: "bpm", field: .avgHr)
                             .accessibilityLabel("Average heart rate in beats per minute, optional")
                     }
                     field("Calories") {
-                        numberInput("optional", text: $kcalText, unit: "kcal")
+                        numberInput("optional", text: $kcalText, unit: "kcal", field: .calories)
                             .accessibilityLabel("Calories in kilocalories, optional")
                     }
                 }
@@ -94,8 +99,13 @@ struct ManualWorkoutSheet: View {
         .frame(width: 420)
         #else
         .frame(maxWidth: .infinity)
+        // A short 5-field form → open at .medium with .large a drag away; the now-visible grabber
+        // also supplies the top dismiss affordance the sheet otherwise lacks (only a bottom Cancel).
+        .noopSheetPresentation(largeFirst: false)
         #endif
         .background(StrandPalette.surfaceOverlay)
+        // Lets the user dismiss the decimal pad (which has no return key) and reach Cancel/Add. No-op on macOS.
+        .keyboardDoneToolbar($focusedField)
     }
 
     // MARK: - Sections
@@ -146,12 +156,15 @@ struct ManualWorkoutSheet: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func numberInput(_ placeholder: String, text: Binding<String>, unit: String) -> some View {
+    private func numberInput(_ placeholder: String, text: Binding<String>, unit: String, field: NumberField) -> some View {
         HStack(spacing: 6) {
             TextField(placeholder, text: text)
                 .textFieldStyle(.plain)
                 .font(StrandFont.bodyNumber)
                 .foregroundStyle(StrandPalette.textPrimary)
+                // Numeric entry → decimal pad on iOS (digits + "."), not the QWERTY default; no-op on macOS.
+                .numericKeyboard()
+                .focused($focusedField, equals: field)
             Text(unit).font(StrandFont.footnote).foregroundStyle(StrandPalette.textTertiary)
         }
         .padding(.horizontal, 12).padding(.vertical, 9)

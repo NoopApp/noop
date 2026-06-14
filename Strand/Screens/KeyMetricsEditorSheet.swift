@@ -52,7 +52,16 @@ struct KeyMetricsEditorSheet: View {
             footer
         }
         .padding(24)
+        // A fixed 420pt suits the free-floating macOS window, but it overflows a 393pt iPhone, so
+        // on iOS fill the presented sheet (matching the sibling sheets' #185 fix) and adopt detents.
+        #if os(macOS)
         .frame(width: 420)
+        #else
+        .frame(maxWidth: .infinity)
+        // A short list → open at .medium with .large a drag away; the grabber gives the top dismiss
+        // affordance the sheet otherwise lacks (only a bottom Done today).
+        .noopSheetPresentation(largeFirst: false)
+        #endif
         .background(StrandPalette.surfaceOverlay)
     }
 

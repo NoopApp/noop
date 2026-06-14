@@ -16,6 +16,23 @@ public enum NoopMetrics {
     public static let hypnogramBandMinThickness: CGFloat = 14  // floor so short stages read as bars, not ticks
 }
 
+// MARK: - iOS sheet presentation idiom
+
+#if os(iOS)
+public extension View {
+    /// The house iOS sheet idiom: a drag indicator (the touch affordance that says
+    /// "swipe to dismiss") plus the supplied detents. macOS sheets are free-floating
+    /// windows and must NOT receive this — call sites stay shared, this is iOS-only.
+    /// `largeFirst == false` opens at .medium with .large reachable by dragging up
+    /// (right for short forms); `true` opens full-height (right for long scrolls).
+    func noopSheetPresentation(largeFirst: Bool) -> some View {
+        self
+            .presentationDragIndicator(.visible)
+            .presentationDetents(largeFirst ? [.large] : [.medium, .large])
+    }
+}
+#endif
+
 // MARK: - Surface
 
 /// The one card surface — now the Bevel frosted card. PUBLIC API is unchanged
@@ -297,5 +314,42 @@ public struct SourceBadge: View {
             .background(tint.opacity(0.16), in: Capsule(style: .continuous))
             .foregroundStyle(tint)
             .overlay(Capsule(style: .continuous).strokeBorder(tint.opacity(0.34), lineWidth: 1))
+    }
+}
+
+// MARK: - Numeric field helpers (iOS soft-keyboard)
+
+public extension View {
+    /// Configures a TextField for whole-number-or-decimal entry on iOS: the decimal-pad keyboard
+    /// (handles both Avg-HR integers and decimal calories) plus number content type. No-op on
+    /// macOS (hardware keyboard), so the SAME shared view compiles on both. Pair with
+    /// `.keyboardDoneToolbar(...)` on the enclosing view to add a Done button (iOS has no
+    /// return key on the decimal pad).
+    func numericKeyboard() -> some View {
+        #if os(iOS)
+        self.keyboardType(.decimalPad).textContentType(nil)
+        #else
+        self
+        #endif
+    }
+}
+
+public extension View {
+    /// Adds a single trailing "Done" button to the software-keyboard accessory bar that resigns the
+    /// given focus binding. iOS-only; the keyboard toolbar is hosted by the keyboard itself, so it
+    /// works inside a sheet with no NavigationStack. No-op on macOS.
+    func keyboardDoneToolbar<Value: Hashable>(_ focus: FocusState<Value?>.Binding) -> some View {
+        #if os(iOS)
+        self.toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { focus.wrappedValue = nil }
+                    .font(StrandFont.body)
+                    .foregroundStyle(StrandPalette.accent)
+            }
+        }
+        #else
+        self
+        #endif
     }
 }

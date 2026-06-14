@@ -117,6 +117,8 @@ struct ScoringGuideView: View {
         .frame(width: 560, height: 640)
         #else
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // A long explainer scroll → open full-height, with a grabber for swipe-to-dismiss.
+        .noopSheetPresentation(largeFirst: true)
         #endif
         .background(StrandPalette.surfaceBase)
     }
