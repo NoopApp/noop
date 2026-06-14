@@ -7,6 +7,7 @@ enum AIProvider: String, CaseIterable, Identifiable {
     case anthropic
     case gemini
     case custom
+    case codexLocal
 
     var id: String { rawValue }
 
@@ -16,6 +17,7 @@ enum AIProvider: String, CaseIterable, Identifiable {
         case .anthropic: return "Anthropic"
         case .gemini:    return "Google Gemini"
         case .custom:    return "Custom (OpenAI-compatible)"
+        case .codexLocal: return "Codex Local"
         }
     }
 
@@ -25,6 +27,7 @@ enum AIProvider: String, CaseIterable, Identifiable {
         case .anthropic: return "claude-sonnet-4-6"
         case .gemini:    return "gemini-2.5-flash"
         case .custom:    return ""   // the user picks the model their server serves
+        case .codexLocal: return "codex-local"
         }
     }
 
@@ -53,6 +56,8 @@ enum AIProvider: String, CaseIterable, Identifiable {
             ]
         case .custom:
             return []   // populated from the server's /models (refreshModels) or typed in
+        case .codexLocal:
+            return ["codex-local"]
         }
     }
 
@@ -62,6 +67,7 @@ enum AIProvider: String, CaseIterable, Identifiable {
         case .anthropic: return URL(string: "https://api.anthropic.com/v1/messages")!
         case .gemini:    return URL(string: "https://generativelanguage.googleapis.com/v1beta/models")!
         case .custom:    return AIProvider.customURL(path: "/chat/completions")
+        case .codexLocal: return AIProvider.codexLocalURL(path: "/chat/completions")
         }
     }
 
@@ -71,6 +77,7 @@ enum AIProvider: String, CaseIterable, Identifiable {
         case .anthropic: return URL(string: "https://api.anthropic.com/v1/models")!
         case .gemini:    return URL(string: "https://generativelanguage.googleapis.com/v1beta/models")!
         case .custom:    return AIProvider.customURL(path: "/models")
+        case .codexLocal: return AIProvider.codexLocalURL(path: "/models")
         }
     }
 
@@ -80,6 +87,7 @@ enum AIProvider: String, CaseIterable, Identifiable {
         case .anthropic: return AnthropicClient()
         case .gemini:    return GeminiClient()
         case .custom:    return CustomClient()
+        case .codexLocal: return CodexLocalClient()
         }
     }
 
@@ -102,6 +110,34 @@ enum AIProvider: String, CaseIterable, Identifiable {
         var base = customBaseURL
         while base.hasSuffix("/") { base.removeLast() }
         return URL(string: base + path) ?? URL(string: "http://localhost" + path)!
+    }
+
+    // MARK: - Codex Local bridge
+
+    /// UserDefaults key for the local NOOP Codex bridge base URL. The bridge speaks a minimal
+    /// OpenAI-compatible surface on loopback and invokes the logged-in Codex CLI outside the app
+    /// sandbox.
+    static let codexLocalBaseURLKey = "ai.codexLocalBaseURL"
+
+    static var codexLocalBaseURL: String {
+        let stored = UserDefaults.standard.string(forKey: codexLocalBaseURLKey) ?? ""
+        let trimmed = stored.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "http://127.0.0.1:37337/v1" : trimmed
+    }
+
+    static func codexLocalURL(path: String) -> URL {
+        var base = codexLocalBaseURL
+        while base.hasSuffix("/") { base.removeLast() }
+        return URL(string: base + path) ?? URL(string: "http://127.0.0.1:37337/v1" + path)!
+    }
+
+    static var codexLocalHealthURL: URL {
+        var base = codexLocalBaseURL
+        while base.hasSuffix("/") { base.removeLast() }
+        if base.hasSuffix("/v1") {
+            base.removeLast(3)
+        }
+        return URL(string: base + "/health") ?? URL(string: "http://127.0.0.1:37337/health")!
     }
 }
 
