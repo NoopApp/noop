@@ -32,6 +32,9 @@ struct ScreenScaffold<Content: View>: View {
             }
             .padding(28)
             #if os(iOS)
+            // The tab bar floats over the scroll content, so the last card was hidden behind it.
+            // Reserve extra bottom scroll room so every screen's final card clears the floating bar.
+            .padding(.bottom, NoopMetrics.tabBarClearance)
             // iPad: cap the readable column, then centre it in the full-width scroll viewport.
             // iPhone (.compact): the inner frame is .infinity/.leading, identical to before.
             .frame(maxWidth: hSizeClass == .regular ? 700 : .infinity,

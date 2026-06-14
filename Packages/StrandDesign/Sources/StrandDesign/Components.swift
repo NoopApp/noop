@@ -14,6 +14,7 @@ public enum NoopMetrics {
     public static let tileHeight: CGFloat = 108  // every metric tile is this tall
     public static let chartHeight: CGFloat = 220
     public static let hypnogramBandMinThickness: CGFloat = 14  // floor so short stages read as bars, not ticks
+    public static let tabBarClearance: CGFloat = 76  // iOS: extra bottom scroll room so the last card clears the floating tab bar
 }
 
 // MARK: - Surface
