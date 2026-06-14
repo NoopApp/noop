@@ -90,6 +90,19 @@ extension WhoopStore {
         }
     }
 
+    /// Delete one sleep session by its full natural key (deviceId, startTs). Source-scoped by
+    /// deviceId, so deleting a manually-added or imported session never touches an identically-timed
+    /// row under a different source. Returns rows deleted. Port of Android WhoopDao.deleteSleepSession.
+    @discardableResult
+    public func deleteSleepSession(deviceId: String, startTs: Int) async throws -> Int {
+        try syncWrite { db in
+            try db.execute(sql: """
+                DELETE FROM sleepSession WHERE deviceId = ? AND startTs = ?
+                """, arguments: [deviceId, startTs])
+            return db.changesCount
+        }
+    }
+
     /// Upsert cached daily metrics. Natural key (deviceId, day). Returns rows changed.
     @discardableResult
     public func upsertDailyMetrics(_ days: [DailyMetric], deviceId: String) async throws -> Int {

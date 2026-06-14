@@ -215,7 +215,15 @@ final class IntelligenceEngine: ObservableObject {
         // always wins; this only fills the days the strap collected but no import covered.
         if !dailies.isEmpty { _ = try? await store.upsertDailyMetrics(dailies, deviceId: computedId) }
         if !restPoints.isEmpty { _ = try? await store.upsertMetricSeries(restPoints, deviceId: computedId) }
-        if !cachedSleep.isEmpty { _ = try? await store.upsertSleepSessions(cachedSleep, deviceId: computedId) }
+        // Honour the user's manual sleep deletions (#281): a computed night whose span the user removed
+        // must NOT be re-derived back. The deleted-span list is the durable record (same mechanism as
+        // dismissed detected bouts) — drop any re-derived session overlapping a deleted span.
+        let deletedSpans = SleepSource.parseDeletedSpans(
+            UserDefaults.standard.stringArray(forKey: SleepSource.deletedDefaultsKey) ?? [])
+        let keptSleep = deletedSpans.isEmpty ? cachedSleep : cachedSleep.filter {
+            !SleepSource.isDeleted(startTs: $0.startTs, endTs: $0.endTs, spans: deletedSpans)
+        }
+        if !keptSleep.isEmpty { _ = try? await store.upsertSleepSessions(keptSleep, deviceId: computedId) }
         // Make re-detection idempotent across runs: clear the prior computed detected workouts in the
         // scored window (a bout's startTs can drift as more HR arrives, which would otherwise orphan
         // stale rows under the (deviceId,startTs,sport) key), then re-insert.

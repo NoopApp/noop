@@ -712,6 +712,86 @@ final class Repository: ObservableObject {
                                             from: row.startTs, to: row.startTs)
     }
 
+    // MARK: - Sleep editing (manual add · delete · merge) — #281
+    //
+    // Sleep sessions are read un-deduplicated by SleepView from TWO sources: imported WHOOP/Apple
+    // sessions under the strap `deviceId`, and on-device computed sessions under `computedDeviceId`,
+    // which the IntelligenceEngine RE-DERIVES every run. The read model (`CachedSleepSession`) carries
+    // no source, so these mutators are written source-aware here:
+    //  - a MANUAL add lands under the strap `deviceId` (the engine never writes sleep there, so it is
+    //    never clobbered by a re-analysis) with a coarse honest stage summary;
+    //  - a DELETE removes the (startTs) row from BOTH sources AND records the span in a durable list so
+    //    a re-derived COMPUTED night the user removed stays removed (mirrors dismissed detected bouts);
+    //  - a MERGE writes the combined block as a manual session and deletes the two originals.
+
+    /// Persisted deleted-sleep spans ("startTs:endTs"). The engine consults these to skip re-deriving a
+    /// computed night the user deleted; the read path needs no filter (the row is physically gone).
+    private var deletedSleepSpans: [String] {
+        get { UserDefaults.standard.stringArray(forKey: SleepSource.deletedDefaultsKey) ?? [] }
+        set { UserDefaults.standard.set(newValue, forKey: SleepSource.deletedDefaultsKey) }
+    }
+
+    /// Add a sleep session the strap missed (e.g. a nap). Persisted under the strap `deviceId` so a
+    /// later analyzeRecent — which only writes computed sleep under `computedDeviceId` — never touches
+    /// it. If a previously-deleted span covers this new session, drop that span first so re-adding the
+    /// same night isn't immediately re-hidden from the engine's computed re-derivation.
+    func saveManualSleep(_ session: CachedSleepSession) async {
+        guard let store = await ensureStore() else { return }
+        let spans = SleepSource.parseDeletedSpans(deletedSleepSpans)
+        if SleepSource.isDeleted(startTs: session.startTs, endTs: session.endTs, spans: spans) {
+            deletedSleepSpans = deletedSleepSpans.filter { tok in
+                let parts = tok.split(separator: ":")
+                guard parts.count == 2, let a = Int(parts[0]), let b = Int(parts[1]) else { return false }
+                return !(session.startTs < b && a < session.endTs)
+            }
+        }
+        _ = try? await store.upsertSleepSessions([session], deviceId: deviceId)
+        await refresh()
+    }
+
+    /// Delete one sleep session. The read model has no source, so remove the (startTs) row from BOTH
+    /// the strap (imported/manual) and the computed source, and record the span durably so a re-derived
+    /// computed night stays deleted across analyzeRecent runs.
+    func deleteSleep(_ session: CachedSleepSession) async {
+        guard let store = await ensureStore() else { return }
+        let token = SleepSource.deletedToken(startTs: session.startTs, endTs: session.endTs)
+        var spans = deletedSleepSpans
+        if !spans.contains(token) { spans.append(token); deletedSleepSpans = spans }
+        _ = try? await store.deleteSleepSession(deviceId: deviceId, startTs: session.startTs)
+        _ = try? await store.deleteSleepSession(deviceId: computedDeviceId, startTs: session.startTs)
+        await refresh()
+    }
+
+    /// Merge two adjacent sessions into one (the issue's "sessions close together"). The combined block
+    /// is written as a manual session under the strap id and both originals are deleted from both
+    /// sources; the originals' spans are recorded so a computed half isn't re-derived back into a split.
+    func mergeSleepSessions(_ a: CachedSleepSession, _ b: CachedSleepSession) async {
+        guard let store = await ensureStore() else { return }
+        let merged = SleepSource.merge(a, b)
+        // Record + delete both originals first.
+        for s in [a, b] {
+            let token = SleepSource.deletedToken(startTs: s.startTs, endTs: s.endTs)
+            var spans = deletedSleepSpans
+            if !spans.contains(token) { spans.append(token); deletedSleepSpans = spans }
+            _ = try? await store.deleteSleepSession(deviceId: deviceId, startTs: s.startTs)
+            _ = try? await store.deleteSleepSession(deviceId: computedDeviceId, startTs: s.startTs)
+        }
+        // The merged block spans the originals — make sure its own span isn't on the deleted list.
+        deletedSleepSpans = deletedSleepSpans.filter { tok in
+            let parts = tok.split(separator: ":")
+            guard parts.count == 2, let lo = Int(parts[0]), let hi = Int(parts[1]) else { return false }
+            return !(merged.startTs <= lo && hi <= merged.endTs)
+        }
+        _ = try? await store.upsertSleepSessions([merged], deviceId: deviceId)
+        await refresh()
+    }
+
+    /// Suggested merges among every un-deduplicated sleep block (adjacent pairs within the gap
+    /// threshold). The Sleep screen surfaces these so the user can confirm a one-tap merge. (#281)
+    func suggestedSleepMerges() async -> [SleepSource.MergeCandidate] {
+        SleepSource.suggestedMerges(await allSleepSessions())
+    }
+
     /// Apple Health daily aggregates (steps/energy/vo2/hr).
     func appleDailyRows(days: Int = 4000) async -> [AppleDaily] {
         guard let store = await ensureStore() else { return [] }

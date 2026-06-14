@@ -56,6 +56,13 @@ struct SleepView: View {
     /// gaps preserved. Oldest→newest. Falls back to `repo.sleeps` until loaded. (#170)
     @State private var allSessions: [CachedSleepSession] = []
 
+    /// Presents the "Add sleep" sheet when true (#281).
+    @State private var showingAddSleep = false
+    /// The day's blocks pending a delete confirmation (nil = no dialog). (#281)
+    @State private var deleteCandidate: [CachedSleepSession]?
+    /// The two blocks pending a merge confirmation (nil = no dialog). (#281)
+    @State private var mergeCandidate: (CachedSleepSession, CachedSleepSession)?
+
     var body: some View {
         // Resolve the memoized model for THIS render. `dataKey` is O(1)-ish (counts + last-row
         // identity), so comparing it every render is cheap. When it matches the cached key we
@@ -114,7 +121,85 @@ struct SleepView: View {
                 modelKey = dataKey
                 model = buildModel()
             }
+            // Manual add / delete / merge (#281).
+            .sheet(isPresented: $showingAddSleep) {
+                ManualSleepSheet { session in
+                    Task { await repo.saveManualSleep(session) }
+                }
+            }
+            .confirmationDialog("Delete this sleep?",
+                                isPresented: deleteDialogBinding,
+                                titleVisibility: .visible) {
+                Button("Delete", role: .destructive) {
+                    if let blocks = deleteCandidate { performDelete(blocks) }
+                }
+                Button("Cancel", role: .cancel) { deleteCandidate = nil }
+            } message: {
+                Text(deleteMessage)
+            }
+            .confirmationDialog("Merge these sleeps?",
+                                isPresented: mergeDialogBinding,
+                                titleVisibility: .visible) {
+                Button("Merge") {
+                    if let (a, b) = mergeCandidate { performMerge(a, b) }
+                }
+                Button("Cancel", role: .cancel) { mergeCandidate = nil }
+            } message: {
+                Text("They'll become one night spanning both, with the gap counted as awake. This can't be undone.")
+            }
         }
+    }
+
+    // MARK: - Sleep editing actions (#281)
+
+    /// Blocks of the day currently shown in the hero (newest day first, offset 0 = last night).
+    private func displayedDayBlocks() -> [CachedSleepSession] {
+        let days = navDays
+        guard nightOffset >= 0, nightOffset < days.count else { return [] }
+        return days[nightOffset]
+    }
+
+    /// Adjacent blocks within the displayed day close enough to merge (the issue's "sessions close
+    /// together"), or nil. Only the first such pair is offered at a time.
+    private func mergeablePair() -> (CachedSleepSession, CachedSleepSession)? {
+        SleepSource.suggestedMerges(displayedDayBlocks()).first.map { ($0.first, $0.second) }
+    }
+
+    private func performDelete(_ blocks: [CachedSleepSession]) {
+        deleteCandidate = nil
+        Task {
+            for b in blocks { await repo.deleteSleep(b) }
+            allSessions = await repo.allSleepSessions()
+            nightOffset = 0
+            navNight = nil
+            modelKey = dataKey
+            model = buildModel()
+        }
+    }
+
+    private func performMerge(_ a: CachedSleepSession, _ b: CachedSleepSession) {
+        mergeCandidate = nil
+        Task {
+            await repo.mergeSleepSessions(a, b)
+            allSessions = await repo.allSleepSessions()
+            nightOffset = 0
+            navNight = nil
+            modelKey = dataKey
+            model = buildModel()
+        }
+    }
+
+    private var deleteDialogBinding: Binding<Bool> {
+        Binding(get: { deleteCandidate != nil }, set: { if !$0 { deleteCandidate = nil } })
+    }
+    private var mergeDialogBinding: Binding<Bool> {
+        Binding(get: { mergeCandidate != nil }, set: { if !$0 { mergeCandidate = nil } })
+    }
+    private var deleteMessage: String {
+        let n = deleteCandidate?.count ?? 0
+        return n > 1
+            ? "This night has \(n) sleep blocks — all of them will be removed. This can't be undone."
+            : "This sleep will be removed. This can't be undone."
     }
 
     // MARK: - 1. HERO — stage breakdown
@@ -670,7 +755,42 @@ struct SleepView: View {
             .buttonStyle(.plain)
             .disabled(nightOffset == 0)
             .accessibilityLabel("Next night")
+
+            sleepEditMenu
         }
+    }
+
+    /// Overflow menu for manual sleep editing (#281): add a missed sleep, merge adjacent split blocks,
+    /// or delete the displayed night. Mirrors the Workouts screen's row menu. Add is always available;
+    /// merge/delete act on the day currently shown in the hero.
+    @ViewBuilder
+    private var sleepEditMenu: some View {
+        let blocks = displayedDayBlocks()
+        let pair = mergeablePair()
+        Menu {
+            Button { showingAddSleep = true } label: {
+                Label("Add sleep…", systemImage: "plus")
+            }
+            if let pair {
+                Button { mergeCandidate = pair } label: {
+                    Label("Merge adjacent sleeps…", systemImage: "arrow.triangle.merge")
+                }
+            }
+            if !blocks.isEmpty {
+                Divider()
+                Button(role: .destructive) { deleteCandidate = blocks } label: {
+                    Label(blocks.count > 1 ? "Delete this night…" : "Delete this sleep…", systemImage: "trash")
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(StrandFont.headline)
+                .foregroundStyle(StrandPalette.accent)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .accessibilityLabel("Edit sleep")
     }
 
     /// Mean total sleep duration (minutes) across nights with data — the "typical".
@@ -824,6 +944,13 @@ struct SleepView: View {
         if live.backfilling { SyncingHistoryNote(chunks: live.syncChunksThisSession) }
         if repo.loaded {
             ComingSoon(what: "No nights here yet. Import your WHOOP export in Data Sources to see every night, your sleep stages and trends straight away. Or open Intelligence to see last night computed from the strap after you wear it to bed.")
+            // Even with no history, let the user log a nap or a night the strap missed. (#281)
+            Button { showingAddSleep = true } label: {
+                Label("Add sleep", systemImage: "plus").font(StrandFont.subhead)
+            }
+            .buttonStyle(.bordered)
+            .tint(StrandPalette.accent)
+            .accessibilityLabel("Add a sleep")
         } else {
             ComingSoon(what: "Loading your sleep history…")
         }

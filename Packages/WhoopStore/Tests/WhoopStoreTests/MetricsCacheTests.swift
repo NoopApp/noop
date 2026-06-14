@@ -53,6 +53,27 @@ final class MetricsCacheTests: XCTestCase {
         XCTAssertEqual(rows.map { $0.startTs }, [500])
     }
 
+    func testDeleteSleepSessionByNaturalKeyTouchesOnlyTheNamedSource() async throws {
+        // Manual add/delete (#281): deleting one session must hit only (deviceId, startTs) and
+        // leave an identically-timed session under a DIFFERENT source untouched.
+        let store = try await WhoopStore.inMemory()
+        let s = CachedSleepSession(startTs: 1_000, endTs: 5_000, efficiency: 0.9,
+                                   restingHr: 50, avgHrv: 60, stagesJSON: nil)
+        try await store.upsertSleepSessions([s], deviceId: "my-whoop")
+        try await store.upsertSleepSessions([s], deviceId: "my-whoop-noop")
+
+        let n = try await store.deleteSleepSession(deviceId: "my-whoop-noop", startTs: 1_000)
+        XCTAssertEqual(n, 1)
+        let imported = try await store.sleepSessions(deviceId: "my-whoop", from: 0, to: 100_000, limit: 100)
+        XCTAssertEqual(imported.count, 1, "imported session must be untouched")
+        let computed = try await store.sleepSessions(deviceId: "my-whoop-noop", from: 0, to: 100_000, limit: 100)
+        XCTAssertEqual(computed.count, 0)
+
+        // Deleting a now-absent key is a harmless no-op (returns 0).
+        let again = try await store.deleteSleepSession(deviceId: "my-whoop-noop", startTs: 1_000)
+        XCTAssertEqual(again, 0)
+    }
+
     // MARK: - daily metrics
 
     func testDailyMetricUpsertReadAndIdempotency() async throws {
