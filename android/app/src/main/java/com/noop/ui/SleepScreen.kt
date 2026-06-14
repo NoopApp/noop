@@ -21,7 +21,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -265,6 +267,12 @@ fun SleepScreen(
                     }
                     scope.launch { vm.updateSleepSessionTimes(s, start, end) }
                 },
+                onDeleteSession = { s ->
+                    // Delete = the edit path minus the re-insert: drop it from `sleeps` so metrics
+                    // recompute immediately, then persist the removal off the UI thread. (#281)
+                    sleeps = sleeps.filter { !(it.deviceId == s.deviceId && it.startTs == s.startTs) }
+                    scope.launch { vm.deleteSleepSession(s) }
+                },
                 onPickNightDate = onPickNightDate,
             )
             if (model != null) {
@@ -297,10 +305,11 @@ private fun Hero(
     onNavigate: (Int) -> Unit,
     session: SleepSession? = null,
     onUpdateTimes: (SleepSession, Long, Long) -> Unit = { _, _, _ -> },
+    onDeleteSession: (SleepSession) -> Unit = {},
     onPickNightDate: ((LocalDate) -> Unit)? = null,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        NightNavHeader(nightOffset, lastIndex, clock, onNavigate, session, onUpdateTimes, onPickNightDate)
+        NightNavHeader(nightOffset, lastIndex, clock, onNavigate, session, onUpdateTimes, onDeleteSession, onPickNightDate)
         if (display == null) {
             // Honest fallback: this night recorded no usable stage data — never silently
             // substitute another night's hypnogram. (#160)
@@ -378,12 +387,14 @@ private fun NightNavHeader(
     onNavigate: (Int) -> Unit,
     session: SleepSession? = null,
     onUpdateTimes: (SleepSession, Long, Long) -> Unit = { _, _, _ -> },
+    onDeleteSession: (SleepSession) -> Unit = {},
     onPickNightDate: ((LocalDate) -> Unit)? = null,
 ) {
     val canGoOlder = offset < lastIndex
     val canGoNewer = offset > 0
     val context = LocalContext.current
     var showTimeChoice by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
     var editingBed by remember { mutableStateOf(false) }
     var editingWake by remember { mutableStateOf(false) }
     var showDatePicker by remember { mutableStateOf(false) }
@@ -569,8 +580,30 @@ private fun NightNavHeader(
                     tint = Palette.textTertiary,
                     modifier = Modifier.size(14.dp).clickable { showTimeChoice = true },
                 )
+                Spacer(Modifier.width(Metrics.space12))
+                Icon(
+                    Icons.Filled.DeleteOutline,
+                    contentDescription = "Delete this sleep session",
+                    tint = Palette.textTertiary,
+                    modifier = Modifier.size(14.dp).clickable { showDeleteConfirm = true },
+                )
             }
         }
+    }
+
+    if (showDeleteConfirm && session != null) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Delete this sleep session?") },
+            text = { Text("Removes this recorded sleep and recomputes the day without it. This can't be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteConfirm = false
+                    onDeleteSession(session)
+                }) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") } },
+        )
     }
 }
 
