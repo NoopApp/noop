@@ -319,6 +319,14 @@ interface WhoopDao {
     @Query("SELECT * FROM dismissedWorkout WHERE deviceId = :deviceId")
     suspend fun dismissedWorkouts(deviceId: String): List<DismissedWorkout>
 
+    /** Record a user-deleted sleep session as a tombstone. IGNORE so re-deleting is a no-op. (#281) */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertDismissedSleep(rows: List<DismissedSleep>)
+
+    /** Sleep tombstones for a [deviceId] — the repository filters re-derived sessions against these. */
+    @Query("SELECT * FROM dismissedSleep WHERE deviceId = :deviceId")
+    suspend fun dismissedSleeps(deviceId: String): List<DismissedSleep>
+
     // MARK: - Frontier / stats (Reads.swift)
 
     /** Max HR sample ts for a device, or null if none — the biometric data frontier.

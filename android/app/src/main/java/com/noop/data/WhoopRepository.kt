@@ -175,10 +175,23 @@ class WhoopRepository(private val dao: WhoopDao) {
         dao.upsertSleepSessions(listOf(session.copy(startTs = newStartTs, endTs = newEndTs)))
     }
 
-    /** Remove a sleep session entirely — the delete half of [updateSleepSessionTimes] with no
-     *  re-insert. (deviceId, startTs) is the primary key, so it uniquely identifies the row (#281). */
-    suspend fun deleteSleepSession(session: SleepSession) =
+    /** Remove a sleep session. Sleep is COMPUTED and re-derived on every recompute, so a plain row
+     *  delete reappears — we ALSO write a [DismissedSleep] tombstone (mirrors dismissed workouts) that
+     *  the sleep reads filter against, keeping the deletion durable across re-derivation (#281). */
+    suspend fun deleteSleepSession(session: SleepSession) {
+        dao.insertDismissedSleep(listOf(DismissedSleep(session.deviceId, session.startTs, session.endTs)))
         dao.deleteSleepSession(session.deviceId, session.startTs)
+    }
+
+    /** Drop any sessions matching a [DismissedSleep] tombstone for [deviceId]. Matches on
+     *  (deviceId, startTs) — stable for a completed night's deterministic re-derivation; a still-
+     *  accumulating night whose startTs drifts is the known edge (same caveat as dismissed workouts). */
+    private suspend fun withoutDismissedSleep(deviceId: String, sessions: List<SleepSession>): List<SleepSession> {
+        val dismissed = dao.dismissedSleeps(deviceId)
+        if (dismissed.isEmpty()) return sessions
+        val keys = dismissed.mapTo(HashSet()) { it.startTs }
+        return sessions.filter { it.startTs !in keys }
+    }
     suspend fun upsertMetricSeries(rows: List<MetricSeriesRow>) = dao.upsertMetricSeries(rows)
     suspend fun upsertJournal(rows: List<JournalEntry>) = dao.upsertJournal(rows)
     suspend fun upsertWorkouts(rows: List<WorkoutRow>) = dao.upsertWorkouts(rows)
@@ -313,7 +326,7 @@ class WhoopRepository(private val dao: WhoopDao) {
         dao.gravitySamples(deviceId, from, to, limit)
 
     suspend fun sleepSessions(deviceId: String, from: Long, to: Long, limit: Int = DEFAULT_LIMIT) =
-        dao.sleepSessions(deviceId, from, to, limit)
+        withoutDismissedSleep(deviceId, dao.sleepSessions(deviceId, from, to, limit))
 
     suspend fun metricSeries(deviceId: String, key: String, from: String, to: String) =
         dao.metricSeries(deviceId, key, from, to)
@@ -396,8 +409,11 @@ class WhoopRepository(private val dao: WhoopDao) {
         to: Long,
         limit: Int = DEFAULT_LIMIT,
     ): List<SleepSession> = mergeSleep(
-        imported = dao.sleepSessions(deviceId, from, to, limit),
-        computed = dao.sleepSessions(computedDeviceId(deviceId), from, to, limit),
+        imported = withoutDismissedSleep(deviceId, dao.sleepSessions(deviceId, from, to, limit)),
+        computed = withoutDismissedSleep(
+            computedDeviceId(deviceId),
+            dao.sleepSessions(computedDeviceId(deviceId), from, to, limit),
+        ),
     )
 
     /** Cached daily metrics for the inclusive day range [from, to] (YYYY-MM-DD), oldest first. */

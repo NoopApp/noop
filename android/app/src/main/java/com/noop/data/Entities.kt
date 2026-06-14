@@ -301,6 +301,20 @@ data class DismissedWorkout(
 )
 
 /**
+ * Durable tombstone for a user-deleted sleep session (#281), mirroring [DismissedWorkout]. Sleep is
+ * COMPUTED from raw HR/motion and re-derived by SleepStager on every recompute, then re-upserted — so
+ * a plain row delete reappears. This marker keeps the deleted session hidden after re-derivation: the
+ * repository's sleep reads filter it out. Keyed (deviceId, startTs) like DismissedWorkout. Added by
+ * MIGRATION_6_7.
+ */
+@Entity(tableName = "dismissedSleep", primaryKeys = ["deviceId", "startTs"])
+data class DismissedSleep(
+    val deviceId: String,
+    val startTs: Long,
+    val endTs: Long,
+)
+
+/**
  * Cached Apple-Health daily aggregate. Swift `appleDaily` (v8 — JournalWorkoutAppleCache.swift).
  * Natural key (deviceId, day) where day is "YYYY-MM-DD". All metric columns nullable.
  */
